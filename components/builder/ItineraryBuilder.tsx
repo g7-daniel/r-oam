@@ -99,10 +99,10 @@ export default function ItineraryBuilder() {
     );
   }
 
-  // Desktop three-column layout
+  // Desktop three-column layout - use fixed positioning to escape parent layout
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
-      <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-900 overflow-hidden transition-colors duration-300">
+      <div className="fixed inset-0 flex flex-col bg-slate-50 dark:bg-slate-900 overflow-hidden transition-colors duration-300 z-40">
         {/* Header */}
         <TripHeader />
 

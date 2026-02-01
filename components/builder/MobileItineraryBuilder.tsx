@@ -82,7 +82,7 @@ export default function MobileItineraryBuilder({
 
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
-      <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-900">
+      <div className="fixed inset-0 flex flex-col bg-slate-50 dark:bg-slate-900 z-40">
         {/* Compact header for mobile */}
         <TripHeader />
 
