@@ -129,12 +129,12 @@ export default function HotelSnooChat({ destinationName, onHotelsFound }: HotelS
 
   const currentQuestion = QUESTIONS[currentStep];
 
-  // Collapsed button state
+  // Collapsed button state - hidden on mobile (there's a separate menu item for mobile)
   if (!isOpen) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed top-20 right-6 z-50 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-full shadow-lg hover:from-orange-600 hover:to-orange-700 transition-all hover:shadow-xl border border-orange-400"
+        className="hidden md:flex fixed top-20 right-6 z-50 items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-full shadow-lg hover:from-orange-600 hover:to-orange-700 transition-all hover:shadow-xl border border-orange-400"
       >
         <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
           <SnooLogo className="w-4 h-4 text-orange-500" />

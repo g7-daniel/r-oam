@@ -48,6 +48,17 @@ const ALL_AMENITIES = [
 
 const PROPERTY_TYPES = ['hotel', 'resort', 'apartment', 'villa', 'hostel', 'boutique'];
 
+// Available subreddits for hotel recommendations - grouped by category
+const HOTEL_SUBREDDITS = {
+  luxury: ['fatfire', 'fattravel', 'luxurytravel'],
+  general: ['travel', 'hotels', 'solotravel'],
+  budget: ['budgettravel', 'shoestring', 'backpacking'],
+  specialty: ['TravelHacks', 'digitalnomad', 'honeymoon'],
+};
+
+// All available subreddits flattened
+const ALL_SUBREDDITS = Object.values(HOTEL_SUBREDDITS).flat();
+
 // Country code to name mapping
 const COUNTRY_NAMES: Record<string, string> = {
   'CR': 'Costa Rica', 'PA': 'Panama', 'MX': 'Mexico', 'JM': 'Jamaica', 'DO': 'Dominican Republic',
@@ -461,6 +472,10 @@ export default function Step5HotelsV2() {
   const [distanceFilter, setDistanceFilter] = useState<number>(10);
   const [modalHotel, setModalHotel] = useState<HotelType | null>(null);
   const [redditHotels, setRedditHotels] = useState<RedditHotel[]>([]);
+  const [selectedSubreddits, setSelectedSubreddits] = useState<Set<string>>(
+    new Set(['travel', 'hotels', 'luxurytravel', 'fatfire'])
+  );
+  const [isLoadingReddit, setIsLoadingReddit] = useState(false);
 
   // Handler for Snoo Reddit recommendations
   const handleRedditHotelsFound = (hotels: RedditHotel[]) => {
@@ -477,6 +492,61 @@ export default function Step5HotelsV2() {
       setHotelResults(activeDestination.destinationId, updatedResults);
     }
   };
+
+  // Toggle subreddit selection
+  const toggleSubreddit = (sub: string) => {
+    setSelectedSubreddits(prev => {
+      const next = new Set(prev);
+      if (next.has(sub)) {
+        next.delete(sub);
+      } else {
+        next.add(sub);
+      }
+      return next;
+    });
+  };
+
+  // Fetch Reddit recommendations based on selected subreddits
+  const fetchRedditRecommendations = useCallback(async () => {
+    if (!activeDestination || selectedSubreddits.size === 0) return;
+
+    setIsLoadingReddit(true);
+    try {
+      const response = await fetch('/api/reddit/hotels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          destination: activeDestination.place.name,
+          subreddits: Array.from(selectedSubreddits),
+          preferences: {
+            budget: selectedSubreddits.has('fatfire') || selectedSubreddits.has('luxurytravel') ? 'luxury' : 'mid',
+          },
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const hotels = data.hotels || [];
+        setRedditHotels(hotels);
+
+        // Mark matching hotels in the main list
+        if (hotels.length > 0) {
+          const hotelNames = hotels.map((h: RedditHotel) => h.name.toLowerCase());
+          const updatedResults = activeDestination.hotels.results.map(hotel => ({
+            ...hotel,
+            isRedditRecommended: hotelNames.some((name: string) =>
+              hotel.name.toLowerCase().includes(name) || name.includes(hotel.name.toLowerCase())
+            ),
+          }));
+          setHotelResults(activeDestination.destinationId, updatedResults);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch Reddit recommendations:', error);
+    } finally {
+      setIsLoadingReddit(false);
+    }
+  }, [activeDestination, selectedSubreddits, setHotelResults]);
 
   // Track which destinations we've searched for in this session
   const searchedDestinations = useRef<Set<string>>(new Set());
@@ -623,6 +693,19 @@ export default function Step5HotelsV2() {
     }
   }, [activeDestination?.destinationId, fetchHotels]);
 
+  // Fetch Reddit recommendations when subreddits change or destination changes
+  // Use stringified subreddits to avoid Set reference comparison issues
+  const subredditsKey = Array.from(selectedSubreddits).sort().join(',');
+  useEffect(() => {
+    if (activeDestination && selectedSubreddits.size > 0) {
+      const debounceTimer = setTimeout(() => {
+        fetchRedditRecommendations();
+      }, 500);
+      return () => clearTimeout(debounceTimer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDestination?.destinationId, subredditsKey]);
+
   // Filter hotels
   const allHotels = activeDestination?.hotels.results || [];
 
@@ -724,6 +807,56 @@ export default function Step5HotelsV2() {
             );
           })}
         </div>
+      )}
+
+      {/* Subreddit selection for Reddit recommendations */}
+      {activeDestination && (
+        <Card className="bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-orange-200 dark:border-orange-800">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0">
+              <MessageCircle className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-semibold text-slate-900 dark:text-white text-sm">
+                  Reddit Recommendations
+                </h3>
+                {isLoadingReddit && (
+                  <span className="flex items-center gap-1.5 text-xs text-orange-600 dark:text-orange-400">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Searching...
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                Select subreddits to find traveler-recommended hotels
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {ALL_SUBREDDITS.map((sub) => (
+                  <button
+                    key={sub}
+                    onClick={() => toggleSubreddit(sub)}
+                    className={clsx(
+                      'flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all',
+                      selectedSubreddits.has(sub)
+                        ? 'bg-orange-500 text-white shadow-sm'
+                        : 'bg-white dark:bg-slate-700 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-600 hover:border-orange-300 dark:hover:border-orange-500'
+                    )}
+                  >
+                    <span className="text-[10px] opacity-75">r/</span>
+                    {sub}
+                  </button>
+                ))}
+              </div>
+              {redditHotels.length > 0 && (
+                <p className="text-xs text-green-600 dark:text-green-400 mt-2">
+                  <Check className="w-3 h-3 inline mr-1" />
+                  Found {redditHotels.length} Reddit-recommended hotels - look for the orange badge!
+                </p>
+              )}
+            </div>
+          </div>
+        </Card>
       )}
 
       {activeDestination && (

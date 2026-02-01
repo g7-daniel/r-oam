@@ -48,25 +48,25 @@ export default function HotelsPage() {
       </div>
 
       {/* Main content */}
-      <div className="max-w-6xl mx-auto px-6 py-8 pb-24">
+      <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8 pb-16 md:pb-24">
         <Step5HotelsV2 />
       </div>
 
-      {/* Bottom navigation bar */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 px-6 py-4 z-40">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
+      {/* Bottom navigation bar - compact on mobile */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 px-4 md:px-6 py-2 md:py-4 z-40">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-2">
           <button
             onClick={() => router.push('/plan')}
-            className="px-4 py-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-medium transition-colors"
+            className="px-3 md:px-4 py-1.5 md:py-2 text-sm md:text-base text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-medium transition-colors"
           >
             Back
           </button>
           <button
             onClick={() => router.push('/plan/flights')}
             disabled={!allHotelsSelected}
-            className="flex items-center gap-2 px-6 py-2.5 bg-primary-500 text-white font-medium rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 md:gap-2 px-4 md:px-6 py-2 md:py-2.5 text-sm md:text-base bg-primary-500 text-white font-medium rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Continue to Flights
+            <span className="hidden sm:inline">Continue to</span> Flights
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>

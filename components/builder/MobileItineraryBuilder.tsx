@@ -124,56 +124,56 @@ export default function MobileItineraryBuilder({
           )}
         </div>
 
-        {/* Bottom tab bar */}
+        {/* Bottom tab bar - compact design */}
         <div className="flex-shrink-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 safe-area-bottom">
-          <div className="flex">
+          <div className="flex h-12">
             <button
               onClick={() => setActiveTab('browse')}
               className={clsx(
-                'flex-1 flex flex-col items-center gap-1 py-3 transition-colors',
+                'flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors',
                 activeTab === 'browse'
                   ? 'text-primary-600 dark:text-primary-400'
                   : 'text-slate-400 dark:text-slate-500'
               )}
             >
-              <Compass className="w-5 h-5" />
-              <span className="text-xs font-medium">Browse</span>
+              <Compass className="w-4 h-4" />
+              <span className="text-[10px] font-medium">Browse</span>
             </button>
 
             <button
               onClick={() => setActiveTab('itinerary')}
               className={clsx(
-                'flex-1 flex flex-col items-center gap-1 py-3 transition-colors',
+                'flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors',
                 activeTab === 'itinerary'
                   ? 'text-primary-600 dark:text-primary-400'
                   : 'text-slate-400 dark:text-slate-500'
               )}
             >
-              <Calendar className="w-5 h-5" />
-              <span className="text-xs font-medium">Itinerary</span>
+              <Calendar className="w-4 h-4" />
+              <span className="text-[10px] font-medium">Itinerary</span>
             </button>
 
             <button
               onClick={() => setActiveTab('map')}
               className={clsx(
-                'flex-1 flex flex-col items-center gap-1 py-3 transition-colors',
+                'flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors',
                 activeTab === 'map'
                   ? 'text-primary-600 dark:text-primary-400'
                   : 'text-slate-400 dark:text-slate-500'
               )}
             >
-              <Map className="w-5 h-5" />
-              <span className="text-xs font-medium">Map</span>
+              <Map className="w-4 h-4" />
+              <span className="text-[10px] font-medium">Map</span>
             </button>
 
             <button
               onClick={() => setShowAISheet(true)}
-              className="flex-1 flex flex-col items-center gap-1 py-3 text-slate-400 dark:text-slate-500"
+              className="flex-1 flex flex-col items-center justify-center gap-0.5"
             >
-              <div className="w-6 h-6 rounded-full bg-[#FF4500] flex items-center justify-center">
-                <SnooLogo className="w-4 h-4 text-white" />
+              <div className="w-5 h-5 rounded-full bg-[#FF4500] flex items-center justify-center">
+                <SnooLogo className="w-3 h-3 text-white" />
               </div>
-              <span className="text-xs font-medium text-[#FF4500]">Snoo</span>
+              <span className="text-[10px] font-medium text-[#FF4500]">Snoo</span>
             </button>
           </div>
         </div>

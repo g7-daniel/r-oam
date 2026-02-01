@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useTripStoreV2 } from '@/stores/tripStoreV2';
 import { GoogleMap, useJsApiLoader, Marker, Polyline, InfoWindow } from '@react-google-maps/api';
 import { Loader2, Map, Calendar, Bookmark } from 'lucide-react';
@@ -44,6 +44,8 @@ export default function RightMapPanel({
 }: RightMapPanelProps) {
   const { trip, scheduledItems, collections } = useTripStoreV2();
   const [activeMarker, setActiveMarker] = useState<string | null>(null);
+  const [map, setMap] = useState<google.maps.Map | null>(null);
+  const boundsRef = useRef<string>(''); // Track bounds to prevent unnecessary updates
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
@@ -58,6 +60,9 @@ export default function RightMapPanel({
   const defaultCenter = activeDestination
     ? { lat: activeDestination.place.lat, lng: activeDestination.place.lng }
     : { lat: 35.6762, lng: 139.6503 }; // Tokyo fallback
+
+  // Default zoom: show wider area (country/region level)
+  const defaultZoom = 8;
 
   // Get items to display based on view mode
   const displayItems = useMemo(() => {
@@ -75,6 +80,58 @@ export default function RightMapPanel({
 
   // Filter items with valid coordinates
   const itemsWithCoords = displayItems.filter(item => item.lat && item.lng);
+
+  // Calculate and apply bounds when items change
+  const fitBoundsToItems = useCallback(() => {
+    if (!map || !isLoaded) return;
+
+    // Create a unique key for current bounds
+    const boundsKey = itemsWithCoords.map(i => `${i.lat}-${i.lng}`).join(',');
+
+    // Skip if bounds haven't changed
+    if (boundsRef.current === boundsKey && boundsKey !== '') return;
+    boundsRef.current = boundsKey;
+
+    if (itemsWithCoords.length === 0) {
+      // No items - show the whole destination region
+      if (activeDestination) {
+        map.setCenter({ lat: activeDestination.place.lat, lng: activeDestination.place.lng });
+        map.setZoom(defaultZoom);
+      }
+      return;
+    }
+
+    if (itemsWithCoords.length === 1) {
+      // Single item - center on it with reasonable zoom
+      map.setCenter({ lat: itemsWithCoords[0].lat!, lng: itemsWithCoords[0].lng! });
+      map.setZoom(14);
+      return;
+    }
+
+    // Multiple items - fit bounds to show all
+    const bounds = new google.maps.LatLngBounds();
+    itemsWithCoords.forEach(item => {
+      bounds.extend({ lat: item.lat!, lng: item.lng! });
+    });
+
+    // Add some padding
+    map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
+  }, [map, isLoaded, itemsWithCoords, activeDestination, defaultZoom]);
+
+  // Fit bounds when items, view, or selected day changes
+  useEffect(() => {
+    fitBoundsToItems();
+  }, [fitBoundsToItems, mapView, selectedDayIndex]);
+
+  // Map load callback
+  const onMapLoad = useCallback((mapInstance: google.maps.Map) => {
+    setMap(mapInstance);
+  }, []);
+
+  // Map unmount callback
+  const onMapUnmount = useCallback(() => {
+    setMap(null);
+  }, []);
 
   // Calculate route path for day view
   const routePath = useMemo(() => {
@@ -215,8 +272,10 @@ export default function RightMapPanel({
         <GoogleMap
           mapContainerStyle={mapContainerStyle}
           center={defaultCenter}
-          zoom={13}
+          zoom={defaultZoom}
           options={mapOptions}
+          onLoad={onMapLoad}
+          onUnmount={onMapUnmount}
         >
           {/* Markers */}
           {itemsWithCoords.map((item, index) => {
