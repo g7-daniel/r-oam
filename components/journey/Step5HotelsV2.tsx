@@ -28,7 +28,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import clsx from 'clsx';
-import HotelSnooChat from './HotelSnooChat';
+import HotelSnooChat, { type RedditHotel } from './HotelSnooChat';
 import type { Hotel as HotelType } from '@/lib/schemas/trip';
 
 // Amenity icons
@@ -460,6 +460,23 @@ export default function Step5HotelsV2() {
   const [propertyTypeFilter, setPropertyTypeFilter] = useState<string[]>([]);
   const [distanceFilter, setDistanceFilter] = useState<number>(10);
   const [modalHotel, setModalHotel] = useState<HotelType | null>(null);
+  const [redditHotels, setRedditHotels] = useState<RedditHotel[]>([]);
+
+  // Handler for Snoo Reddit recommendations
+  const handleRedditHotelsFound = (hotels: RedditHotel[]) => {
+    setRedditHotels(hotels);
+    // Mark these hotels in the main list as Reddit-recommended
+    if (activeDestination && hotels.length > 0) {
+      const hotelNames = hotels.map(h => h.name.toLowerCase());
+      const updatedResults = activeDestination.hotels.results.map(hotel => ({
+        ...hotel,
+        isRedditRecommended: hotelNames.some(name =>
+          hotel.name.toLowerCase().includes(name) || name.includes(hotel.name.toLowerCase())
+        ),
+      }));
+      setHotelResults(activeDestination.destinationId, updatedResults);
+    }
+  };
 
   // Track which destinations we've searched for in this session
   const searchedDestinations = useRef<Set<string>>(new Set());
@@ -1115,7 +1132,10 @@ export default function Step5HotelsV2() {
 
       {/* Snoo Hotel Assistant */}
       {activeDestination && (
-        <HotelSnooChat destinationName={activeDestination.place.name} />
+        <HotelSnooChat
+          destinationName={activeDestination.place.name}
+          onHotelsFound={handleRedditHotelsFound}
+        />
       )}
     </div>
   );
