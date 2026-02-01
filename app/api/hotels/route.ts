@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
 
   // 2. If Amadeus returned few results (or wasn't called), use Google Places
   if (allHotels.length < 10) {
-    const searchCityName = cityName || CITY_NAMES[cityCode] || cityCode;
+    const searchCityName = cityName || (cityCode ? CITY_NAMES[cityCode] : null) || cityCode || 'hotel';
     const location = lat && lng ? { lat, lng } : undefined;
 
     console.log('Supplementing with Google Places for:', searchCityName);
@@ -150,21 +150,40 @@ export async function GET(request: NextRequest) {
         .map(gh => {
           // Estimate price based on price_level (0-4 scale from Google)
           // Price level: 0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive
-          const basePricePerNight = [50, 80, 150, 300, 500][gh.priceLevel] || 150;
-          const priceVariation = (Math.random() * 0.4 - 0.2); // ±20% variation
+          const basePricePerNight = [50, 100, 200, 400, 800][gh.priceLevel] || 200;
+          const priceVariation = (Math.random() * 0.3 - 0.15); // ±15% variation
           const estimatedPricePerNight = Math.round(basePricePerNight * (1 + priceVariation));
+
+          // Star rating based on price level + luxury detection, NOT user rating
+          // price_level 0-1 = 2-3 stars, 2 = 3-4 stars, 3-4 = 4-5 stars
+          // Luxury brands always get 5 stars
+          const isLuxury = (gh as any).isLuxury || false;
+          let stars: number;
+          if (isLuxury) {
+            stars = 5;
+          } else {
+            stars = Math.min(5, Math.max(2, gh.priceLevel + 2)); // 2-5 stars based on price
+          }
+
+          // Better amenities for higher-end hotels
+          const baseAmenities = ['wifi', 'air_conditioning'];
+          if (gh.priceLevel >= 3 || isLuxury) {
+            baseAmenities.push('pool', 'spa', 'gym', 'restaurant', 'room_service', 'concierge');
+          } else if (gh.priceLevel >= 2) {
+            baseAmenities.push('pool', 'gym', 'restaurant');
+          }
 
           return {
             id: gh.id,
             name: gh.name,
             address: gh.address,
             city: searchCityName,
-            stars: Math.min(5, Math.max(3, Math.round(gh.rating))), // Convert rating to stars
+            stars,
             pricePerNight: estimatedPricePerNight,
             totalPrice: estimatedPricePerNight * nights,
             currency: 'USD',
             imageUrl: gh.imageUrl,
-            amenities: ['wifi', 'air_conditioning'], // Default amenities
+            amenities: baseAmenities,
             distanceToCenter: Math.random() * 5,
             latitude: gh.lat,
             longitude: gh.lng,
@@ -173,6 +192,7 @@ export async function GET(request: NextRequest) {
             source: 'google',
             hasRealPricing: false, // Estimated pricing
             priceLevel: gh.priceLevel,
+            isLuxury,
           };
         });
 

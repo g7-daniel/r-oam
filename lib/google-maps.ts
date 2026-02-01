@@ -368,6 +368,7 @@ export async function searchHotelsGoogle(
   lat: number;
   lng: number;
   types: string[];
+  isLuxury: boolean;
 }[]> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 
@@ -376,11 +377,19 @@ export async function searchHotelsGoogle(
     return [];
   }
 
-  // Search for hotels in the city
+  // Search with multiple queries to find variety of hotels
+  // Include specific luxury brand names to ensure top hotels appear
   const queries = [
-    `hotels in ${cityName}`,
-    `luxury hotels ${cityName}`,
-    `boutique hotels ${cityName}`,
+    `best hotels in ${cityName}`,
+    `5 star resort ${cityName}`,
+    `luxury resort ${cityName}`,
+    `boutique hotel ${cityName}`,
+    `St Regis ${cityName}`,
+    `Four Seasons ${cityName}`,
+    `Ritz Carlton ${cityName}`,
+    `Eden Roc ${cityName}`,
+    `Marriott ${cityName}`,
+    `Hilton ${cityName}`,
   ];
 
   const allPlaces: PlaceResult[] = [];
@@ -394,7 +403,7 @@ export async function searchHotelsGoogle(
 
     if (location) {
       params.append('location', `${location.lat},${location.lng}`);
-      params.append('radius', '30000'); // 30km radius
+      params.append('radius', '50000'); // 50km radius for resorts
     }
 
     try {
@@ -418,21 +427,66 @@ export async function searchHotelsGoogle(
     new Map(allPlaces.map((p) => [p.place_id, p])).values()
   );
 
-  // Sort by rating (highest first)
-  uniquePlaces.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  // Detect luxury hotels by name
+  const luxuryBrands = [
+    'st regis', 'st. regis', 'four seasons', 'ritz carlton', 'ritz-carlton',
+    'mandarin oriental', 'peninsula', 'waldorf', 'aman', 'rosewood',
+    'park hyatt', 'w hotel', 'edition', 'conrad', 'fairmont', 'sofitel',
+    'intercontinental', 'jw marriott', 'eden roc', 'one&only', 'six senses',
+    'banyan tree', 'shangri-la', 'langham', 'raffles', 'belmond'
+  ];
 
-  return uniquePlaces.slice(0, 20).map((place: any) => ({
-    id: `google-${place.place_id}`,
-    name: place.name,
-    address: place.formatted_address || place.vicinity || '',
-    rating: place.rating || 4.0,
-    reviewCount: place.user_ratings_total || 0,
-    priceLevel: place.price_level || 2,
-    imageUrl: place.photos?.[0]?.photo_reference
-      ? `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=800&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
-      : 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800',
-    lat: place.geometry?.location?.lat || 0,
-    lng: place.geometry?.location?.lng || 0,
-    types: place.types || [],
-  }));
+  const isLuxuryHotel = (name: string) => {
+    const lowerName = name.toLowerCase();
+    return luxuryBrands.some(brand => lowerName.includes(brand)) ||
+           lowerName.includes('5 star') ||
+           lowerName.includes('five star') ||
+           lowerName.includes('luxury');
+  };
+
+  // Sort: luxury first, then by rating
+  uniquePlaces.sort((a, b) => {
+    const aLuxury = isLuxuryHotel(a.name);
+    const bLuxury = isLuxuryHotel(b.name);
+    if (aLuxury && !bLuxury) return -1;
+    if (!aLuxury && bLuxury) return 1;
+    // Then by price level (higher = more expensive)
+    const priceDiff = ((b as any).price_level || 0) - ((a as any).price_level || 0);
+    if (priceDiff !== 0) return priceDiff;
+    // Then by rating
+    return (b.rating || 0) - (a.rating || 0);
+  });
+
+  // Hotel fallback images by quality tier
+  const luxuryImages = [
+    'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800',
+    'https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=800',
+    'https://images.unsplash.com/photo-1582719508461-905c673771fd?w=800',
+  ];
+  const standardImages = [
+    'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800',
+    'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=800',
+    'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=800',
+  ];
+
+  return uniquePlaces.slice(0, 30).map((place: any, idx) => {
+    const luxury = isLuxuryHotel(place.name);
+    const fallbackImages = luxury ? luxuryImages : standardImages;
+
+    return {
+      id: `google-${place.place_id}`,
+      name: place.name,
+      address: place.formatted_address || place.vicinity || '',
+      rating: place.rating || 4.0,
+      reviewCount: place.user_ratings_total || 0,
+      priceLevel: place.price_level ?? (luxury ? 4 : 2), // Default luxury to expensive
+      imageUrl: place.photos?.[0]?.photo_reference
+        ? `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=800&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
+        : fallbackImages[idx % fallbackImages.length],
+      lat: place.geometry?.location?.lat || 0,
+      lng: place.geometry?.location?.lng || 0,
+      types: place.types || [],
+      isLuxury: luxury,
+    };
+  });
 }
