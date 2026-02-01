@@ -207,7 +207,7 @@ export default function StartPage() {
       country: 'Custom',
       lat: 0,
       lng: 0,
-      imageUrl: `https://source.unsplash.com/400x300/?${encodeURIComponent(searchQuery + ' travel')}`,
+      imageUrl: `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop`,
     };
     handleAddDestination(customDest);
   }, [searchQuery, handleAddDestination]);
@@ -425,15 +425,22 @@ export default function StartPage() {
                         key={`${dest.name}-${index}`}
                         type="button"
                         onClick={() => handleAddDestination(dest)}
-                        className="relative group overflow-hidden rounded-xl aspect-[4/3]"
+                        className="relative group overflow-hidden rounded-xl aspect-[4/3] bg-gradient-to-br from-primary-400 to-primary-600"
                       >
                         <img
-                          src={dest.imageUrl}
+                          src={dest.imageUrl || `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop&q=80`}
                           alt={dest.name}
                           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                           onError={(e) => {
-                            // Fallback to Unsplash if image fails to load
-                            (e.target as HTMLImageElement).src = `https://source.unsplash.com/400x300/?${encodeURIComponent(dest.name + ' travel')}`;
+                            const img = e.target as HTMLImageElement;
+                            // Prevent infinite loop
+                            if (!img.dataset.fallback) {
+                              img.dataset.fallback = '1';
+                              img.src = `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop&q=80`;
+                            } else {
+                              // Hide image completely, show gradient background
+                              img.style.display = 'none';
+                            }
                           }}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
@@ -585,7 +592,7 @@ export default function StartPage() {
                   alt={pendingDestination.name}
                   className="w-full h-full object-cover"
                   onError={(e) => {
-                    (e.target as HTMLImageElement).src = `https://source.unsplash.com/200x200/?${encodeURIComponent(pendingDestination.name + ' travel')}`;
+                    (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=200&h=200&fit=crop`;
                   }}
                 />
               </div>

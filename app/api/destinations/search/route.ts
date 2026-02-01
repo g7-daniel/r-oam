@@ -79,10 +79,25 @@ export async function GET(request: NextRequest) {
           const mainName = prediction.structured_formatting?.main_text ||
             prediction.description.split(',')[0];
 
-          // Get photo URL if available
-          let imageUrl = `https://source.unsplash.com/400x300/?${encodeURIComponent(mainName + ' travel')}`;
+          // Get photo URL if available - use Google Places photo or reliable Unsplash static image
+          let imageUrl = '';
           if (result.photos?.[0]?.photo_reference) {
             imageUrl = `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=400&photo_reference=${result.photos[0].photo_reference}&key=${apiKey}`;
+          } else {
+            // Use a reliable static Unsplash travel image as fallback
+            const fallbackImages = [
+              'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop', // travel map
+              'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&h=300&fit=crop', // beach
+              'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=400&h=300&fit=crop', // lake mountains
+              'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=400&h=300&fit=crop', // paris
+              'https://images.unsplash.com/photo-1499856871958-5b9627545d1a?w=400&h=300&fit=crop', // city
+              'https://images.unsplash.com/photo-1523906834658-6e24ef2386f9?w=400&h=300&fit=crop', // venice
+              'https://images.unsplash.com/photo-1530521954074-e64f6810b32d?w=400&h=300&fit=crop', // tropical
+              'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=400&h=300&fit=crop', // japan
+            ];
+            // Pick a consistent image based on the destination name
+            const index = mainName.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0) % fallbackImages.length;
+            imageUrl = fallbackImages[index];
           }
 
           return {

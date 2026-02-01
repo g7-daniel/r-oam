@@ -159,7 +159,7 @@ export default function Step2Destinations() {
       countryCode: 'XX',
       lat: 0,
       lng: 0,
-      imageUrl: `https://source.unsplash.com/400x300/?${encodeURIComponent(searchQuery + ' travel')}`,
+      imageUrl: `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop`,
     };
 
     handleAddDestination(customDestData);
@@ -231,7 +231,7 @@ export default function Step2Destinations() {
                       className="w-full h-full object-cover"
                       onError={(e) => {
                         // Fallback on error
-                        (e.target as HTMLImageElement).src = `https://source.unsplash.com/400x300/?${encodeURIComponent(dest.place.name + ' travel')}`;
+                        (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop`;
                       }}
                     />
                   ) : (
@@ -363,7 +363,7 @@ export default function Step2Destinations() {
                     alt={dest.name}
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = `https://source.unsplash.com/400x300/?${encodeURIComponent(dest.name + ' travel')}`;
+                      (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop`;
                     }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
@@ -437,7 +437,7 @@ export default function Step2Destinations() {
                   alt={pendingDestination.name}
                   className="w-full h-full object-cover"
                   onError={(e) => {
-                    (e.target as HTMLImageElement).src = `https://source.unsplash.com/200x200/?${encodeURIComponent(pendingDestination.name + ' travel')}`;
+                    (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=200&h=200&fit=crop`;
                   }}
                 />
               </div>
