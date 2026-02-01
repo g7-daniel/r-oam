@@ -72,7 +72,22 @@ export const DESTINATION_CATEGORIES: Record<string, string[]> = {
   'Hong Kong': ['dining', 'shopping', 'landmarks', 'cultural', 'nightlife', 'temples'],
   'Seoul': ['dining', 'shopping', 'cultural', 'nightlife', 'temples', 'hidden_gems'],
 
-  // Beach destinations
+  // Caribbean & Beach destinations
+  'Dominican Republic': ['beaches', 'water_sports', 'dining', 'nightlife', 'nature', 'hidden_gems', 'cultural'],
+  'Punta Cana': ['beaches', 'water_sports', 'dining', 'nightlife', 'adventure', 'hidden_gems'],
+  'Santo Domingo': ['cultural', 'landmarks', 'dining', 'nightlife', 'beaches', 'hidden_gems'],
+  'Puerto Plata': ['beaches', 'water_sports', 'adventure', 'dining', 'nature', 'hidden_gems'],
+  'La Romana': ['beaches', 'water_sports', 'dining', 'adventure', 'hidden_gems', 'nature'],
+  'Samana': ['beaches', 'nature', 'wildlife', 'water_sports', 'adventure', 'hidden_gems'],
+  'Jamaica': ['beaches', 'water_sports', 'dining', 'nightlife', 'nature', 'hidden_gems'],
+  'Montego Bay': ['beaches', 'water_sports', 'dining', 'nightlife', 'adventure', 'hidden_gems'],
+  'Puerto Rico': ['beaches', 'cultural', 'dining', 'nightlife', 'nature', 'hidden_gems'],
+  'San Juan': ['beaches', 'cultural', 'dining', 'nightlife', 'landmarks', 'hidden_gems'],
+  'Aruba': ['beaches', 'water_sports', 'dining', 'nightlife', 'adventure', 'hidden_gems'],
+  'Bahamas': ['beaches', 'water_sports', 'dining', 'nightlife', 'nature', 'hidden_gems'],
+  'Turks and Caicos': ['beaches', 'water_sports', 'dining', 'nature', 'hidden_gems'],
+  'Barbados': ['beaches', 'water_sports', 'dining', 'nightlife', 'cultural', 'hidden_gems'],
+  'St. Lucia': ['beaches', 'nature', 'water_sports', 'dining', 'adventure', 'hidden_gems'],
   'Cancun': ['beaches', 'water_sports', 'nightlife', 'dining', 'cultural', 'adventure'],
   'Maldives': ['beaches', 'water_sports', 'dining', 'hidden_gems', 'nature'],
   'Santorini': ['beaches', 'landmarks', 'dining', 'nightlife', 'hidden_gems', 'cultural'],
@@ -81,6 +96,10 @@ export const DESTINATION_CATEGORIES: Record<string, string[]> = {
   'Oahu': ['beaches', 'water_sports', 'nature', 'dining', 'landmarks', 'hidden_gems'],
   'Miami': ['beaches', 'nightlife', 'dining', 'shopping', 'cultural', 'water_sports'],
   'Tulum': ['beaches', 'cultural', 'dining', 'nature', 'water_sports', 'hidden_gems'],
+  'Playa del Carmen': ['beaches', 'water_sports', 'nightlife', 'dining', 'adventure', 'hidden_gems'],
+  'Fiji': ['beaches', 'water_sports', 'nature', 'dining', 'adventure', 'hidden_gems'],
+  'Bora Bora': ['beaches', 'water_sports', 'dining', 'nature', 'hidden_gems'],
+  'Tahiti': ['beaches', 'water_sports', 'nature', 'dining', 'cultural', 'hidden_gems'],
 
   // Australia/New Zealand
   'Sydney': ['beaches', 'landmarks', 'dining', 'cultural', 'nature', 'nightlife', 'hidden_gems'],
@@ -127,6 +146,25 @@ export const DESTINATION_CATEGORIES: Record<string, string[]> = {
   'Kenya': ['wildlife', 'nature', 'adventure', 'beaches', 'cultural', 'hidden_gems'],
 };
 
+// Regional category patterns for smart fallbacks
+const REGIONAL_PATTERNS: { pattern: RegExp; categories: string[] }[] = [
+  // Caribbean & tropical islands
+  {
+    pattern: /caribbean|island|cay|keys|virgin|cayman|trinidad|tobago|grenada|antigua|martinique|guadeloupe|curacao|bonaire|sint|saint|st\./i,
+    categories: ['beaches', 'water_sports', 'dining', 'nightlife', 'nature', 'hidden_gems']
+  },
+  // Beach/coastal destinations
+  {
+    pattern: /beach|coast|shore|bay|cove|playa|praia|strand/i,
+    categories: ['beaches', 'water_sports', 'dining', 'nature', 'nightlife', 'hidden_gems']
+  },
+  // Mountain/nature destinations
+  {
+    pattern: /mountain|alps|peak|valley|forest|national park|reserve/i,
+    categories: ['nature', 'adventure', 'wildlife', 'hiking', 'dining', 'hidden_gems']
+  },
+];
+
 // Get categories for a destination, with smart fallbacks
 export function getCategoriesForDestination(destinationName: string): Category[] {
   // Check for exact match first
@@ -144,9 +182,17 @@ export function getCategoriesForDestination(destinationName: string): Category[]
     }
   }
 
-  // Default categories for unknown destinations
+  // Check regional patterns
+  for (const { pattern, categories } of REGIONAL_PATTERNS) {
+    if (pattern.test(destinationName)) {
+      return ALL_CATEGORIES.filter(cat => categories.includes(cat.id));
+    }
+  }
+
+  // Default categories - include beaches and water sports as they're common travel activities
+  // Better to show more options than miss relevant ones
   return ALL_CATEGORIES.filter(cat =>
-    ['dining', 'landmarks', 'cultural', 'nature', 'shopping', 'hidden_gems', 'parks', 'museums'].includes(cat.id)
+    ['beaches', 'dining', 'landmarks', 'cultural', 'nature', 'water_sports', 'shopping', 'hidden_gems'].includes(cat.id)
   );
 }
 
