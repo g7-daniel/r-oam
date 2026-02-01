@@ -5,7 +5,7 @@ import {
   getHotelListByGeocode,
   HotelBasicInfo,
 } from '@/lib/amadeus';
-import { searchPlaces, getPhotoUrl } from '@/lib/google-maps';
+import { searchPlaces, getPhotoUrl, searchHotelsGoogle } from '@/lib/google-maps';
 import { getDestinationConfig, DestinationConfig } from '@/lib/configs/destinations';
 import { calculateHaversineDistance } from '@/lib/utils/geo';
 
@@ -278,7 +278,46 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  console.log(`Step 2: Got ${allHotels.length} hotels in inventory`);
+  console.log(`Step 2: Got ${allHotels.length} hotels from Amadeus`);
+
+  // Step 2.5: Supplement with Google Places to find luxury hotels Amadeus might miss
+  const googleHotels = await searchHotelsGoogle(
+    destination || '',
+    lat && lng ? { lat, lng } : undefined
+  );
+  console.log(`Step 2.5: Got ${googleHotels.length} hotels from Google Places`);
+
+  // Convert Google hotels to our format and add non-duplicates
+  const existingNames = new Set(allHotels.map(h => h.name.toLowerCase()));
+  let googleAddedCount = 0;
+
+  for (const gh of googleHotels) {
+    const ghNameLower = gh.name.toLowerCase();
+    // Check if already exists (fuzzy match)
+    const isDuplicate = Array.from(existingNames).some(existing =>
+      existing.includes(ghNameLower.slice(0, 10)) || ghNameLower.includes(existing.slice(0, 10))
+    );
+
+    if (!isDuplicate) {
+      allHotels.push({
+        hotelId: gh.id,
+        name: gh.name,
+        latitude: gh.lat,
+        longitude: gh.lng,
+        // Store Google-specific data for later
+        _googleData: {
+          imageUrl: gh.imageUrl,
+          rating: gh.rating,
+          reviewCount: gh.reviewCount,
+          priceLevel: gh.priceLevel,
+          isLuxury: gh.isLuxury,
+        },
+      } as HotelBasicInfo & { _googleData: any });
+      existingNames.add(ghNameLower);
+      googleAddedCount++;
+    }
+  }
+  console.log(`Added ${googleAddedCount} unique hotels from Google Places`);
 
   if (allHotels.length === 0) {
     return NextResponse.json({
@@ -309,6 +348,7 @@ export async function GET(request: NextRequest) {
   const finalHotels: EnhancedHotel[] = allHotels.map((hotel, index) => {
     const offer = offers.get(hotel.hotelId);
     const enhancement = googleEnhancements.get(hotel.hotelId);
+    const googleData = (hotel as any)._googleData;
 
     // Calculate estimated price if no real price
     const estimatedPrice = estimatePriceByHotelName(hotel.name);
@@ -326,6 +366,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Prefer Google data if available (for hotels added from Google Places)
+    const imageUrl = googleData?.imageUrl || enhancement?.imageUrl || null;
+    const rating = googleData?.rating || enhancement?.rating || null;
+    const reviewCount = googleData?.reviewCount || enhancement?.reviewCount || null;
+    const isFromGoogle = !!googleData;
+
     return {
       id: hotel.hotelId,
       name: hotel.name,
@@ -335,17 +381,17 @@ export async function GET(request: NextRequest) {
       pricePerNight: Math.round(pricePerNight),
       totalPrice: Math.round(totalPrice),
       currency: 'USD',
-      imageUrl: enhancement?.imageUrl || null,
+      imageUrl,
       amenities: generateAmenities(hotel.name),
       distanceToCenter: Math.round(distanceToCenter * 10) / 10,
       latitude: hotel.latitude || 0,
       longitude: hotel.longitude || 0,
-      guestRating: enhancement?.rating ? enhancement.rating * 2 : null, // Convert 5-point to 10-point
-      reviewCount: enhancement?.reviewCount || null,
-      source: 'amadeus',
+      guestRating: rating ? rating * 2 : null, // Convert 5-point to 10-point
+      reviewCount,
+      source: isFromGoogle ? 'google' : 'amadeus',
       hasRealPricing: !!offer,
-      isLuxury: isLuxuryHotel(hotel.name),
-      needsEnhancement: index >= TOP_ENHANCE_COUNT,
+      isLuxury: googleData?.isLuxury || isLuxuryHotel(hotel.name),
+      needsEnhancement: index >= TOP_ENHANCE_COUNT && !isFromGoogle,
     };
   });
 
