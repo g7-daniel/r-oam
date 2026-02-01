@@ -244,36 +244,36 @@ export default function Step2Destinations() {
                 {/* Destination info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-bold">
+                    <span className="w-6 h-6 rounded-full bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-400 flex items-center justify-center text-xs font-bold">
                       {index + 1}
                     </span>
-                    <h3 className="font-semibold text-slate-900">{dest.place.name}</h3>
+                    <h3 className="font-semibold text-slate-900 dark:text-white">{dest.place.name}</h3>
                     {dest.place.countryCode !== 'XX' && (
-                      <span className="text-sm text-slate-500">{dest.place.countryCode}</span>
+                      <span className="text-sm text-slate-500 dark:text-slate-400">{dest.place.countryCode}</span>
                     )}
                   </div>
 
-                  {/* Nights selector */}
-                  <div className="flex items-center gap-3 mt-2">
-                    <Moon className="w-4 h-4 text-slate-400" />
+                  {/* Nights selector - more prominent */}
+                  <div className="flex items-center gap-2 mt-3 p-2 bg-slate-50 dark:bg-slate-700 rounded-lg">
+                    <Moon className="w-4 h-4 text-primary-500" />
                     <button
                       type="button"
                       onClick={() => handleNightsChange(dest.destinationId, -1, dest.nights)}
                       disabled={dest.nights <= 1}
-                      className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-8 h-8 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-100 dark:hover:bg-slate-500 border border-slate-200 dark:border-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
-                      <Minus className="w-3.5 h-3.5" />
+                      <Minus className="w-4 h-4" />
                     </button>
-                    <span className="w-8 text-center font-medium">{dest.nights}</span>
+                    <span className="w-10 text-center font-bold text-lg text-slate-900 dark:text-white">{dest.nights}</span>
                     <button
                       type="button"
                       onClick={() => handleNightsChange(dest.destinationId, 1, dest.nights)}
                       disabled={dest.nights >= 30}
-                      className="w-7 h-7 flex items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-8 h-8 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-100 dark:hover:bg-slate-500 border border-slate-200 dark:border-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
-                      <Plus className="w-3.5 h-3.5" />
+                      <Plus className="w-4 h-4" />
                     </button>
-                    <span className="text-sm text-slate-500">nights</span>
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300">nights</span>
                   </div>
                 </div>
 

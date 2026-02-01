@@ -57,6 +57,8 @@ export default function StartPage() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmails, setInviteEmails] = useState('');
   const [isClient, setIsClient] = useState(false);
+  const [pendingDestination, setPendingDestination] = useState<DestinationData | null>(null);
+  const [pendingNights, setPendingNights] = useState(3);
   const inputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -145,27 +147,49 @@ export default function StartPage() {
 
   const handleAddDestination = useCallback(
     (destData: DestinationData) => {
-      const place: Place = {
-        name: destData.name,
-        countryCode: destData.countryCode,
-        lat: destData.lat,
-        lng: destData.lng,
-      };
+      // If this is the first destination, add directly
+      if (destinations.length === 0) {
+        const place: Place = {
+          name: destData.name,
+          countryCode: destData.countryCode,
+          lat: destData.lat,
+          lng: destData.lng,
+        };
+        const nightsToAllocate = tripNights > 0 ? tripNights : 3;
+        const destId = addDestination(place, nightsToAllocate);
+        setDestinationHeroImage(destId, destData.imageUrl);
+        setShowSearch(false);
+        setSearchQuery('');
+        return;
+      }
 
-      // Smart night allocation
+      // For 2nd+ destination, show the nights selection modal
       const currentTotalNights = destinations.reduce((sum, d) => sum + d.nights, 0);
-      const availableNights = tripNights > 0 ? tripNights - currentTotalNights : 0;
-      const nightsToAllocate = destinations.length === 0
-        ? (tripNights > 0 ? tripNights : 3)
-        : Math.max(1, Math.min(availableNights, 3));
-
-      const destId = addDestination(place, nightsToAllocate);
-      setDestinationHeroImage(destId, destData.imageUrl);
+      const suggestedNights = tripNights > 0
+        ? Math.max(2, Math.floor((tripNights - currentTotalNights + 2) / 2))
+        : 3;
+      setPendingNights(Math.min(suggestedNights, tripNights > 0 ? tripNights : 7));
+      setPendingDestination(destData);
       setShowSearch(false);
       setSearchQuery('');
     },
     [addDestination, setDestinationHeroImage, destinations, tripNights]
   );
+
+  const confirmAddDestination = useCallback(() => {
+    if (!pendingDestination) return;
+
+    const place: Place = {
+      name: pendingDestination.name,
+      countryCode: pendingDestination.countryCode,
+      lat: pendingDestination.lat,
+      lng: pendingDestination.lng,
+    };
+
+    const destId = addDestination(place, pendingNights);
+    setDestinationHeroImage(destId, pendingDestination.imageUrl);
+    setPendingDestination(null);
+  }, [pendingDestination, pendingNights, addDestination, setDestinationHeroImage]);
 
   const handleCustomDestination = useCallback(() => {
     if (!searchQuery.trim()) return;
@@ -176,25 +200,26 @@ export default function StartPage() {
       return;
     }
 
-    const place: Place = {
+    // Create custom destination and use handleAddDestination
+    const customDest: DestinationData = {
       name: searchQuery.trim(),
       countryCode: 'XX',
+      country: 'Custom',
       lat: 0,
       lng: 0,
+      imageUrl: `https://source.unsplash.com/400x300/?${encodeURIComponent(searchQuery + ' travel')}`,
     };
+    handleAddDestination(customDest);
+  }, [searchQuery, handleAddDestination]);
 
-    const currentTotalNights = destinations.reduce((sum, d) => sum + d.nights, 0);
-    const availableNights = tripNights > 0 ? tripNights - currentTotalNights : 0;
-    const nightsToAllocate = destinations.length === 0
-      ? (tripNights > 0 ? tripNights : 3)
-      : Math.max(1, availableNights);
-
-    const destId = addDestination(place, nightsToAllocate);
-    const imageUrl = `https://source.unsplash.com/400x300/?${encodeURIComponent(searchQuery + ' travel')}`;
-    setDestinationHeroImage(destId, imageUrl);
-    setShowSearch(false);
-    setSearchQuery('');
-  }, [searchQuery, addDestination, setDestinationHeroImage, destinations, tripNights, handleAddDestination]);
+  const handleNightsChange = (destId: string, delta: number, currentNights: number) => {
+    const otherDestNights = destinations
+      .filter(d => d.destinationId !== destId)
+      .reduce((sum, d) => sum + d.nights, 0);
+    const maxForThisDest = tripNights > 0 ? Math.max(1, tripNights - otherDestNights) : 30;
+    const newNights = Math.max(1, Math.min(maxForThisDest, currentNights + delta));
+    updateDestinationNights(destId, newNights);
+  };
 
   const handleStyleTagToggle = (tagId: string) => {
     setSelectedStyleTags(prev => {
@@ -307,10 +332,28 @@ export default function StartPage() {
                       </span>
                       <h3 className="font-medium text-slate-900 dark:text-white truncate">{dest.place.name}</h3>
                     </div>
+                    {/* Nights adjuster */}
                     {tripNights > 0 && (
-                      <p className="text-sm text-slate-500 dark:text-slate-400 ml-7">
-                        {dest.nights} nights
-                      </p>
+                      <div className="flex items-center gap-2 ml-7 mt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleNightsChange(dest.destinationId, -1, dest.nights)}
+                          disabled={dest.nights <= 1}
+                          className="w-6 h-6 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow-sm border border-slate-200 dark:border-slate-500 hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <span className="text-sm font-bold">−</span>
+                        </button>
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 w-16 text-center">
+                          {dest.nights} nights
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleNightsChange(dest.destinationId, 1, dest.nights)}
+                          className="w-6 h-6 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow-sm border border-slate-200 dark:border-slate-500 hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <span className="text-sm font-bold">+</span>
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -529,6 +572,114 @@ export default function StartPage() {
           </p>
         )}
       </div>
+
+      {/* Nights Selection Modal for 2nd+ destination */}
+      {pendingDestination && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-xl">
+            {/* Header with destination preview */}
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-slate-200 dark:bg-slate-700">
+                <img
+                  src={pendingDestination.imageUrl}
+                  alt={pendingDestination.name}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = `https://source.unsplash.com/200x200/?${encodeURIComponent(pendingDestination.name + ' travel')}`;
+                  }}
+                />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Adding {pendingDestination.name}
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  How many nights will you stay?
+                </p>
+              </div>
+            </div>
+
+            {/* Nights selector */}
+            <div className="bg-slate-50 dark:bg-slate-700 rounded-xl p-4 mb-6">
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => setPendingNights(Math.max(1, pendingNights - 1))}
+                  disabled={pendingNights <= 1}
+                  className="w-12 h-12 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-xl font-bold"
+                >
+                  −
+                </button>
+                <div className="text-center">
+                  <span className="text-4xl font-bold text-slate-900 dark:text-white">{pendingNights}</span>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">nights</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPendingNights(Math.min(tripNights > 0 ? tripNights : 30, pendingNights + 1))}
+                  className="w-12 h-12 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-xl font-bold"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            {/* Summary of trip allocation */}
+            {tripNights > 0 && (
+              <div className="mb-6 text-sm text-slate-600 dark:text-slate-300">
+                <p className="font-medium mb-2">Trip breakdown:</p>
+                <ul className="space-y-1">
+                  {destinations.map((d, i) => (
+                    <li key={d.destinationId} className="flex justify-between">
+                      <span>{i + 1}. {d.place.name}</span>
+                      <span className="font-medium">{d.nights} nights</span>
+                    </li>
+                  ))}
+                  <li className="flex justify-between text-primary-600 dark:text-primary-400">
+                    <span>{destinations.length + 1}. {pendingDestination.name}</span>
+                    <span className="font-medium">{pendingNights} nights</span>
+                  </li>
+                  <li className="flex justify-between pt-2 border-t border-slate-200 dark:border-slate-600 font-medium">
+                    <span>Total</span>
+                    <span className={clsx(
+                      totalNights + pendingNights === tripNights
+                        ? 'text-green-600'
+                        : totalNights + pendingNights > tripNights
+                        ? 'text-amber-600'
+                        : 'text-slate-600 dark:text-slate-300'
+                    )}>
+                      {totalNights + pendingNights} / {tripNights} nights
+                    </span>
+                  </li>
+                </ul>
+                {totalNights + pendingNights > tripNights && (
+                  <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                    Tip: You can adjust nights after adding using the +/- buttons.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingDestination(null)}
+                className="flex-1 px-4 py-3 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmAddDestination}
+                className="flex-1 px-4 py-3 bg-primary-500 text-white rounded-xl hover:bg-primary-600 transition-colors font-medium"
+              >
+                Add Destination
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Invite Modal */}
       {showInviteModal && (
