@@ -39,8 +39,8 @@ const CITY_NAMES: Record<string, string> = {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
-  const cityCode = searchParams.get('cityCode');
-  const cityName = searchParams.get('cityName'); // Optional: passed from frontend
+  const cityCode = searchParams.get('cityCode'); // Optional if lat/lng provided
+  const cityName = searchParams.get('cityName'); // Required if no cityCode
   const checkInDate = searchParams.get('checkInDate');
   const checkOutDate = searchParams.get('checkOutDate');
   const adults = parseInt(searchParams.get('adults') || '1', 10);
@@ -50,9 +50,20 @@ export async function GET(request: NextRequest) {
   const lat = searchParams.get('lat') ? parseFloat(searchParams.get('lat')!) : undefined;
   const lng = searchParams.get('lng') ? parseFloat(searchParams.get('lng')!) : undefined;
 
-  if (!cityCode || !checkInDate || !checkOutDate) {
+  // Require either cityCode OR (cityName + lat/lng) for search
+  const hasAmadeusParams = cityCode && checkInDate && checkOutDate;
+  const hasGoogleParams = cityName && lat && lng;
+
+  if (!checkInDate || !checkOutDate) {
     return NextResponse.json(
-      { error: 'Missing required parameters: cityCode, checkInDate, checkOutDate' },
+      { error: 'Missing required parameters: checkInDate, checkOutDate' },
+      { status: 400 }
+    );
+  }
+
+  if (!cityCode && !hasGoogleParams) {
+    return NextResponse.json(
+      { error: 'Missing required parameters: cityCode or (cityName + lat + lng)' },
       { status: 400 }
     );
   }
@@ -82,34 +93,40 @@ export async function GET(request: NextRequest) {
     checkOutDate,
     adults,
     maxPrice,
+    lat,
+    lng,
   });
 
   const allHotels: any[] = [];
 
-  // 1. Try Amadeus first
-  try {
-    const amadeusHotels = await searchHotels({
-      cityCode,
-      checkInDate,
-      checkOutDate,
-      adults,
-      maxPrice,
-    });
+  // 1. Try Amadeus first (only if we have a city code)
+  if (cityCode) {
+    try {
+      const amadeusHotels = await searchHotels({
+        cityCode,
+        checkInDate,
+        checkOutDate,
+        adults,
+        maxPrice,
+      });
 
-    console.log('Amadeus returned', amadeusHotels.length, 'hotels');
+      console.log('Amadeus returned', amadeusHotels.length, 'hotels');
 
-    // Mark these as from Amadeus (have real pricing)
-    amadeusHotels.forEach(h => {
-      (h as any).source = 'amadeus';
-      (h as any).hasRealPricing = true;
-    });
+      // Mark these as from Amadeus (have real pricing)
+      amadeusHotels.forEach(h => {
+        (h as any).source = 'amadeus';
+        (h as any).hasRealPricing = true;
+      });
 
-    allHotels.push(...amadeusHotels);
-  } catch (error) {
-    console.error('Amadeus hotel search failed:', error);
+      allHotels.push(...amadeusHotels);
+    } catch (error) {
+      console.error('Amadeus hotel search failed:', error);
+    }
+  } else {
+    console.log('No city code provided, skipping Amadeus');
   }
 
-  // 2. If Amadeus returned few results, supplement with Google Places
+  // 2. If Amadeus returned few results (or wasn't called), use Google Places
   if (allHotels.length < 10) {
     const searchCityName = cityName || CITY_NAMES[cityCode] || cityCode;
     const location = lat && lng ? { lat, lng } : undefined;

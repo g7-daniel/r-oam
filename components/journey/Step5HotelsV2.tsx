@@ -73,23 +73,38 @@ const CITY_CODES: Record<string, string> = {
   // USA
   'New York': 'NYC', 'Los Angeles': 'LAX', 'Miami': 'MIA', 'San Francisco': 'SFO', 'Las Vegas': 'LAS',
   'Chicago': 'CHI', 'Boston': 'BOS', 'Washington': 'WAS', 'Seattle': 'SEA', 'Orlando': 'ORL',
+  'Hawaii': 'HNL', 'Honolulu': 'HNL', 'Maui': 'OGG',
   // Europe
   'Paris': 'PAR', 'London': 'LON', 'Rome': 'ROM', 'Barcelona': 'BCN', 'Madrid': 'MAD',
   'Amsterdam': 'AMS', 'Berlin': 'BER', 'Munich': 'MUC', 'Vienna': 'VIE', 'Prague': 'PRG',
   'Lisbon': 'LIS', 'Dublin': 'DUB', 'Athens': 'ATH', 'Venice': 'VCE', 'Florence': 'FLR',
+  'Santorini': 'JTR', 'Mykonos': 'JMK', 'Dubrovnik': 'DBV', 'Split': 'SPU',
   // Asia
   'Bangkok': 'BKK', 'Singapore': 'SIN', 'Hong Kong': 'HKG', 'Seoul': 'SEL', 'Taipei': 'TPE',
-  'Bali': 'DPS', 'Phuket': 'HKT', 'Hanoi': 'HAN', 'Ho Chi Minh City': 'SGN',
+  'Bali': 'DPS', 'Ubud': 'DPS', 'Phuket': 'HKT', 'Chiang Mai': 'CNX', 'Koh Samui': 'USM',
+  'Hanoi': 'HAN', 'Ho Chi Minh City': 'SGN',
   // Latin America
-  'Mexico City': 'MEX', 'Cancun': 'CUN', 'Panama City': 'PTY', 'San Jose': 'SJO',
+  'Mexico City': 'MEX', 'Cancun': 'CUN', 'Tulum': 'CUN', 'Playa del Carmen': 'CUN',
+  'Panama City': 'PTY', 'San Jose': 'SJO',
   'Lima': 'LIM', 'Buenos Aires': 'BUE', 'Rio de Janeiro': 'RIO', 'Sao Paulo': 'SAO',
-  // Caribbean
-  'Punta Cana': 'PUJ', 'Montego Bay': 'MBJ', 'Nassau': 'NAS',
+  // Costa Rica
+  'Tamarindo': 'LIR', 'La Fortuna': 'SJO', 'Manuel Antonio': 'SJO', 'Monteverde': 'SJO',
+  'Santa Teresa': 'SJO', 'Jaco': 'SJO', 'Puerto Viejo': 'SJO', 'Nosara': 'LIR',
+  // Caribbean - Dominican Republic
+  'Dominican Republic': 'SDQ', 'Punta Cana': 'PUJ', 'Santo Domingo': 'SDQ',
+  'Puerto Plata': 'POP', 'La Romana': 'SDQ', 'Samana': 'AZS',
+  // Caribbean - Other
+  'Jamaica': 'MBJ', 'Montego Bay': 'MBJ', 'Puerto Rico': 'SJU', 'San Juan': 'SJU',
+  'Aruba': 'AUA', 'Bahamas': 'NAS', 'Nassau': 'NAS', 'Barbados': 'BGI',
+  'St. Lucia': 'UVF', 'Turks and Caicos': 'PLS',
   // Middle East
   'Dubai': 'DXB', 'Tel Aviv': 'TLV', 'Jerusalem': 'TLV', 'Israel': 'TLV', 'Istanbul': 'IST',
   'Jordan': 'AMM', 'Amman': 'AMM', 'Petra': 'AMM', 'Abu Dhabi': 'AUH',
-  // Australia/NZ
+  // Australia/NZ/Pacific
   'Sydney': 'SYD', 'Melbourne': 'MEL', 'Auckland': 'AKL',
+  'Fiji': 'NAN', 'Bora Bora': 'BOB', 'Tahiti': 'PPT', 'Maldives': 'MLE',
+  // Africa
+  'Cape Town': 'CPT', 'Johannesburg': 'JNB', 'Marrakech': 'RAK', 'Morocco': 'RAK',
   // Defaults for countries
   'Costa Rica': 'SJO', 'Panama': 'PTY', 'Thailand': 'BKK', 'Japan': 'TYO', 'Italy': 'ROM',
   'France': 'PAR', 'Spain': 'MAD', 'Germany': 'BER', 'Greece': 'ATH',
@@ -507,18 +522,23 @@ export default function Step5HotelsV2() {
 
       let hotelsFetched = false;
 
-      // Try real API if we have a city code
-      if (cityCode) {
+      // Try API if we have a city code OR coordinates (for Google Places fallback)
+      const hasCoordinates = activeDestination.place.lat && activeDestination.place.lng;
+      if (cityCode || hasCoordinates) {
         try {
           const params = new URLSearchParams({
-            cityCode,
             cityName: activeDestination.place.name,
             checkInDate: checkInDate.toISOString().split('T')[0],
             checkOutDate: checkOutDate.toISOString().split('T')[0],
             adults: String(basics.travelers.adults),
           });
 
-          // Add coordinates if available
+          // Add city code if available (for Amadeus)
+          if (cityCode) {
+            params.append('cityCode', cityCode);
+          }
+
+          // Add coordinates (for Google Places fallback)
           if (activeDestination.place.lat) {
             params.append('lat', String(activeDestination.place.lat));
           }
