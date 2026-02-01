@@ -3,13 +3,20 @@
 import { useState } from 'react';
 import { DragDropContext, DropResult } from 'react-beautiful-dnd';
 import { useTripStoreV2 } from '@/stores/tripStoreV2';
-import CollectionsPanel from './CollectionsPanel';
+import LeftSidebar from './LeftSidebar';
 import MainItinerary from './MainItinerary';
 import RightMapPanel from './RightMapPanel';
 import AIAssistantPanel from './AIAssistantPanel';
 import TripHeader from './TripHeader';
-import { FolderHeart, Calendar, Map, MessageSquare, X } from 'lucide-react';
+import { Compass, Calendar, Map, X } from 'lucide-react';
 import clsx from 'clsx';
+
+// Reddit Snoo logo SVG
+const SnooLogo = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+    <path d="M10 0C4.48 0 0 4.48 0 10c0 5.52 4.48 10 10 10s10-4.48 10-10C20 4.48 15.52 0 10 0zm5.86 6.12c.67 0 1.22.55 1.22 1.22 0 .45-.25.84-.62 1.05.03.18.05.36.05.55 0 2.81-3.27 5.09-7.31 5.09-4.04 0-7.31-2.28-7.31-5.09 0-.19.02-.37.05-.55-.37-.21-.62-.6-.62-1.05 0-.67.55-1.22 1.22-1.22.33 0 .62.13.84.34 1.03-.74 2.45-1.23 4.02-1.29l.76-3.57c.02-.09.07-.16.14-.21.07-.05.16-.07.24-.05l2.47.53c.17-.33.52-.57.92-.57.57 0 1.03.46 1.03 1.03s-.46 1.03-1.03 1.03c-.56 0-1.01-.44-1.03-.99l-2.22-.47-.68 3.19c1.54.07 2.94.55 3.95 1.28.22-.21.52-.34.84-.34zM6.5 9.75c-.57 0-1.03.46-1.03 1.03s.46 1.03 1.03 1.03 1.03-.46 1.03-1.03-.46-1.03-1.03-1.03zm7 0c-.57 0-1.03.46-1.03 1.03s.46 1.03 1.03 1.03 1.03-.46 1.03-1.03-.46-1.03-1.03-1.03zm-5.47 3.82c-.1-.1-.1-.26 0-.36.1-.1.26-.1.36 0 .63.63 1.64.93 2.61.93s1.98-.3 2.61-.93c.1-.1.26-.1.36 0 .1.1.1.26 0 .36-.73.73-1.87 1.09-2.97 1.09s-2.24-.36-2.97-1.09z"/>
+  </svg>
+);
 
 interface MobileItineraryBuilderProps {
   selectedDayIndex: number;
@@ -19,7 +26,7 @@ interface MobileItineraryBuilderProps {
   setMapView: (view: 'day' | 'all' | 'saved') => void;
 }
 
-type MobileTab = 'collections' | 'itinerary' | 'map';
+type MobileTab = 'browse' | 'itinerary' | 'map';
 
 export default function MobileItineraryBuilder({
   selectedDayIndex,
@@ -88,9 +95,9 @@ export default function MobileItineraryBuilder({
 
         {/* Main content area */}
         <div className="flex-1 overflow-hidden">
-          {activeTab === 'collections' && (
+          {activeTab === 'browse' && (
             <div className="h-full bg-white dark:bg-slate-800">
-              <CollectionsPanel />
+              <LeftSidebar />
             </div>
           )}
 
@@ -121,16 +128,16 @@ export default function MobileItineraryBuilder({
         <div className="flex-shrink-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 safe-area-bottom">
           <div className="flex">
             <button
-              onClick={() => setActiveTab('collections')}
+              onClick={() => setActiveTab('browse')}
               className={clsx(
                 'flex-1 flex flex-col items-center gap-1 py-3 transition-colors',
-                activeTab === 'collections'
+                activeTab === 'browse'
                   ? 'text-primary-600 dark:text-primary-400'
                   : 'text-slate-400 dark:text-slate-500'
               )}
             >
-              <FolderHeart className="w-5 h-5" />
-              <span className="text-xs font-medium">Saved</span>
+              <Compass className="w-5 h-5" />
+              <span className="text-xs font-medium">Browse</span>
             </button>
 
             <button
@@ -163,10 +170,10 @@ export default function MobileItineraryBuilder({
               onClick={() => setShowAISheet(true)}
               className="flex-1 flex flex-col items-center gap-1 py-3 text-slate-400 dark:text-slate-500"
             >
-              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-                <MessageSquare className="w-3 h-3 text-white" />
+              <div className="w-6 h-6 rounded-full bg-[#FF4500] flex items-center justify-center">
+                <SnooLogo className="w-4 h-4 text-white" />
               </div>
-              <span className="text-xs font-medium">Snoo</span>
+              <span className="text-xs font-medium text-[#FF4500]">Snoo</span>
             </button>
           </div>
         </div>
@@ -190,10 +197,13 @@ export default function MobileItineraryBuilder({
               {/* Header */}
               <div className="flex-shrink-0 px-4 pb-2 flex items-center justify-between border-b border-slate-100 dark:border-slate-700">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-                    <MessageSquare className="w-4 h-4 text-white" />
+                  <div className="w-8 h-8 rounded-full bg-[#FF4500] flex items-center justify-center">
+                    <SnooLogo className="w-5 h-5 text-white" />
                   </div>
-                  <span className="font-semibold text-slate-900 dark:text-white">Ask Snoo</span>
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-slate-900 dark:text-white">Ask Snoo</span>
+                    <span className="text-[10px] text-orange-600 dark:text-orange-400">Powered by Reddit travelers</span>
+                  </div>
                 </div>
                 <button
                   onClick={() => setShowAISheet(false)}
