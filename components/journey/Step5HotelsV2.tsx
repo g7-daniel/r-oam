@@ -478,7 +478,7 @@ export default function Step5HotelsV2() {
   const [freeCancellationOnly, setFreeCancellationOnly] = useState(false);
   const [redditRecommendedOnly, setRedditRecommendedOnly] = useState(false);
   const [propertyTypeFilter, setPropertyTypeFilter] = useState<string[]>([]);
-  const [distanceFilter, setDistanceFilter] = useState<number>(100); // Default 100km for country/region searches
+  const [distanceFilter, setDistanceFilter] = useState<number>(300); // Default 300km for country/region searches
   const [modalHotel, setModalHotel] = useState<HotelType | null>(null);
   const [redditHotels, setRedditHotels] = useState<RedditHotel[]>([]);
   const [selectedSubreddits, setSelectedSubreddits] = useState<Set<string>>(
@@ -945,7 +945,7 @@ export default function Step5HotelsV2() {
               <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold text-slate-900 dark:text-white text-sm">Filters</h3>
-                  {(hotelNameSearch || starFilter.length > 0 || priceFilter[0] > 0 || priceFilter[1] < 2000 || guestRatingFilter > 0 || amenityFilters.length > 0 || freeCancellationOnly || redditRecommendedOnly || propertyTypeFilter.length > 0 || distanceFilter < 100) && (
+                  {(hotelNameSearch || starFilter.length > 0 || priceFilter[0] > 0 || priceFilter[1] < 2000 || guestRatingFilter > 0 || amenityFilters.length > 0 || freeCancellationOnly || redditRecommendedOnly || propertyTypeFilter.length > 0 || distanceFilter < 300) && (
                     <button
                       onClick={() => {
                         setHotelNameSearch('');
@@ -956,7 +956,7 @@ export default function Step5HotelsV2() {
                         setFreeCancellationOnly(false);
                         setRedditRecommendedOnly(false);
                         setPropertyTypeFilter([]);
-                        setDistanceFilter(100);
+                        setDistanceFilter(300);
                       }}
                       className="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
                     >
@@ -1082,9 +1082,9 @@ export default function Step5HotelsV2() {
                   </div>
                   <input
                     type="range"
-                    min={5}
-                    max={100}
-                    step={5}
+                    min={10}
+                    max={300}
+                    step={10}
                     value={distanceFilter}
                     onChange={(e) => setDistanceFilter(parseInt(e.target.value))}
                     className="w-full h-1.5 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
@@ -1277,7 +1277,7 @@ export default function Step5HotelsV2() {
                         setFreeCancellationOnly(false);
                         setRedditRecommendedOnly(false);
                         setPropertyTypeFilter([]);
-                        setDistanceFilter(100);
+                        setDistanceFilter(300);
                       }}
                       className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
                     >

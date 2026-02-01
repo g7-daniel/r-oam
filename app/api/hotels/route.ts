@@ -288,10 +288,26 @@ export async function GET(request: NextRequest) {
   console.log(`Step 2.5: Got ${googleHotels.length} hotels from Google Places`);
 
   // Convert Google hotels to our format and add non-duplicates
+  // Filter by distance from center (use destination's search radius)
   const existingNames = new Set(allHotels.map(h => h.name.toLowerCase()));
   let googleAddedCount = 0;
+  let googleFilteredCount = 0;
 
   for (const gh of googleHotels) {
+    // Filter by distance - only include hotels within the destination's search radius
+    if (gh.lat && gh.lng) {
+      const distance = calculateHaversineDistance(
+        config.centerLat,
+        config.centerLng,
+        gh.lat,
+        gh.lng
+      );
+      if (distance > config.searchRadiusKm) {
+        googleFilteredCount++;
+        continue; // Skip hotels outside the destination area
+      }
+    }
+
     const ghNameLower = gh.name.toLowerCase();
     // Check if already exists (fuzzy match)
     const isDuplicate = Array.from(existingNames).some(existing =>
@@ -317,7 +333,7 @@ export async function GET(request: NextRequest) {
       googleAddedCount++;
     }
   }
-  console.log(`Added ${googleAddedCount} unique hotels from Google Places`);
+  console.log(`Added ${googleAddedCount} unique hotels from Google Places (${googleFilteredCount} filtered by distance)`);
 
   if (allHotels.length === 0) {
     return NextResponse.json({
