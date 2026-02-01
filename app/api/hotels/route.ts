@@ -1,60 +1,198 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { searchHotels } from '@/lib/amadeus';
-import { searchHotelsGoogle, searchPlaces, getPhotoUrl } from '@/lib/google-maps';
-import { filterByDistance } from '@/lib/utils/geo';
+import {
+  getFullHotelInventory,
+  getHotelOffersBatch,
+  getHotelListByGeocode,
+  HotelBasicInfo,
+} from '@/lib/amadeus';
+import { searchPlaces, getPhotoUrl } from '@/lib/google-maps';
+import { getDestinationConfig, DestinationConfig } from '@/lib/configs/destinations';
+import { calculateHaversineDistance } from '@/lib/utils/geo';
 
-// City code to city name mapping for Google Places fallback
-const CITY_NAMES: Record<string, string> = {
-  TYO: 'Tokyo, Japan',
-  NYC: 'New York City',
-  LAX: 'Los Angeles',
-  SFO: 'San Francisco',
-  PAR: 'Paris, France',
-  LON: 'London, UK',
-  ROM: 'Rome, Italy',
-  BCN: 'Barcelona, Spain',
-  BKK: 'Bangkok, Thailand',
-  SIN: 'Singapore',
-  HKG: 'Hong Kong',
-  DXB: 'Dubai',
-  SYD: 'Sydney, Australia',
-  SEL: 'Seoul, South Korea',
-  SJO: 'San Jose, Costa Rica',
-  MIA: 'Miami',
-  CHI: 'Chicago',
-  BOS: 'Boston',
-  SEA: 'Seattle',
-  DEN: 'Denver',
-  AMS: 'Amsterdam',
-  BER: 'Berlin',
-  MUC: 'Munich',
-  VIE: 'Vienna',
-  PRG: 'Prague',
-  LIS: 'Lisbon',
-  MAD: 'Madrid',
-  MIL: 'Milan',
-  FLR: 'Florence',
-  VCE: 'Venice',
-};
+// Estimate price based on hotel name patterns
+function estimatePriceByHotelName(name: string): number {
+  const nameLower = name.toLowerCase();
+
+  // Ultra luxury: $800+
+  const ultraLuxury = ['aman', 'rosewood', 'four seasons', 'mandarin oriental', 'peninsula'];
+  if (ultraLuxury.some((brand) => nameLower.includes(brand))) {
+    return 800 + Math.floor(Math.random() * 400);
+  }
+
+  // Luxury: $400-600
+  const luxury = [
+    'ritz', 'waldorf', 'st regis', 'st. regis', 'park hyatt', 'conrad',
+    'edition', 'w hotel', 'jw marriott', 'intercontinental', 'fairmont',
+    'sofitel', 'eden roc', 'banyan tree', 'six senses', 'shangri-la'
+  ];
+  if (luxury.some((brand) => nameLower.includes(brand))) {
+    return 400 + Math.floor(Math.random() * 200);
+  }
+
+  // Upper upscale: $250-400
+  const upperUpscale = [
+    'marriott', 'hilton', 'hyatt', 'sheraton', 'westin', 'le meridien',
+    'doubletree', 'embassy suites', 'andaz', 'thompson', 'kimpton'
+  ];
+  if (upperUpscale.some((brand) => nameLower.includes(brand))) {
+    return 250 + Math.floor(Math.random() * 150);
+  }
+
+  // Resort keyword
+  if (nameLower.includes('resort') || nameLower.includes('spa')) {
+    return 200 + Math.floor(Math.random() * 200);
+  }
+
+  // Budget brands: $80-150
+  const budget = ['holiday inn', 'hampton', 'best western', 'comfort', 'la quinta', 'motel'];
+  if (budget.some((brand) => nameLower.includes(brand))) {
+    return 80 + Math.floor(Math.random() * 70);
+  }
+
+  // Default mid-range: $150-250
+  return 150 + Math.floor(Math.random() * 100);
+}
+
+// Detect luxury hotel by name
+function isLuxuryHotel(name: string): boolean {
+  const nameLower = name.toLowerCase();
+  const luxuryBrands = [
+    'aman', 'rosewood', 'four seasons', 'mandarin oriental', 'peninsula',
+    'ritz', 'waldorf', 'st regis', 'st. regis', 'park hyatt', 'conrad',
+    'edition', 'w hotel', 'jw marriott', 'intercontinental', 'fairmont',
+    'sofitel', 'eden roc', 'banyan tree', 'six senses', 'shangri-la',
+    'langham', 'raffles', 'belmond', 'one&only', 'aman'
+  ];
+  return luxuryBrands.some((brand) => nameLower.includes(brand));
+}
+
+// Get star rating based on hotel name
+function getStarRating(name: string): number {
+  const nameLower = name.toLowerCase();
+
+  // 5 stars - Ultra luxury
+  const fiveStars = [
+    'aman', 'rosewood', 'four seasons', 'mandarin oriental', 'peninsula',
+    'ritz', 'waldorf', 'st regis', 'st. regis', 'park hyatt'
+  ];
+  if (fiveStars.some((brand) => nameLower.includes(brand))) return 5;
+
+  // 4-5 stars - Luxury
+  const fourFiveStars = [
+    'conrad', 'edition', 'w hotel', 'jw marriott', 'intercontinental',
+    'fairmont', 'sofitel', 'eden roc', 'banyan tree', 'six senses',
+    'shangri-la', 'langham', 'raffles', 'belmond'
+  ];
+  if (fourFiveStars.some((brand) => nameLower.includes(brand))) return 5;
+
+  // 4 stars - Upper upscale
+  const fourStars = [
+    'marriott', 'hilton', 'hyatt', 'sheraton', 'westin', 'le meridien',
+    'doubletree', 'embassy suites', 'andaz', 'thompson', 'kimpton'
+  ];
+  if (fourStars.some((brand) => nameLower.includes(brand))) return 4;
+
+  // Resort typically 4 stars
+  if (nameLower.includes('resort')) return 4;
+
+  // 3 stars - Mid-range
+  const threeStars = ['courtyard', 'holiday inn', 'hampton', 'best western'];
+  if (threeStars.some((brand) => nameLower.includes(brand))) return 3;
+
+  // 2 stars - Budget
+  const twoStars = ['motel', 'lodge', 'inn'];
+  if (twoStars.some((brand) => nameLower.includes(brand))) return 2;
+
+  // Default 3-4 stars
+  return Math.random() > 0.5 ? 4 : 3;
+}
+
+// Enhanced hotel type after merging all data
+interface EnhancedHotel {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  stars: number;
+  pricePerNight: number;
+  totalPrice: number;
+  currency: string;
+  imageUrl: string | null;
+  amenities: string[];
+  distanceToCenter: number;
+  latitude: number;
+  longitude: number;
+  guestRating: number | null;
+  reviewCount: number | null;
+  source: string;
+  hasRealPricing: boolean;
+  isLuxury: boolean;
+  needsEnhancement?: boolean;
+}
+
+// Google Places enhancement for photos/ratings
+async function enhanceWithGooglePlaces(
+  hotels: HotelBasicInfo[],
+  destination: string,
+  batchSize: number = 50
+): Promise<Map<string, { imageUrl: string | null; rating: number | null; reviewCount: number | null }>> {
+  const enhancements = new Map<string, { imageUrl: string | null; rating: number | null; reviewCount: number | null }>();
+
+  // Limit to batchSize to avoid rate limits
+  const hotelsToEnhance = hotels.slice(0, batchSize);
+
+  // Process in parallel with concurrency limit
+  const CONCURRENCY = 10;
+  for (let i = 0; i < hotelsToEnhance.length; i += CONCURRENCY) {
+    const batch = hotelsToEnhance.slice(i, i + CONCURRENCY);
+
+    const results = await Promise.all(
+      batch.map(async (hotel) => {
+        try {
+          const places = await searchPlaces(`${hotel.name} hotel ${destination}`);
+          const place = places[0];
+
+          if (place) {
+            return {
+              hotelId: hotel.hotelId,
+              imageUrl: place.photos?.[0]?.photo_reference
+                ? getPhotoUrl(place.photos[0].photo_reference)
+                : null,
+              rating: place.rating || null,
+              reviewCount: place.user_ratings_total || null,
+            };
+          }
+          return { hotelId: hotel.hotelId, imageUrl: null, rating: null, reviewCount: null };
+        } catch {
+          return { hotelId: hotel.hotelId, imageUrl: null, rating: null, reviewCount: null };
+        }
+      })
+    );
+
+    for (const result of results) {
+      enhancements.set(result.hotelId, {
+        imageUrl: result.imageUrl,
+        rating: result.rating,
+        reviewCount: result.reviewCount,
+      });
+    }
+  }
+
+  console.log(`Enhanced ${enhancements.size} hotels with Google Places data`);
+  return enhancements;
+}
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
+  const params = request.nextUrl.searchParams;
 
-  const cityCode = searchParams.get('cityCode'); // Optional if lat/lng provided
-  const cityName = searchParams.get('cityName'); // Required if no cityCode
-  const checkInDate = searchParams.get('checkInDate');
-  const checkOutDate = searchParams.get('checkOutDate');
-  const adults = parseInt(searchParams.get('adults') || '1', 10);
-  const maxPrice = searchParams.get('maxPrice')
-    ? parseInt(searchParams.get('maxPrice')!, 10)
-    : undefined;
-  const lat = searchParams.get('lat') ? parseFloat(searchParams.get('lat')!) : undefined;
-  const lng = searchParams.get('lng') ? parseFloat(searchParams.get('lng')!) : undefined;
+  const destination = params.get('destination') || params.get('cityName');
+  const checkInDate = params.get('checkInDate');
+  const checkOutDate = params.get('checkOutDate');
+  const adults = parseInt(params.get('adults') || '2', 10);
+  const lat = params.get('lat') ? parseFloat(params.get('lat')!) : undefined;
+  const lng = params.get('lng') ? parseFloat(params.get('lng')!) : undefined;
 
-  // Require either cityCode OR (cityName + lat/lng) for search
-  const hasAmadeusParams = cityCode && checkInDate && checkOutDate;
-  const hasGoogleParams = cityName && lat && lng;
-
+  // Validate required params
   if (!checkInDate || !checkOutDate) {
     return NextResponse.json(
       { error: 'Missing required parameters: checkInDate, checkOutDate' },
@@ -62,9 +200,9 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  if (!cityCode && !hasGoogleParams) {
+  if (!destination && (!lat || !lng)) {
     return NextResponse.json(
-      { error: 'Missing required parameters: cityCode or (cityName + lat + lng)' },
+      { error: 'Missing required parameters: destination or (lat + lng)' },
       { status: 400 }
     );
   }
@@ -81,155 +219,183 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Calculate number of nights
+  // Calculate nights
   const nights = Math.ceil(
     (new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) /
       (1000 * 60 * 60 * 24)
   );
 
   console.log('Hotel search params:', {
-    cityCode,
-    cityName,
+    destination,
     checkInDate,
     checkOutDate,
     adults,
-    maxPrice,
     lat,
     lng,
   });
 
-  const allHotels: any[] = [];
+  // Step 1: Get destination config
+  let config: DestinationConfig | null = destination ? getDestinationConfig(destination) : null;
 
-  // 1. Try Amadeus first (only if we have a city code)
-  if (cityCode) {
-    try {
-      const amadeusHotels = await searchHotels({
-        cityCode,
-        checkInDate,
-        checkOutDate,
-        adults,
-        maxPrice,
-        destinationLat: lat,
-        destinationLng: lng,
-      });
+  // Fallback: create config from coordinates if no match
+  if (!config && lat && lng) {
+    console.log('No destination config found, using geocode fallback');
+    config = {
+      type: 'region',
+      cityCodes: [], // Will use geocode search
+      centerLat: lat,
+      centerLng: lng,
+      searchRadiusKm: 100,
+    };
+  }
 
-      console.log('Amadeus returned', amadeusHotels.length, 'hotels');
+  if (!config) {
+    return NextResponse.json(
+      { error: `Unknown destination: ${destination}. Try providing coordinates (lat/lng).` },
+      { status: 400 }
+    );
+  }
 
-      // Mark these as from Amadeus (have real pricing)
-      amadeusHotels.forEach(h => {
-        (h as any).source = 'amadeus';
-        (h as any).hasRealPricing = true;
-      });
+  console.log('Using destination config:', {
+    type: config.type,
+    cityCodes: config.cityCodes,
+    center: { lat: config.centerLat, lng: config.centerLng },
+    radius: config.searchRadiusKm,
+  });
 
-      allHotels.push(...amadeusHotels);
-    } catch (error) {
-      console.error('Amadeus hotel search failed:', error);
-    }
+  // Step 2: Get full hotel inventory
+  let allHotels: HotelBasicInfo[];
+
+  if (config.cityCodes.length > 0) {
+    // Use multi-city search
+    allHotels = await getFullHotelInventory(config);
   } else {
-    console.log('No city code provided, skipping Amadeus');
+    // Geocode fallback
+    allHotels = await getHotelListByGeocode(
+      config.centerLat,
+      config.centerLng,
+      config.searchRadiusKm
+    );
   }
 
-  // 2. If Amadeus returned few results (or wasn't called), use Google Places
-  if (allHotels.length < 10) {
-    const searchCityName = cityName || (cityCode ? CITY_NAMES[cityCode] : null) || cityCode || 'hotel';
-    const location = lat && lng ? { lat, lng } : undefined;
+  console.log(`Step 2: Got ${allHotels.length} hotels in inventory`);
 
-    console.log('Supplementing with Google Places for:', searchCityName);
-
-    try {
-      const googleHotels = await searchHotelsGoogle(searchCityName, location);
-      console.log('Google Places returned', googleHotels.length, 'hotels');
-
-      // Convert Google Places format to our hotel format
-      const convertedGoogleHotels = googleHotels
-        .filter(gh => {
-          // Don't include duplicates (check by name similarity)
-          const isDuplicate = allHotels.some(
-            ah => ah.name.toLowerCase().includes(gh.name.toLowerCase().slice(0, 10)) ||
-                  gh.name.toLowerCase().includes(ah.name.toLowerCase().slice(0, 10))
-          );
-          return !isDuplicate;
-        })
-        .map(gh => {
-          // Estimate price based on price_level (0-4 scale from Google)
-          // Price level: 0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive
-          const basePricePerNight = [50, 100, 200, 400, 800][gh.priceLevel] || 200;
-          const priceVariation = (Math.random() * 0.3 - 0.15); // ±15% variation
-          const estimatedPricePerNight = Math.round(basePricePerNight * (1 + priceVariation));
-
-          // Star rating based on price level + luxury detection, NOT user rating
-          // price_level 0-1 = 2-3 stars, 2 = 3-4 stars, 3-4 = 4-5 stars
-          // Luxury brands always get 5 stars
-          const isLuxury = (gh as any).isLuxury || false;
-          let stars: number;
-          if (isLuxury) {
-            stars = 5;
-          } else {
-            stars = Math.min(5, Math.max(2, gh.priceLevel + 2)); // 2-5 stars based on price
-          }
-
-          // Better amenities for higher-end hotels
-          const baseAmenities = ['wifi', 'air_conditioning'];
-          if (gh.priceLevel >= 3 || isLuxury) {
-            baseAmenities.push('pool', 'spa', 'gym', 'restaurant', 'room_service', 'concierge');
-          } else if (gh.priceLevel >= 2) {
-            baseAmenities.push('pool', 'gym', 'restaurant');
-          }
-
-          return {
-            id: gh.id,
-            name: gh.name,
-            address: gh.address,
-            city: searchCityName,
-            stars,
-            pricePerNight: estimatedPricePerNight,
-            totalPrice: estimatedPricePerNight * nights,
-            currency: 'USD',
-            imageUrl: gh.imageUrl,
-            amenities: baseAmenities,
-            distanceToCenter: Math.random() * 5,
-            latitude: gh.lat,
-            longitude: gh.lng,
-            guestRating: gh.rating * 2, // Convert 5-point to 10-point scale
-            reviewCount: gh.reviewCount,
-            source: 'google',
-            hasRealPricing: false, // Estimated pricing
-            priceLevel: gh.priceLevel,
-            isLuxury,
-          };
-        });
-
-      allHotels.push(...convertedGoogleHotels);
-    } catch (error) {
-      console.error('Google Places hotel search failed:', error);
-    }
+  if (allHotels.length === 0) {
+    return NextResponse.json({
+      hotels: [],
+      totalCount: 0,
+      withPricing: 0,
+      message: 'No hotels found for this destination',
+    });
   }
 
-  // Enhance hotels that have generic/missing images with real Google Places photos
-  const searchCityForImages = cityName || (cityCode ? CITY_NAMES[cityCode] : null) || 'hotel';
-  const hotelsNeedingImages = allHotels.filter(
-    (h) => !h.imageUrl || h.imageUrl.includes('unsplash.com')
+  // Step 3: Get prices for first 100 hotels
+  const MAX_PRICING_REQUESTS = 100;
+  const hotelIdsForPricing = allHotels.slice(0, MAX_PRICING_REQUESTS).map((h) => h.hotelId);
+
+  const offers = await getHotelOffersBatch(hotelIdsForPricing, checkInDate, checkOutDate, adults);
+  console.log(`Step 3: Got real prices for ${offers.size} hotels`);
+
+  // Step 4: Enhance TOP hotels with Google Places data
+  const TOP_ENHANCE_COUNT = 100;
+  const hotelsToEnhance = allHotels.slice(0, TOP_ENHANCE_COUNT);
+  const googleEnhancements = await enhanceWithGooglePlaces(
+    hotelsToEnhance,
+    destination || 'hotel',
+    TOP_ENHANCE_COUNT
   );
 
-  if (hotelsNeedingImages.length > 0) {
-    console.log(`Enhancing ${hotelsNeedingImages.length} hotels with Google Places images`);
+  // Step 5: Merge everything into final hotel objects
+  const finalHotels: EnhancedHotel[] = allHotels.map((hotel, index) => {
+    const offer = offers.get(hotel.hotelId);
+    const enhancement = googleEnhancements.get(hotel.hotelId);
 
-    // Enhance top 10 hotels without real images
-    const imageLookups = hotelsNeedingImages.slice(0, 10).map(async (hotel) => {
-      try {
-        const places = await searchPlaces(`${hotel.name} hotel ${searchCityForImages}`);
-        if (places[0]?.photos?.[0]?.photo_reference) {
-          hotel.imageUrl = getPhotoUrl(places[0].photos[0].photo_reference);
-        }
-      } catch (err) {
-        // Keep original image on error
-      }
-    });
+    // Calculate estimated price if no real price
+    const estimatedPrice = estimatePriceByHotelName(hotel.name);
+    const pricePerNight = offer?.pricePerNight || estimatedPrice;
+    const totalPrice = offer?.totalPrice || estimatedPrice * nights;
 
-    await Promise.all(imageLookups);
+    // Calculate distance from center
+    let distanceToCenter = 0;
+    if (hotel.latitude && hotel.longitude) {
+      distanceToCenter = calculateHaversineDistance(
+        config!.centerLat,
+        config!.centerLng,
+        hotel.latitude,
+        hotel.longitude
+      );
+    }
+
+    return {
+      id: hotel.hotelId,
+      name: hotel.name,
+      address: destination || '',
+      city: destination || '',
+      stars: getStarRating(hotel.name),
+      pricePerNight: Math.round(pricePerNight),
+      totalPrice: Math.round(totalPrice),
+      currency: 'USD',
+      imageUrl: enhancement?.imageUrl || null,
+      amenities: generateAmenities(hotel.name),
+      distanceToCenter: Math.round(distanceToCenter * 10) / 10,
+      latitude: hotel.latitude || 0,
+      longitude: hotel.longitude || 0,
+      guestRating: enhancement?.rating ? enhancement.rating * 2 : null, // Convert 5-point to 10-point
+      reviewCount: enhancement?.reviewCount || null,
+      source: 'amadeus',
+      hasRealPricing: !!offer,
+      isLuxury: isLuxuryHotel(hotel.name),
+      needsEnhancement: index >= TOP_ENHANCE_COUNT,
+    };
+  });
+
+  // Sort: Luxury first, then by distance (for better user experience)
+  finalHotels.sort((a, b) => {
+    // Luxury hotels first
+    if (a.isLuxury && !b.isLuxury) return -1;
+    if (!a.isLuxury && b.isLuxury) return 1;
+    // Then by distance
+    return a.distanceToCenter - b.distanceToCenter;
+  });
+
+  console.log(`Returning ${finalHotels.length} hotels (${offers.size} with real prices)`);
+
+  return NextResponse.json({
+    hotels: finalHotels,
+    totalCount: finalHotels.length,
+    withPricing: offers.size,
+    destination: destination,
+    searchConfig: {
+      type: config.type,
+      cityCodes: config.cityCodes,
+      radiusKm: config.searchRadiusKm,
+    },
+  });
+}
+
+// Generate amenities based on hotel name/type
+function generateAmenities(hotelName: string): string[] {
+  const nameLower = hotelName.toLowerCase();
+  const amenities: string[] = ['wifi', 'air_conditioning'];
+
+  // Luxury amenities
+  if (isLuxuryHotel(hotelName)) {
+    amenities.push('pool', 'spa', 'gym', 'restaurant', 'room_service', 'concierge', 'bar');
+  }
+  // Upper upscale
+  else if (nameLower.includes('marriott') || nameLower.includes('hilton') || nameLower.includes('hyatt')) {
+    amenities.push('pool', 'gym', 'restaurant', 'room_service');
+  }
+  // Resort
+  else if (nameLower.includes('resort')) {
+    amenities.push('pool', 'beach_access', 'restaurant', 'spa');
+  }
+  // Mid-range
+  else {
+    amenities.push('parking');
+    if (Math.random() > 0.5) amenities.push('breakfast');
+    if (Math.random() > 0.5) amenities.push('pool');
   }
 
-  console.log('Total hotels returned:', allHotels.length);
-
-  return NextResponse.json(allHotels);
+  return amenities;
 }

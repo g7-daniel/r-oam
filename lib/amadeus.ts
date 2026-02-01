@@ -7,7 +7,8 @@ import type {
   FlightSearchParams,
   HotelSearchParams,
 } from '@/types';
-import { filterByDistance } from '@/lib/utils/geo';
+import { filterByDistance, calculateHaversineDistance } from '@/lib/utils/geo';
+import { DestinationConfig } from '@/lib/configs/destinations';
 
 const AMADEUS_BASE_URL = 'https://test.api.amadeus.com';
 
@@ -453,6 +454,498 @@ export async function searchHotels(
   }
 
   return hotels;
+}
+
+// Get hotel list for a city with names (for matching Reddit hotels)
+export async function getHotelListByCity(cityCode: string): Promise<
+  { hotelId: string; name: string; latitude?: number; longitude?: number }[]
+> {
+  const token = await getAccessToken();
+
+  const params = new URLSearchParams({
+    cityCode,
+    radius: '100',
+    radiusUnit: 'KM',
+    hotelSource: 'ALL',
+  });
+
+  const response = await fetch(
+    `${AMADEUS_BASE_URL}/v1/reference-data/locations/hotels/by-city?${params}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+
+  if (!response.ok) {
+    console.error('Failed to get hotel list:', await response.text());
+    return [];
+  }
+
+  const data = await response.json();
+  return (data.data || []).map((h: any) => ({
+    hotelId: h.hotelId,
+    name: h.name,
+    latitude: h.geoCode?.latitude,
+    longitude: h.geoCode?.longitude,
+  }));
+}
+
+// Get hotel list by coordinates (better for finding hotels in specific locations)
+export async function getHotelListByGeocode(lat: number, lng: number, radiusKm: number = 50): Promise<
+  { hotelId: string; name: string; latitude?: number; longitude?: number }[]
+> {
+  const token = await getAccessToken();
+
+  const params = new URLSearchParams({
+    latitude: lat.toString(),
+    longitude: lng.toString(),
+    radius: radiusKm.toString(),
+    radiusUnit: 'KM',
+    hotelSource: 'ALL',
+  });
+
+  const response = await fetch(
+    `${AMADEUS_BASE_URL}/v1/reference-data/locations/hotels/by-geocode?${params}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+
+  if (!response.ok) {
+    console.error('Failed to get hotel list by geocode:', await response.text());
+    return [];
+  }
+
+  const data = await response.json();
+  console.log(`Amadeus: Found ${data.data?.length || 0} hotels near (${lat}, ${lng})`);
+  return (data.data || []).map((h: any) => ({
+    hotelId: h.hotelId,
+    name: h.name,
+    latitude: h.geoCode?.latitude,
+    longitude: h.geoCode?.longitude,
+  }));
+}
+
+// Fuzzy match hotel name to Amadeus hotel list
+function fuzzyMatchHotel(
+  searchName: string,
+  hotelList: { hotelId: string; name: string }[]
+): { hotelId: string; name: string; score: number } | null {
+  const searchLower = searchName.toLowerCase().trim();
+  const searchWords = searchLower.split(/\s+/);
+
+  let bestMatch: { hotelId: string; name: string; score: number } | null = null;
+
+  for (const hotel of hotelList) {
+    const hotelLower = hotel.name.toLowerCase();
+    let score = 0;
+
+    // Exact match
+    if (hotelLower === searchLower) {
+      return { ...hotel, score: 100 };
+    }
+
+    // Check if search name is contained in hotel name or vice versa
+    if (hotelLower.includes(searchLower)) {
+      score = 80;
+    } else if (searchLower.includes(hotelLower)) {
+      score = 75;
+    } else {
+      // Word-based matching
+      let matchedWords = 0;
+      for (const word of searchWords) {
+        if (word.length > 2 && hotelLower.includes(word)) {
+          matchedWords++;
+        }
+      }
+      score = (matchedWords / searchWords.length) * 60;
+    }
+
+    // Boost for matching key words
+    const keyWords = ['marriott', 'hilton', 'hyatt', 'sheraton', 'westin', 'ritz', 'four seasons', 'aman', 'rosewood', 'waldorf', 'conrad', 'intercontinental'];
+    for (const key of keyWords) {
+      if (searchLower.includes(key) && hotelLower.includes(key)) {
+        score += 15;
+        break;
+      }
+    }
+
+    if (score > 50 && (!bestMatch || score > bestMatch.score)) {
+      bestMatch = { ...hotel, score };
+    }
+  }
+
+  return bestMatch;
+}
+
+// Get prices for specific hotels by ID
+export async function getHotelPricesByIds(
+  hotelIds: string[],
+  checkInDate: string,
+  checkOutDate: string,
+  adults: number = 2
+): Promise<Map<string, { pricePerNight: number; totalPrice: number; currency: string }>> {
+  if (hotelIds.length === 0) return new Map();
+
+  const token = await getAccessToken();
+
+  const params = new URLSearchParams({
+    hotelIds: hotelIds.slice(0, 20).join(','), // Amadeus limits to ~20 hotels per request
+    checkInDate,
+    checkOutDate,
+    adults: adults.toString(),
+    currency: 'USD',
+  });
+
+  const response = await fetch(
+    `${AMADEUS_BASE_URL}/v3/shopping/hotel-offers?${params}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+
+  if (!response.ok) {
+    console.error('Failed to get hotel prices:', await response.text());
+    return new Map();
+  }
+
+  const data = await response.json();
+  const priceMap = new Map<string, { pricePerNight: number; totalPrice: number; currency: string }>();
+
+  const nights = Math.ceil(
+    (new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  const exchangeRates: Record<string, number> = {
+    USD: 1, EUR: 1.08, GBP: 1.27, JPY: 0.0067, CNY: 0.14,
+    KRW: 0.00075, THB: 0.028, AUD: 0.65, CAD: 0.74, SGD: 0.74, HKD: 0.13,
+  };
+
+  for (const offer of data.data || []) {
+    const hotelId = offer.hotel.hotelId;
+    const rawPrice = parseFloat(offer.offers[0]?.price.total || '0');
+    const currency = offer.offers[0]?.price.currency || 'USD';
+    const exchangeRate = exchangeRates[currency] || 1;
+    const totalPrice = rawPrice * exchangeRate;
+
+    priceMap.set(hotelId, {
+      pricePerNight: totalPrice / nights,
+      totalPrice,
+      currency: 'USD',
+    });
+  }
+
+  return priceMap;
+}
+
+// Match Reddit hotels to Amadeus and get real prices
+// Uses hotel coordinates to search nearby Amadeus hotels
+export async function getAmadeusPricesForHotels(
+  hotels: Array<{ name: string; lat?: number; lng?: number }>,
+  fallbackCityCode: string,
+  checkInDate: string,
+  checkOutDate: string,
+  adults: number = 2
+): Promise<Map<string, { pricePerNight: number; totalPrice: number; amadeusName: string }>> {
+  const results = new Map<string, { pricePerNight: number; totalPrice: number; amadeusName: string }>();
+
+  if (hotels.length === 0) return results;
+
+  try {
+    // Process each hotel individually using its coordinates
+    for (const hotel of hotels) {
+      let hotelList: { hotelId: string; name: string }[] = [];
+
+      // If hotel has coordinates, search by geocode (more accurate)
+      if (hotel.lat && hotel.lng) {
+        console.log(`Amadeus: Searching hotels near "${hotel.name}" at (${hotel.lat.toFixed(4)}, ${hotel.lng.toFixed(4)})`);
+        hotelList = await getHotelListByGeocode(hotel.lat, hotel.lng, 30); // 30km radius
+      }
+
+      // Fall back to city code search if geocode didn't find anything
+      if (hotelList.length === 0 && fallbackCityCode) {
+        console.log(`Amadeus: Falling back to city code ${fallbackCityCode} for "${hotel.name}"`);
+        hotelList = await getHotelListByCity(fallbackCityCode);
+      }
+
+      if (hotelList.length === 0) {
+        console.log(`Amadeus: No hotels found near "${hotel.name}"`);
+        continue;
+      }
+
+      // Try to match the hotel name
+      const match = fuzzyMatchHotel(hotel.name, hotelList);
+      if (match && match.score >= 50) {
+        console.log(`Amadeus: Matched "${hotel.name}" → "${match.name}" (score: ${match.score})`);
+
+        // Get price for this hotel
+        const prices = await getHotelPricesByIds([match.hotelId], checkInDate, checkOutDate, adults);
+        const price = prices.get(match.hotelId);
+
+        if (price) {
+          results.set(hotel.name.toLowerCase(), {
+            pricePerNight: price.pricePerNight,
+            totalPrice: price.totalPrice,
+            amadeusName: match.name,
+          });
+          console.log(`Amadeus: Real price for "${hotel.name}": $${price.pricePerNight.toFixed(0)}/night`);
+        }
+      } else {
+        console.log(`Amadeus: No match found for "${hotel.name}" in ${hotelList.length} nearby hotels`);
+      }
+    }
+
+    console.log(`Amadeus: Found real prices for ${results.size}/${hotels.length} Reddit hotels`);
+  } catch (error) {
+    console.error('Amadeus price lookup error:', error);
+  }
+
+  return results;
+}
+
+// ============ MULTI-CITY HOTEL INVENTORY ============
+
+// Basic hotel info from the hotel list endpoint (no prices)
+export interface HotelBasicInfo {
+  hotelId: string;
+  name: string;
+  latitude?: number;
+  longitude?: number;
+  distanceFromCenter?: number;
+}
+
+// Hotel offer with pricing from the offers endpoint
+export interface HotelOffer {
+  hotelId: string;
+  pricePerNight: number;
+  totalPrice: number;
+  currency: string;
+  rooms?: {
+    type: string;
+    description: string;
+    price: number;
+  }[];
+}
+
+// Chunk an array into batches
+function chunk<T>(array: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    result.push(array.slice(i, i + size));
+  }
+  return result;
+}
+
+/**
+ * Get FULL hotel inventory for a destination (searches all city codes)
+ * Returns basic info only (no prices) - for complete hotel list
+ */
+export async function getFullHotelInventory(
+  config: DestinationConfig
+): Promise<HotelBasicInfo[]> {
+  const allHotels: HotelBasicInfo[] = [];
+  const seen = new Set<string>();
+
+  console.log(`Getting full hotel inventory for ${config.cityCodes.join(', ')}`);
+
+  // Search each city code
+  for (const cityCode of config.cityCodes) {
+    try {
+      const hotels = await getHotelListByCity(cityCode);
+      console.log(`  - ${cityCode}: ${hotels.length} hotels found`);
+
+      for (const hotel of hotels) {
+        // Skip duplicates
+        if (seen.has(hotel.hotelId)) continue;
+        seen.add(hotel.hotelId);
+
+        // Filter by distance from center if we have coordinates
+        if (hotel.latitude && hotel.longitude) {
+          const distance = calculateHaversineDistance(
+            config.centerLat,
+            config.centerLng,
+            hotel.latitude,
+            hotel.longitude
+          );
+
+          if (distance > config.searchRadiusKm) {
+            continue;
+          }
+
+          allHotels.push({
+            ...hotel,
+            distanceFromCenter: distance,
+          });
+        } else {
+          // Include hotels without coordinates (can't filter by distance)
+          allHotels.push(hotel);
+        }
+      }
+    } catch (error) {
+      console.error(`Error fetching hotels for ${cityCode}:`, error);
+    }
+  }
+
+  // Sort by distance from center (closest first)
+  allHotels.sort((a, b) => {
+    const distA = a.distanceFromCenter ?? 999;
+    const distB = b.distanceFromCenter ?? 999;
+    return distA - distB;
+  });
+
+  console.log(`Full inventory: ${allHotels.length} hotels in ${config.cityCodes.join(', ')}`);
+  return allHotels;
+}
+
+/**
+ * Get prices for multiple hotels in batches
+ * Amadeus limits to ~20 hotels per request, so we batch
+ */
+export async function getHotelOffersBatch(
+  hotelIds: string[],
+  checkInDate: string,
+  checkOutDate: string,
+  adults: number = 2
+): Promise<Map<string, HotelOffer>> {
+  const results = new Map<string, HotelOffer>();
+
+  if (hotelIds.length === 0) return results;
+
+  // Amadeus limits to ~20 hotels per request
+  const BATCH_SIZE = 20;
+  const batches = chunk(hotelIds, BATCH_SIZE);
+
+  console.log(`Getting prices for ${hotelIds.length} hotels in ${batches.length} batches`);
+
+  const nights = Math.ceil(
+    (new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) /
+      (1000 * 60 * 60 * 24)
+  );
+
+  for (const batch of batches) {
+    try {
+      const priceMap = await getHotelPricesByIds(batch, checkInDate, checkOutDate, adults);
+
+      priceMap.forEach((price, hotelId) => {
+        results.set(hotelId, {
+          hotelId,
+          pricePerNight: price.pricePerNight,
+          totalPrice: price.totalPrice,
+          currency: price.currency,
+        });
+      });
+    } catch (error) {
+      console.error('Error in hotel price batch:', error);
+    }
+  }
+
+  console.log(`Got prices for ${results.size}/${hotelIds.length} hotels`);
+  return results;
+}
+
+/**
+ * Combined function: Get inventory + prices + merge
+ * Returns hotels with prices where available, estimates for others
+ */
+export async function getHotelsWithPricing(
+  config: DestinationConfig,
+  checkInDate: string,
+  checkOutDate: string,
+  adults: number = 2,
+  maxPricingRequests: number = 100
+): Promise<{
+  hotels: (HotelBasicInfo & {
+    hasRealPrice: boolean;
+    pricePerNight?: number;
+    totalPrice?: number;
+    estimatedPrice?: number;
+  })[];
+  totalCount: number;
+  withPricing: number;
+}> {
+  // Step 1: Get full inventory
+  const inventory = await getFullHotelInventory(config);
+
+  if (inventory.length === 0) {
+    return { hotels: [], totalCount: 0, withPricing: 0 };
+  }
+
+  // Step 2: Get prices for first N hotels (prioritize closest)
+  const hotelIdsForPricing = inventory
+    .slice(0, maxPricingRequests)
+    .map((h) => h.hotelId);
+
+  const priceMap = await getHotelOffersBatch(
+    hotelIdsForPricing,
+    checkInDate,
+    checkOutDate,
+    adults
+  );
+
+  // Step 3: Merge inventory with prices
+  const hotels = inventory.map((hotel) => {
+    const price = priceMap.get(hotel.hotelId);
+    return {
+      ...hotel,
+      hasRealPrice: !!price,
+      pricePerNight: price?.pricePerNight,
+      totalPrice: price?.totalPrice,
+      // Estimate price based on name patterns if no real price
+      estimatedPrice: price?.pricePerNight || estimatePriceByHotelName(hotel.name),
+    };
+  });
+
+  return {
+    hotels,
+    totalCount: inventory.length,
+    withPricing: priceMap.size,
+  };
+}
+
+/**
+ * Estimate hotel price based on name patterns (luxury brands = higher price)
+ */
+function estimatePriceByHotelName(name: string): number {
+  const nameLower = name.toLowerCase();
+
+  // Ultra luxury: $800+
+  const ultraLuxury = ['aman', 'rosewood', 'four seasons', 'mandarin oriental', 'peninsula'];
+  if (ultraLuxury.some((brand) => nameLower.includes(brand))) {
+    return 800 + Math.floor(Math.random() * 400);
+  }
+
+  // Luxury: $400-600
+  const luxury = [
+    'ritz', 'waldorf', 'st regis', 'st. regis', 'park hyatt', 'conrad',
+    'edition', 'w hotel', 'jw marriott', 'intercontinental', 'fairmont',
+    'sofitel', 'eden roc', 'banyan tree', 'six senses', 'shangri-la'
+  ];
+  if (luxury.some((brand) => nameLower.includes(brand))) {
+    return 400 + Math.floor(Math.random() * 200);
+  }
+
+  // Upper upscale: $250-400
+  const upperUpscale = [
+    'marriott', 'hilton', 'hyatt', 'sheraton', 'westin', 'le meridien',
+    'doubletree', 'embassy suites', 'andaz', 'thompson', 'kimpton'
+  ];
+  if (upperUpscale.some((brand) => nameLower.includes(brand))) {
+    return 250 + Math.floor(Math.random() * 150);
+  }
+
+  // Resort keyword
+  if (nameLower.includes('resort') || nameLower.includes('spa')) {
+    return 200 + Math.floor(Math.random() * 200);
+  }
+
+  // Budget brands: $80-150
+  const budget = ['holiday inn', 'hampton', 'best western', 'comfort', 'la quinta', 'motel'];
+  if (budget.some((brand) => nameLower.includes(brand))) {
+    return 80 + Math.floor(Math.random() * 70);
+  }
+
+  // Default mid-range: $150-250
+  return 150 + Math.floor(Math.random() * 100);
 }
 
 export async function getAirportAutocomplete(query: string): Promise<
