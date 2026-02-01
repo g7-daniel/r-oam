@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="50%" style="stop-color:#1e293b"/>
+      <stop offset="100%" style="stop-color:#0f172a"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF4500;stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:#FF4500;stop-opacity:0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Orange glow effects -->
+  <circle cx="200" cy="100" r="300" fill="url(#glow)"/>
+  <circle cx="1000" cy="530" r="250" fill="url(#glow)"/>
+
+  <!-- Logo -->
+  <text x="600" y="280" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="140" font-weight="900">
+    <tspan fill="#FF4500">r/</tspan><tspan fill="white">oam</tspan>
+  </text>
+
+  <!-- Tagline -->
+  <text x="600" y="380" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="42" fill="#94a3b8">
+    Reddit-Powered Travel Planner
+  </text>
+
+  <!-- Subtitle -->
+  <text x="600" y="450" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" fill="#64748b">
+    Plan your trip based on what REAL travelers say
+  </text>
+
+  <!-- Reddit badge -->
+  <rect x="480" y="500" width="240" height="50" rx="25" fill="#FF4500" fill-opacity="0.2" stroke="#FF4500" stroke-opacity="0.5"/>
+  <text x="600" y="535" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="20" fill="#FF4500" font-weight="600">
+    Powered by Reddit
+  </text>
+</svg>
