@@ -110,14 +110,14 @@ export default function ItineraryBuilder() {
         <div className="flex-1 flex overflow-hidden">
           {/* Left Sidebar - Collections & AI */}
           <div className={clsx(
-            "flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col transition-all",
-            isMapExpanded ? "w-[380px]" : "w-[520px]"
+            "border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col transition-all",
+            isMapExpanded ? "w-[280px] lg:w-[320px] xl:w-[380px]" : "w-[320px] lg:w-[400px] xl:w-[480px]"
           )}>
             <LeftSidebar />
           </div>
 
-          {/* Main Area - Day-by-Day Itinerary */}
-          <div className="flex-1 overflow-hidden flex flex-col min-w-0">
+          {/* Main Area - Day-by-Day Itinerary - ensure minimum width */}
+          <div className="flex-1 overflow-hidden flex flex-col min-w-[300px]">
             <MainItinerary
               selectedDayIndex={selectedDayIndex}
               setSelectedDayIndex={setSelectedDayIndex}
@@ -127,7 +127,7 @@ export default function ItineraryBuilder() {
 
           {/* Right Panel - Map (Collapsible) */}
           {isMapExpanded ? (
-            <div className="w-[380px] flex-shrink-0 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col">
+            <div className="w-[280px] lg:w-[320px] xl:w-[380px] flex-shrink-0 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col">
               <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Map</span>
                 <button
