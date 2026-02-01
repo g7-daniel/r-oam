@@ -238,7 +238,7 @@ export default function HotelSnooChat({ destinationName, onHotelSuggestion }: Ho
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed top-20 right-6 z-30 flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-full shadow-lg hover:from-orange-600 hover:to-orange-700 transition-all hover:shadow-xl border border-orange-400"
+        className="fixed top-20 right-6 z-50 flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-full shadow-lg hover:from-orange-600 hover:to-orange-700 transition-all hover:shadow-xl border border-orange-400"
       >
         <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
           <span className="text-orange-500 font-bold text-xs">r/</span>
@@ -250,7 +250,7 @@ export default function HotelSnooChat({ destinationName, onHotelSuggestion }: Ho
   }
 
   return (
-    <div className="fixed top-20 right-6 z-30 w-[420px] h-[520px] bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
+    <div className="fixed top-20 right-6 z-50 w-[420px] h-[520px] bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="bg-reddit text-white px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
