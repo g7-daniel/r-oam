@@ -8,7 +8,7 @@ import ItineraryBuilder from '@/components/builder/ItineraryBuilder';
 export default function TripPage() {
   const params = useParams();
   const router = useRouter();
-  const { trip } = useTripStoreV2();
+  const { trip, _hasHydrated } = useTripStoreV2();
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -16,15 +16,17 @@ export default function TripPage() {
   }, []);
 
   useEffect(() => {
-    if (isClient) {
+    // Only redirect after store has hydrated from localStorage
+    if (isClient && _hasHydrated) {
       // If no destinations, redirect to start page
       if (trip.destinations.length === 0) {
         router.push('/plan/start');
       }
     }
-  }, [isClient, trip.destinations.length, router]);
+  }, [isClient, _hasHydrated, trip.destinations.length, router]);
 
-  if (!isClient) {
+  // Show loading until client-side and store is hydrated
+  if (!isClient || !_hasHydrated) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
         <div className="text-center">

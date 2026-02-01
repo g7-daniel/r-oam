@@ -251,10 +251,17 @@ function HotelDetailModal({
           {/* Image gallery */}
           <div className="relative h-64 md:h-80 bg-slate-200 dark:bg-slate-700">
             <img
-              src={hotelImages[currentImageIndex]}
-              alt={hotel.name}
+              src={hotelImages[currentImageIndex] || ROOM_TYPE_IMAGES.standard[0]}
+              alt={`${hotel.name} - ${currentImageIndex === 0 ? 'Hotel' : selectedRoomType.name}`}
               className="w-full h-full object-cover"
+              onError={(e) => {
+                e.currentTarget.src = ROOM_TYPE_IMAGES.standard[currentImageIndex % 4];
+              }}
             />
+            {/* Image label */}
+            <div className="absolute top-4 left-4 bg-black/60 text-white text-xs px-2 py-1 rounded">
+              {currentImageIndex === 0 ? 'Hotel Exterior' : `${selectedRoomType.name} Preview`}
+            </div>
             {/* Image navigation */}
             <button
               onClick={() => setCurrentImageIndex((prev) => (prev - 1 + hotelImages.length) % hotelImages.length)}
@@ -518,6 +525,8 @@ export default function Step5HotelsV2() {
         body: JSON.stringify({
           destination: activeDestination.place.name,
           subreddits: Array.from(selectedSubreddits),
+          lat: activeDestination.place.lat,
+          lng: activeDestination.place.lng,
           preferences: {
             budget: selectedSubreddits.has('fatfire') || selectedSubreddits.has('luxurytravel') ? 'luxury' : 'mid',
           },
@@ -1432,6 +1441,8 @@ export default function Step5HotelsV2() {
       {activeDestination && (
         <HotelSnooChat
           destinationName={activeDestination.place.name}
+          lat={activeDestination.place.lat}
+          lng={activeDestination.place.lng}
           onHotelsFound={handleRedditHotelsFound}
         />
       )}

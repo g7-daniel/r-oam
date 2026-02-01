@@ -46,6 +46,8 @@ export interface RedditHotel {
 
 interface HotelSnooChatProps {
   destinationName: string;
+  lat?: number;
+  lng?: number;
   onHotelsFound?: (hotels: RedditHotel[]) => void;
 }
 
@@ -86,7 +88,7 @@ const QUESTIONS = [
   },
 ];
 
-export default function HotelSnooChat({ destinationName, onHotelsFound }: HotelSnooChatProps) {
+export default function HotelSnooChat({ destinationName, lat, lng, onHotelsFound }: HotelSnooChatProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
@@ -126,6 +128,8 @@ export default function HotelSnooChat({ destinationName, onHotelsFound }: HotelS
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           destination: destinationName,
+          lat,
+          lng,
           preferences: finalAnswers,
         }),
       });

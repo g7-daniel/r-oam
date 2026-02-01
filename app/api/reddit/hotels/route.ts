@@ -36,7 +36,7 @@ async function verifyHotelWithGoogle(
   hotelName: string,
   destination: string,
   destinationCoords?: { lat: number; lng: number },
-  maxDistanceKm: number = 100
+  maxDistanceKm: number = 250
 ): Promise<{
   verified: boolean;
   name: string;
@@ -330,12 +330,13 @@ export async function POST(request: NextRequest) {
       console.log(`Reddit: Filtered ${rawRecommendations.length} -> ${qualityRecommendations.length} by upvotes (min ${MIN_UPVOTES})`);
 
       // Verify ALL quality hotels with Google Places (with distance check)
+      // ONLY include hotels that pass verification - no exceptions for brands
       const verificationPromises = qualityRecommendations.map(async (rec) => {
-        const verified = await verifyHotelWithGoogle(rec.rawName, destination, destinationCoords, 100);
+        const verified = await verifyHotelWithGoogle(rec.rawName, destination, destinationCoords);
         if (verified) {
           return {
             ...rec,
-            name: verified.name, // Use verified Google name
+            name: verified.name,
             hotelName: verified.name,
             lat: verified.lat,
             lng: verified.lng,
@@ -346,14 +347,9 @@ export async function POST(request: NextRequest) {
             verified: true,
           };
         }
-        // Keep unverified if it has a known brand
-        const hasKnownBrand = KNOWN_HOTEL_BRANDS.some(brand =>
-          rec.rawName.toLowerCase().includes(brand)
-        );
-        if (hasKnownBrand) {
-          return { ...rec, verified: false };
-        }
-        return null; // Filter out unverified unknown hotels
+        // Hotel failed verification (wrong location or not found) - exclude it
+        console.log(`Excluded hotel "${rec.rawName}" - failed location verification for ${destination}`);
+        return null;
       });
 
       const verifiedResults = await Promise.all(verificationPromises);
@@ -361,7 +357,34 @@ export async function POST(request: NextRequest) {
 
     } else {
       // Fall back to default budget-based search
-      recommendations = await searchHotelRecommendations(destination, budget);
+      const rawRecommendations = await searchHotelRecommendations(destination, budget);
+
+      // Verify fallback hotels with Google Places too
+      if (destinationCoords && rawRecommendations.length > 0) {
+        const verificationPromises = rawRecommendations.map(async (rec) => {
+          const verified = await verifyHotelWithGoogle(rec.hotelName, destination, destinationCoords);
+          if (verified) {
+            return {
+              ...rec,
+              name: verified.name,
+              hotelName: verified.name,
+              lat: verified.lat,
+              lng: verified.lng,
+              rating: verified.rating,
+              address: verified.address,
+              imageRef: verified.imageRef,
+              priceLevel: verified.priceLevel,
+              verified: true,
+            };
+          }
+          console.log(`Excluded fallback hotel "${rec.hotelName}" - failed location verification`);
+          return null;
+        });
+        const verifiedResults = await Promise.all(verificationPromises);
+        recommendations = verifiedResults.filter(Boolean) as any[];
+      } else {
+        recommendations = rawRecommendations;
+      }
     }
 
     // Score and filter recommendations based on preferences

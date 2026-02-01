@@ -135,6 +135,10 @@ const getAirportCode = (destinationName: string): string => {
 interface TripStoreState {
   trip: Trip;
 
+  // ============ HYDRATION STATE ============
+  _hasHydrated: boolean;
+  setHasHydrated: (hasHydrated: boolean) => void;
+
   // ============ COLLECTIONS STATE ============
   collections: {
     experiences: CollectionItem[];
@@ -262,6 +266,10 @@ export const useTripStoreV2 = create<TripStoreState>()(
   persist(
     (set, get) => ({
       trip: createDefaultTrip(),
+
+      // ============ HYDRATION STATE ============
+      _hasHydrated: false,
+      setHasHydrated: (hasHydrated: boolean) => set({ _hasHydrated: hasHydrated }),
 
       // ============ COLLECTIONS STATE ============
       collections: {
@@ -1489,6 +1497,9 @@ export const useTripStoreV2 = create<TripStoreState>()(
         diningReservations: state.diningReservations,
         itineraryAssignments: state.itineraryAssignments,
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );
