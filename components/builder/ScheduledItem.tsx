@@ -304,7 +304,7 @@ export default function ScheduledItem({
                 {item.name?.charAt(0)?.toUpperCase() || '?'}
               </span>
               {/* Image on top - hides on error to reveal initial */}
-              {item.imageUrl && (
+              {item.imageUrl && item.imageUrl.length > 0 && (
                 <img
                   src={item.imageUrl}
                   alt={item.name}

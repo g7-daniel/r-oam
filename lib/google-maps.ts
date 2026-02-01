@@ -423,9 +423,22 @@ export async function searchHotelsGoogle(
   }
 
   // Deduplicate by place_id
-  const uniquePlaces = Array.from(
+  let uniquePlaces = Array.from(
     new Map(allPlaces.map((p) => [p.place_id, p])).values()
   );
+
+  // Filter by distance if we have location coordinates (max 50km)
+  if (location && location.lat && location.lng) {
+    const beforeCount = uniquePlaces.length;
+    uniquePlaces = uniquePlaces.filter((place) => {
+      const placeLat = place.geometry?.location?.lat;
+      const placeLng = place.geometry?.location?.lng;
+      if (!placeLat || !placeLng) return false;
+      const distance = getDistanceKm(location.lat, location.lng, placeLat, placeLng);
+      return distance <= 50; // Max 50km from destination
+    });
+    console.log(`Google Places: Filtered ${beforeCount} -> ${uniquePlaces.length} hotels by distance (50km max)`);
+  }
 
   // Detect luxury hotels by name
   const luxuryBrands = [

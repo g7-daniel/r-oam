@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchHotels } from '@/lib/amadeus';
-import { searchHotelsGoogle } from '@/lib/google-maps';
+import { searchHotelsGoogle, searchPlaces, getPhotoUrl } from '@/lib/google-maps';
+import { filterByDistance } from '@/lib/utils/geo';
 
 // City code to city name mapping for Google Places fallback
 const CITY_NAMES: Record<string, string> = {
@@ -108,6 +109,8 @@ export async function GET(request: NextRequest) {
         checkOutDate,
         adults,
         maxPrice,
+        destinationLat: lat,
+        destinationLng: lng,
       });
 
       console.log('Amadeus returned', amadeusHotels.length, 'hotels');
@@ -200,6 +203,30 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       console.error('Google Places hotel search failed:', error);
     }
+  }
+
+  // Enhance hotels that have generic/missing images with real Google Places photos
+  const searchCityForImages = cityName || (cityCode ? CITY_NAMES[cityCode] : null) || 'hotel';
+  const hotelsNeedingImages = allHotels.filter(
+    (h) => !h.imageUrl || h.imageUrl.includes('unsplash.com')
+  );
+
+  if (hotelsNeedingImages.length > 0) {
+    console.log(`Enhancing ${hotelsNeedingImages.length} hotels with Google Places images`);
+
+    // Enhance top 10 hotels without real images
+    const imageLookups = hotelsNeedingImages.slice(0, 10).map(async (hotel) => {
+      try {
+        const places = await searchPlaces(`${hotel.name} hotel ${searchCityForImages}`);
+        if (places[0]?.photos?.[0]?.photo_reference) {
+          hotel.imageUrl = getPhotoUrl(places[0].photos[0].photo_reference);
+        }
+      } catch (err) {
+        // Keep original image on error
+      }
+    });
+
+    await Promise.all(imageLookups);
   }
 
   console.log('Total hotels returned:', allHotels.length);

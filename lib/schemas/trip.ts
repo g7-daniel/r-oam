@@ -182,6 +182,9 @@ export const HotelSchema = z.object({
   lng: z.number(),
   guestRating: z.number().min(0).max(10).optional(),
   isRedditRecommended: z.boolean().optional(),
+  reviewCount: z.number().optional(),
+  source: z.string().optional(), // 'amadeus', 'google', 'reddit'
+  hasRealPricing: z.boolean().optional(),
 });
 export type Hotel = z.infer<typeof HotelSchema>;
 

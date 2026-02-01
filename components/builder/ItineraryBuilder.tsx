@@ -106,18 +106,15 @@ export default function ItineraryBuilder() {
         {/* Header */}
         <TripHeader />
 
-        {/* Main content area */}
+        {/* Main content area - balanced three-column layout */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Left Sidebar - Collections & AI */}
-          <div className={clsx(
-            "border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col transition-all",
-            isMapExpanded ? "w-[280px] lg:w-[320px] xl:w-[380px]" : "w-[320px] lg:w-[400px] xl:w-[480px]"
-          )}>
+          {/* Left Sidebar - Collections & AI - wider for browsing */}
+          <div className="w-[400px] lg:w-[440px] xl:w-[480px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col">
             <LeftSidebar />
           </div>
 
-          {/* Main Area - Day-by-Day Itinerary - ensure minimum width */}
-          <div className="flex-1 overflow-hidden flex flex-col min-w-[300px]">
+          {/* Main Area - Day-by-Day Itinerary - constrain max width for readability */}
+          <div className="flex-1 max-w-[700px] overflow-hidden flex flex-col">
             <MainItinerary
               selectedDayIndex={selectedDayIndex}
               setSelectedDayIndex={setSelectedDayIndex}
@@ -125,9 +122,9 @@ export default function ItineraryBuilder() {
             />
           </div>
 
-          {/* Right Panel - Map (Collapsible) */}
+          {/* Right Panel - Map (Collapsible) - slightly wider */}
           {isMapExpanded ? (
-            <div className="w-[280px] lg:w-[320px] xl:w-[380px] flex-shrink-0 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col">
+            <div className="w-[320px] lg:w-[380px] xl:w-[440px] flex-shrink-0 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col">
               <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Map</span>
                 <button

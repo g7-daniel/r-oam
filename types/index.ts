@@ -514,6 +514,7 @@ export interface PlaceResult {
   place_id: string;
   name: string;
   formatted_address: string;
+  vicinity?: string;
   geometry: {
     location: {
       lat: number;
@@ -529,6 +530,7 @@ export interface PlaceResult {
   opening_hours?: {
     open_now: boolean;
   };
+  price_level?: number;
 }
 
 export interface DirectionsResult {

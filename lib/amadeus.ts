@@ -7,6 +7,7 @@ import type {
   FlightSearchParams,
   HotelSearchParams,
 } from '@/types';
+import { filterByDistance } from '@/lib/utils/geo';
 
 const AMADEUS_BASE_URL = 'https://test.api.amadeus.com';
 
@@ -316,7 +317,10 @@ export async function searchRoundTripFlights(
 }
 
 export async function searchHotels(
-  params: HotelSearchParams
+  params: HotelSearchParams & {
+    destinationLat?: number;
+    destinationLng?: number;
+  }
 ): Promise<Hotel[]> {
   const token = await getAccessToken();
 
@@ -408,7 +412,7 @@ export async function searchHotels(
     HKD: 0.13,
   };
 
-  return offersData.data.map((offer) => {
+  let hotels = offersData.data.map((offer) => {
     const hotel = offer.hotel;
     const rawPrice = parseFloat(offer.offers[0]?.price.total || '0');
     const currency = offer.offers[0]?.price.currency || 'USD';
@@ -435,6 +439,20 @@ export async function searchHotels(
       longitude: hotel.longitude || 0,
     };
   });
+
+  // Filter by distance if coordinates provided (max 100km from destination)
+  if (params.destinationLat && params.destinationLng) {
+    const beforeCount = hotels.length;
+    hotels = filterByDistance(
+      hotels,
+      (h) => ({ lat: h.latitude, lng: h.longitude }),
+      { lat: params.destinationLat, lng: params.destinationLng },
+      100 // Max 100km from destination
+    );
+    console.log(`Amadeus: Filtered ${beforeCount} -> ${hotels.length} hotels by distance (100km max)`);
+  }
+
+  return hotels;
 }
 
 export async function getAirportAutocomplete(query: string): Promise<

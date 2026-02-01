@@ -190,6 +190,8 @@ export default function AddPlaceSearch({
     handleSearch(undefined, categoryId);
   };
 
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+
   const handleAddPlace = (place: PlaceResult) => {
     // Add to collection first
     const collectionType = place.category && ['dining', 'restaurant', 'cafe', 'cafes'].includes(place.category.toLowerCase())
@@ -217,7 +219,8 @@ export default function AddPlaceSearch({
     // Then schedule it
     scheduleItem(place.id, dayIndex);
 
-    onClose();
+    // Mark as added but don't close - let user add more
+    setAddedIds(prev => new Set(prev).add(place.id));
   };
 
   const displayPlaces = places.length > 0 ? places : popularPlaces;
@@ -387,12 +390,26 @@ export default function AddPlaceSearch({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleAddPlace(place);
+                    if (!addedIds.has(place.id)) {
+                      handleAddPlace(place);
+                    }
                   }}
-                  className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 bg-primary-500 text-white rounded-lg text-xs font-medium hover:bg-primary-600 transition-colors"
+                  disabled={addedIds.has(place.id)}
+                  className={clsx(
+                    "flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                    addedIds.has(place.id)
+                      ? "bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 cursor-default"
+                      : "bg-primary-500 text-white hover:bg-primary-600"
+                  )}
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add
+                  {addedIds.has(place.id) ? (
+                    'Added'
+                  ) : (
+                    <>
+                      <Plus className="w-3.5 h-3.5" />
+                      Add
+                    </>
+                  )}
                 </button>
               </div>
             );

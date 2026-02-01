@@ -262,6 +262,67 @@ export interface HotelRecommendation {
   sentimentScore: number;
   quotes: string[];
   subreddits: string[];
+  upvotes?: number;
+}
+
+// Minimum upvote threshold for quality filtering
+const MIN_UPVOTES = 20;
+
+// Generic hotel terms that aren't specific properties
+const GENERIC_HOTEL_TERMS = [
+  'party hostel', 'party hostels', 'on hostel', 'a hostel', 'the hostel',
+  'this hotel', 'that hotel', 'any hotel', 'some hotel', 'our hotel',
+  'all-inclusive resort', 'all inclusive resort', 'beach resort', 'city hotel',
+  'budget hotel', 'cheap hotel', 'nice hotel', 'good hotel', 'great hotel',
+  'local hotel', 'small hotel', 'big hotel', 'new hotel', 'old hotel',
+  'regular hotel', 'regular hotels', 'other hotel', 'same hotel', 'another hotel',
+  'different hostel', 'a different hostel', 'cheapest hotel', 'five-star hotel',
+  'five star hotel', 'four-star hotel', 'four star hotel', 'luxury hotel',
+  'destination hostel', 'nearby hotel', 'closest hotel', 'closest hostel',
+  'flights and hotel', 'flight and hotel', 'airbnb or hostel', 'hotel or hostel',
+  'hostel or hotel',
+];
+
+/**
+ * Validate that a string looks like a real hotel name (not a sentence or generic term)
+ */
+function isValidHotelName(name: string): boolean {
+  const trimmed = name.trim();
+  const words = trimmed.split(/\s+/);
+
+  // Too many words = likely a sentence
+  if (words.length > 6) return false;
+
+  // Too few characters = likely not a hotel
+  if (trimmed.length < 4) return false;
+
+  // Starts with common sentence starters or articles = not a hotel name
+  if (/^(You|I|We|They|The|This|That|It|My|Our|Your|If|When|Where|How|Why|What|Staying|Stay|An|All|A)\s/i.test(trimmed)) {
+    return false;
+  }
+
+  // Contains common sentence phrases = not a hotel
+  if (/\b(have to|need to|should|from|going to|want to|will be|would be)\b/i.test(trimmed)) {
+    return false;
+  }
+
+  // Reject generic hotel terms
+  const lowerName = trimmed.toLowerCase();
+  if (GENERIC_HOTEL_TERMS.some(term => lowerName === term || lowerName.startsWith(term + ' '))) {
+    return false;
+  }
+
+  // Only letters at start = might be valid
+  if (!/^[A-Z]/i.test(trimmed)) return false;
+
+  return true;
+}
+
+/**
+ * Normalize hotel name for deduplication
+ */
+function normalizeHotelName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 /**
@@ -294,53 +355,123 @@ export async function searchHotelRecommendations(
     quotes: string[];
     subreddits: Set<string>;
     totalScore: number;
+    totalUpvotes: number;
   }>();
 
-  // Common hotel chains and patterns to look for
+  // Hotel patterns - focused on explicit hotel mentions only
+  // REMOVED: overly permissive pattern that matched sentences
   const hotelPatterns = [
-    /(?:stay(?:ed)? at|recommend(?:ed)?|book(?:ed)?|love(?:d)?|tried)\s+(?:the\s+)?([A-Z][A-Za-z\s&']+(?:Hotel|Resort|Inn|Suites|Lodge|Hostel|B&B))/gi,
-    /([A-Z][A-Za-z\s&']+(?:Marriott|Hilton|Hyatt|Four Seasons|Ritz|Westin|Sheraton|Holiday Inn|Best Western|Radisson|Courtyard|Hampton))/gi,
-    /([A-Z][A-Za-z\s&']+)\s+(?:was|is)\s+(?:amazing|great|perfect|excellent|wonderful)/gi,
+    // "stayed at [Hotel Name]" - must end with hotel-related suffix
+    /(?:stay(?:ed|ing)? at|recommend(?:ed)?|book(?:ed)?|love(?:d)?|tried|staying at)\s+(?:the\s+)?([A-Z][A-Za-z\s&'-]{2,35}(?:Hotel|Resort|Inn|Suites|Lodge|Hostel|B&B|Villas?))/gi,
+    // Known brand names - must be followed by a hotel-related word or end of name
+    /\b((?:JW\s+)?Marriott(?:\s+\w+){0,3}|Hilton(?:\s+\w+){0,3}|Hyatt(?:\s+\w+){0,3}|Four Seasons(?:\s+\w+){0,3}|Ritz[- ]?Carlton(?:\s+\w+){0,3}|Westin(?:\s+\w+){0,3}|Sheraton(?:\s+\w+){0,3}|Holiday Inn(?:\s+\w+){0,3}|Best Western(?:\s+\w+){0,3}|Radisson(?:\s+\w+){0,3}|Courtyard(?:\s+\w+){0,3}|Hampton(?:\s+\w+){0,3}|St\.?\s*Regis(?:\s+\w+){0,3}|W\s+Hotel(?:\s+\w+){0,3}|Eden\s+Roc(?:\s+\w+){0,3}|Mandarin\s+Oriental(?:\s+\w+){0,3}|Peninsula(?:\s+\w+){0,3}|Amanera|Amanyara|Aman\s+\w+|Rosewood(?:\s+\w+){0,3}|Waldorf(?:\s+\w+){0,3}|Conrad(?:\s+\w+){0,3}|InterContinental(?:\s+\w+){0,3}|Sofitel(?:\s+\w+){0,3}|Fairmont(?:\s+\w+){0,3}|Shangri[- ]?La(?:\s+\w+){0,3}|Raffles(?:\s+\w+){0,3}|Belmond(?:\s+\w+){0,3}|Park Hyatt(?:\s+\w+){0,3}|Grand Hyatt(?:\s+\w+){0,3}|Andaz(?:\s+\w+){0,3}|Casa de Campo|Sanctuary Cap Cana|Excellence(?:\s+\w+){0,2}|Secrets(?:\s+\w+){0,2}|Dreams(?:\s+\w+){0,2}|Breathless(?:\s+\w+){0,2}|Zoetry(?:\s+\w+){0,2}|Barcelo(?:\s+\w+){0,2}|Iberostar(?:\s+\w+){0,3}|RIU(?:\s+\w+){0,2}|Hard Rock(?:\s+\w+){0,3}|Paradisus(?:\s+\w+){0,2})(?=\s|$|[,.])/gi,
   ];
+
+  // Build destination keywords for relevance check
+  // Require the main destination name to appear, not just partial words
+  const destLower = destination.toLowerCase();
+  // For multi-word destinations like "Dominican Republic", require the main identifying word
+  const destParts = destLower.split(/\s+/).filter(w => w.length > 4);
+  // Also extract potential key identifiers (first word of multi-word, or single word)
+  const primaryKeyword = destParts.length > 0 ? destParts[0] : destLower.split(/\s+/)[0];
 
   for (const post of allPosts) {
     const fullText = `${post.title} ${post.selftext}`;
+    const lowerText = fullText.toLowerCase();
+
+    // Check if post is relevant to the destination
+    // Must contain either the full destination name OR the primary keyword
+    const isRelevant = lowerText.includes(destLower) ||
+      (primaryKeyword.length > 4 && lowerText.includes(primaryKeyword));
+    if (!isRelevant) {
+      // Skip posts that don't mention the destination at all
+      continue;
+    }
 
     for (const pattern of hotelPatterns) {
       pattern.lastIndex = 0; // Reset regex
       let match;
       while ((match = pattern.exec(fullText)) !== null) {
         const hotelName = match[1].trim();
-        if (hotelName.length > 3 && hotelName.length < 50) {
-          const existing = hotelMentions.get(hotelName.toLowerCase()) || {
-            count: 0,
-            quotes: [],
-            subreddits: new Set(),
-            totalScore: 0,
-          };
 
-          existing.count++;
-          existing.subreddits.add(post.subreddit);
-          existing.totalScore += analyzeSentiment(fullText);
+        // Validate hotel name - skip sentences and invalid names
+        if (!isValidHotelName(hotelName)) continue;
+        if (hotelName.length < 4 || hotelName.length > 50) continue;
 
-          // Extract quote around the mention
-          const mentionIndex = fullText.indexOf(hotelName);
-          if (mentionIndex >= 0) {
-            const start = Math.max(0, mentionIndex - 50);
-            const end = Math.min(fullText.length, mentionIndex + hotelName.length + 100);
-            const quote = fullText.slice(start, end).trim();
-            if (quote.length > 20 && existing.quotes.length < 3) {
-              existing.quotes.push(quote);
+        // Normalize key for deduplication
+        const key = normalizeHotelName(hotelName);
+
+        const existing = hotelMentions.get(key) || {
+          count: 0,
+          quotes: [],
+          subreddits: new Set(),
+          totalScore: 0,
+          totalUpvotes: 0,
+        };
+
+        existing.count++;
+        existing.subreddits.add(post.subreddit);
+        existing.totalScore += analyzeSentiment(fullText);
+        existing.totalUpvotes += post.score;
+
+        // Strict relevance check: hotel must be associated with the destination
+        const lowerHotelName = hotelName.toLowerCase();
+        const selftextLower = post.selftext.toLowerCase();
+
+        // Option 1: Hotel name contains the destination (e.g., "Hilton Tokyo", "Paris Marriott")
+        const hotelContainsDest = lowerHotelName.includes(destLower) ||
+          (primaryKeyword.length > 4 && lowerHotelName.includes(primaryKeyword));
+
+        if (hotelContainsDest) {
+          // Hotel name includes destination - definitely relevant
+        } else {
+          // Option 2: Check if hotel and destination are in the same paragraph/section
+          // Split by double newlines (paragraphs) or single newlines (list items)
+          const paragraphs = post.selftext.split(/\n\n+|\n(?=[-*•]|\d+\.)/);
+          const hotelInSameParagraph = paragraphs.some(para => {
+            const lowerPara = para.toLowerCase();
+            const hasHotel = lowerPara.includes(lowerHotelName) ||
+              para.includes(hotelName); // Case-sensitive for brand names
+            const hasDest = lowerPara.includes(destLower) ||
+              (primaryKeyword.length > 4 && lowerPara.includes(primaryKeyword));
+            return hasHotel && hasDest;
+          });
+
+          // Option 3: Fallback - check close proximity (within 200 chars)
+          if (!hotelInSameParagraph) {
+            const hotelIndex = selftextLower.indexOf(lowerHotelName);
+            const destIndex = selftextLower.indexOf(destLower);
+            const primaryIndex = primaryKeyword.length > 4 ? selftextLower.indexOf(primaryKeyword) : -1;
+            const nearestDest = destIndex >= 0 ? destIndex : primaryIndex;
+
+            if (hotelIndex < 0 || nearestDest < 0) {
+              continue; // Hotel or destination not in body
+            }
+
+            const distance = Math.abs(hotelIndex - nearestDest);
+            if (distance > 200) {
+              continue; // Too far apart
             }
           }
-
-          hotelMentions.set(hotelName.toLowerCase(), existing);
         }
+
+        // Extract quote around the mention
+        const mentionIndex = fullText.indexOf(hotelName);
+        if (mentionIndex >= 0) {
+          const start = Math.max(0, mentionIndex - 50);
+          const end = Math.min(fullText.length, mentionIndex + hotelName.length + 100);
+          const quote = fullText.slice(start, end).trim();
+          if (quote.length > 20 && existing.quotes.length < 3) {
+            existing.quotes.push(quote);
+          }
+        }
+
+        hotelMentions.set(key, existing);
       }
     }
   }
 
-  // Convert to array and sort by mention count and sentiment
+  // Convert to array and sort by mention count, upvotes, and sentiment
   const recommendations: HotelRecommendation[] = Array.from(hotelMentions.entries())
     .map(([name, data]) => ({
       hotelName: name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
@@ -348,15 +479,36 @@ export async function searchHotelRecommendations(
       sentimentScore: data.count > 0 ? data.totalScore / data.count : 0,
       quotes: data.quotes,
       subreddits: Array.from(data.subreddits),
+      upvotes: data.totalUpvotes,
     }))
-    .filter(rec => rec.mentionCount >= 1 && rec.sentimentScore > 0)
+    .filter(rec => {
+      // Must have positive sentiment
+      if (rec.mentionCount < 1 || rec.sentimentScore <= 0) return false;
+
+      // Must meet minimum upvote threshold
+      if ((rec.upvotes || 0) < MIN_UPVOTES) return false;
+
+      // Hotel name must be at least 2 words (proper names) unless it's a known brand
+      const words = rec.hotelName.trim().split(/\s+/);
+      if (words.length < 2) {
+        // Single word is only OK if it's a recognized brand prefix
+        const knownBrands = ['marriott', 'hilton', 'hyatt', 'sheraton', 'westin', 'amanera', 'amanyara'];
+        if (!knownBrands.some(brand => rec.hotelName.toLowerCase().includes(brand))) {
+          return false;
+        }
+      }
+
+      return true;
+    })
     .sort((a, b) => {
-      // Sort by combination of mentions and sentiment
-      const scoreA = a.mentionCount * (1 + a.sentimentScore);
-      const scoreB = b.mentionCount * (1 + b.sentimentScore);
+      // Sort by combination of mentions, upvotes, and sentiment
+      const scoreA = (a.mentionCount * 10) + ((a.upvotes || 0) * 0.1) + (a.sentimentScore * 20);
+      const scoreB = (b.mentionCount * 10) + ((b.upvotes || 0) * 0.1) + (b.sentimentScore * 20);
       return scoreB - scoreA;
     })
     .slice(0, 10);
+
+  console.log(`Reddit hotels: Found ${recommendations.length} quality recommendations (filtered by ${MIN_UPVOTES}+ upvotes)`);
 
   return recommendations;
 }

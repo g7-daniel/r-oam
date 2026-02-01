@@ -27,11 +27,21 @@ export interface RedditHotel {
   description: string;
   priceRange?: string;
   estimatedPrice?: number;
+  priceEstimate?: number;
   subreddit?: string;
   upvotes?: number;
   url?: string;
   tags?: string[];
   matchScore?: number;
+  verified?: boolean;
+  lat?: number;
+  lng?: number;
+  rating?: number;
+  address?: string;
+  imageUrl?: string;
+  imageRef?: string;
+  priceLevel?: number;
+  mentionCount?: number;
 }
 
 interface HotelSnooChatProps {
@@ -43,6 +53,7 @@ interface HotelSnooChatProps {
 const QUESTIONS = [
   {
     id: 'budget',
+    multiSelect: false,
     question: "What's your budget per night?",
     options: [
       { value: 'budget', label: 'Budget', description: 'Under $150', icon: '$' },
@@ -53,6 +64,7 @@ const QUESTIONS = [
   },
   {
     id: 'style',
+    multiSelect: false,
     question: 'What type of stay?',
     options: [
       { value: 'resort', label: 'Resort', description: 'All-inclusive vibes' },
@@ -63,7 +75,8 @@ const QUESTIONS = [
   },
   {
     id: 'priority',
-    question: "What's most important?",
+    multiSelect: true, // Enable multi-select for priorities
+    question: "What matters most? (select all that apply)",
     options: [
       { value: 'beach', label: 'Beach Access', description: 'Steps from sand' },
       { value: 'pool', label: 'Amazing Pool', description: 'Pool vibes' },
@@ -76,10 +89,64 @@ const QUESTIONS = [
 export default function HotelSnooChat({ destinationName, onHotelsFound }: HotelSnooChatProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [foundCount, setFoundCount] = useState(0);
+
+  // Handle multi-select toggle
+  const handleMultiSelectToggle = (questionId: string, value: string) => {
+    const current = (answers[questionId] as string[]) || [];
+    const newValue = current.includes(value)
+      ? current.filter((v) => v !== value)
+      : [...current, value];
+    setAnswers({ ...answers, [questionId]: newValue });
+  };
+
+  // Handle continue for multi-select questions
+  const handleMultiSelectContinue = async () => {
+    const currentQuestion = QUESTIONS[currentStep];
+    const selectedValues = (answers[currentQuestion.id] as string[]) || [];
+
+    if (selectedValues.length === 0) return;
+
+    if (currentStep < QUESTIONS.length - 1) {
+      setCurrentStep(currentStep + 1);
+    } else {
+      await fetchRecommendations(answers);
+    }
+  };
+
+  // Fetch recommendations helper
+  const fetchRecommendations = async (finalAnswers: Record<string, string | string[]>) => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/reddit/hotels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          destination: destinationName,
+          preferences: finalAnswers,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const hotels = data.hotels || [];
+        setFoundCount(hotels.length);
+        setIsComplete(true);
+
+        // Notify parent to display hotels on the page
+        if (onHotelsFound && hotels.length > 0) {
+          onHotelsFound(hotels);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch Reddit hotel recommendations:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleAnswer = async (questionId: string, value: string) => {
     const newAnswers = { ...answers, [questionId]: value };
@@ -90,33 +157,7 @@ export default function HotelSnooChat({ destinationName, onHotelsFound }: HotelS
       setCurrentStep(currentStep + 1);
     } else {
       // All questions answered - fetch recommendations
-      setIsLoading(true);
-      try {
-        const response = await fetch('/api/reddit/hotels', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            destination: destinationName,
-            preferences: newAnswers,
-          }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const hotels = data.hotels || [];
-          setFoundCount(hotels.length);
-          setIsComplete(true);
-
-          // Notify parent to display hotels on the page
-          if (onHotelsFound && hotels.length > 0) {
-            onHotelsFound(hotels);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch Reddit hotel recommendations:', error);
-      } finally {
-        setIsLoading(false);
-      }
+      await fetchRecommendations(newAnswers);
     }
   };
 
@@ -230,29 +271,72 @@ export default function HotelSnooChat({ destinationName, onHotelsFound }: HotelS
 
             {/* Options */}
             <div className="grid grid-cols-2 gap-2">
-              {currentQuestion.options.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => handleAnswer(currentQuestion.id, option.value)}
-                  className="flex flex-col items-start p-3 bg-slate-50 dark:bg-slate-700/50 hover:bg-orange-50 dark:hover:bg-orange-900/30 border border-slate-200 dark:border-slate-600 hover:border-orange-300 dark:hover:border-orange-500 rounded-xl transition-all text-left group"
-                >
-                  <span className="font-medium text-sm text-slate-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400">
-                    {option.label}
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {option.description}
-                  </span>
-                  {'icon' in option && (
-                    <span className="text-[10px] text-green-600 dark:text-green-400 mt-1 font-medium">
-                      {option.icon}
+              {currentQuestion.options.map((option) => {
+                const isMultiSelect = currentQuestion.multiSelect;
+                const selectedValues = isMultiSelect
+                  ? ((answers[currentQuestion.id] as string[]) || [])
+                  : [];
+                const isSelected = isMultiSelect && selectedValues.includes(option.value);
+
+                return (
+                  <button
+                    key={option.value}
+                    onClick={() =>
+                      isMultiSelect
+                        ? handleMultiSelectToggle(currentQuestion.id, option.value)
+                        : handleAnswer(currentQuestion.id, option.value)
+                    }
+                    className={clsx(
+                      'flex flex-col items-start p-3 border rounded-xl transition-all text-left group relative',
+                      isSelected
+                        ? 'bg-orange-50 dark:bg-orange-900/30 border-orange-400 dark:border-orange-500 ring-2 ring-orange-500'
+                        : 'bg-slate-50 dark:bg-slate-700/50 hover:bg-orange-50 dark:hover:bg-orange-900/30 border-slate-200 dark:border-slate-600 hover:border-orange-300 dark:hover:border-orange-500'
+                    )}
+                  >
+                    {isSelected && (
+                      <div className="absolute top-2 right-2">
+                        <Check className="w-4 h-4 text-orange-500" />
+                      </div>
+                    )}
+                    <span className={clsx(
+                      'font-medium text-sm',
+                      isSelected
+                        ? 'text-orange-600 dark:text-orange-400'
+                        : 'text-slate-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400'
+                    )}>
+                      {option.label}
                     </span>
-                  )}
-                </button>
-              ))}
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {option.description}
+                    </span>
+                    {'icon' in option && (
+                      <span className="text-[10px] text-green-600 dark:text-green-400 mt-1 font-medium">
+                        {option.icon}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Skip option */}
-            {currentStep > 0 && (
+            {/* Continue button for multi-select */}
+            {currentQuestion.multiSelect && (
+              <button
+                onClick={handleMultiSelectContinue}
+                disabled={!answers[currentQuestion.id] || (answers[currentQuestion.id] as string[]).length === 0}
+                className={clsx(
+                  'w-full mt-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                  answers[currentQuestion.id] && (answers[currentQuestion.id] as string[]).length > 0
+                    ? 'bg-orange-500 text-white hover:bg-orange-600'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                )}
+              >
+                Continue →
+              </button>
+            )}
+
+            {/* Skip option - only for single-select questions */}
+            {!currentQuestion.multiSelect && currentStep > 0 && (
               <button
                 onClick={() => handleAnswer(currentQuestion.id, 'any')}
                 className="w-full mt-3 py-2 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"

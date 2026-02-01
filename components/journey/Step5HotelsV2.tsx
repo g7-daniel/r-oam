@@ -529,16 +529,53 @@ export default function Step5HotelsV2() {
         const hotels = data.hotels || [];
         setRedditHotels(hotels);
 
-        // Mark matching hotels in the main list
+        // Mark matching hotels in the main list AND add unmatched Reddit hotels
         if (hotels.length > 0) {
           const hotelNames = hotels.map((h: RedditHotel) => h.name.toLowerCase());
+
+          // Find existing hotels and mark them
           const updatedResults = activeDestination.hotels.results.map(hotel => ({
             ...hotel,
             isRedditRecommended: hotelNames.some((name: string) =>
               hotel.name.toLowerCase().includes(name) || name.includes(hotel.name.toLowerCase())
             ),
           }));
-          setHotelResults(activeDestination.destinationId, updatedResults);
+
+          // Find Reddit hotels that don't match existing hotels
+          const unmatchedRedditHotels = hotels.filter((rh: RedditHotel) => {
+            const rhName = rh.name.toLowerCase();
+            return !updatedResults.some(h =>
+              h.name.toLowerCase().includes(rhName.slice(0, 10)) ||
+              rhName.includes(h.name.toLowerCase().slice(0, 10))
+            );
+          });
+
+          // Convert unmatched Reddit hotels to HotelType and add to results
+          const nights = activeDestination.nights;
+          const convertedRedditHotels: HotelType[] = unmatchedRedditHotels.slice(0, 8).map((rh: RedditHotel, idx: number) => ({
+            id: rh.id || `reddit-${rh.name.toLowerCase().replace(/\s+/g, '-').slice(0, 30)}`,
+            name: rh.name,
+            address: `${activeDestination.place.name}`,
+            city: activeDestination.place.name,
+            countryCode: activeDestination.place.countryCode || 'XX',
+            stars: 4,
+            pricePerNight: rh.priceEstimate || 200,
+            totalPrice: (rh.priceEstimate || 200) * nights,
+            currency: 'USD',
+            imageUrl: HOTEL_IMAGES[idx % HOTEL_IMAGES.length],
+            amenities: ['wifi', 'pool', 'restaurant'],
+            distanceToCenter: 3.0,
+            lat: activeDestination.place.lat || 0,
+            lng: activeDestination.place.lng || 0,
+            guestRating: 8.5,
+            reviewCount: rh.mentionCount || 1,
+            isRedditRecommended: true,
+            source: 'reddit',
+            hasRealPricing: false,
+          }));
+
+          // Add Reddit hotels at the beginning of results
+          setHotelResults(activeDestination.destinationId, [...convertedRedditHotels, ...updatedResults]);
         }
       }
     } catch (error) {
@@ -848,224 +885,336 @@ export default function Step5HotelsV2() {
                   </button>
                 ))}
               </div>
-              {redditHotels.length > 0 && (
-                <p className="text-xs text-green-600 dark:text-green-400 mt-2">
-                  <Check className="w-3 h-3 inline mr-1" />
-                  Found {redditHotels.length} Reddit-recommended hotels - look for the orange badge!
-                </p>
-              )}
             </div>
           </div>
         </Card>
       )}
 
+      {/* Reddit Recommended Hotels Section - Compact horizontal scroll */}
+      {activeDestination && (() => {
+        // Filter Reddit hotels by quality (20+ upvotes) and apply same filters as main list
+        const qualityRedditHotels = redditHotels
+          .filter(h => (h.upvotes || 0) >= 20)
+          .filter(hotel => {
+            // Apply same filters as main hotel list
+            const estimatedPrice = hotel.priceEstimate || 200;
+            if (estimatedPrice < priceFilter[0] || estimatedPrice > priceFilter[1]) return false;
+            // Star filter based on price level
+            const estimatedStars = hotel.priceLevel ? Math.min(5, hotel.priceLevel + 2) : 4;
+            if (starFilter.length > 0 && !starFilter.includes(estimatedStars)) return false;
+            // Guest rating filter
+            const estimatedRating = hotel.rating ? hotel.rating * 2 : 8.5;
+            if (guestRatingFilter > 0 && estimatedRating < guestRatingFilter) return false;
+            return true;
+          })
+          .slice(0, 6); // Max 6 Reddit hotels
+
+        // Only show section if we have at least 3 quality hotels
+        if (qualityRedditHotels.length < 3) return null;
+
+        return (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <MessageCircle className="w-4 h-4 text-orange-500" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Reddit Picks
+            </span>
+            <span className="text-xs text-slate-400">
+              ({qualityRedditHotels.length})
+            </span>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+            {qualityRedditHotels
+              .map((hotel, idx) => {
+                const estimatedPrice = hotel.priceEstimate || (
+                  selectedSubreddits.has('fatfire') || selectedSubreddits.has('luxurytravel') ? 450 : 180
+                );
+                const nights = activeDestination.nights;
+                const hotelImage = hotel.imageUrl || HOTEL_IMAGES[idx % HOTEL_IMAGES.length];
+                const hotelAddress = hotel.address || activeDestination.place.name;
+
+                return (
+                  <div
+                    key={hotel.id || `reddit-${idx}`}
+                    className={clsx(
+                      "flex-shrink-0 w-56 bg-white dark:bg-slate-800 rounded-xl border overflow-hidden cursor-pointer hover:shadow-md transition-shadow",
+                      hotel.verified
+                        ? "border-green-300 dark:border-green-700"
+                        : "border-orange-200 dark:border-orange-800/50"
+                    )}
+                    onClick={() => {
+                      const hotelData: HotelType = {
+                        id: hotel.id || `reddit-${hotel.name.toLowerCase().replace(/\s+/g, '-')}`,
+                        name: hotel.name,
+                        address: hotelAddress,
+                        city: activeDestination.place.name,
+                        countryCode: activeDestination.place.countryCode || 'XX',
+                        stars: hotel.priceLevel ? Math.min(5, hotel.priceLevel + 2) : 4,
+                        pricePerNight: estimatedPrice,
+                        totalPrice: estimatedPrice * nights,
+                        currency: 'USD',
+                        imageUrl: hotelImage,
+                        amenities: ['wifi', 'pool', 'restaurant'],
+                        distanceToCenter: 2.0,
+                        lat: hotel.lat || activeDestination.place.lat || 0,
+                        lng: hotel.lng || activeDestination.place.lng || 0,
+                        guestRating: hotel.rating ? hotel.rating * 2 : 8.5,
+                        reviewCount: hotel.mentionCount || 1,
+                        isRedditRecommended: true,
+                        source: 'reddit',
+                        hasRealPricing: false,
+                      };
+                      setModalHotel(hotelData);
+                    }}
+                  >
+                    {/* Compact image */}
+                    <div className="relative h-24 bg-slate-100 dark:bg-slate-700">
+                      <img
+                        src={hotelImage}
+                        alt={hotel.name}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const img = e.target as HTMLImageElement;
+                          img.src = HOTEL_IMAGES[idx % HOTEL_IMAGES.length];
+                        }}
+                      />
+                      <div className="absolute top-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 bg-orange-500/90 text-white text-[10px] font-medium rounded backdrop-blur-sm">
+                        <span>▲</span>
+                        {hotel.upvotes?.toLocaleString() || hotel.mentionCount || '?'}
+                      </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-2.5">
+                      <h4 className="font-medium text-slate-900 dark:text-white text-sm line-clamp-1 mb-1">
+                        {hotel.name}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2 line-clamp-1">
+                        {hotelAddress}
+                      </p>
+                      <div className="flex items-baseline justify-between">
+                        <div>
+                          <span className="text-base font-bold text-slate-900 dark:text-white">
+                            ${estimatedPrice}
+                          </span>
+                          <span className="text-[10px] text-slate-400 ml-0.5">/night</span>
+                        </div>
+                        <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
+                          ${estimatedPrice * nights} total
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+        );
+      })()}
+
       {activeDestination && (
         <div className="grid lg:grid-cols-4 gap-6">
-          {/* Filters */}
+          {/* Filters - Compact Modern Design */}
           <div className="lg:col-span-1">
-            <Card className="sticky top-4 max-h-[calc(100vh-120px)] overflow-y-auto">
-              <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Filters</h3>
-
-              {/* Price range */}
-              <div className="mb-5 pb-5 border-b border-slate-100 dark:border-slate-700">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
-                  Price per night
-                </label>
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                    <input
-                      type="number"
-                      value={priceFilter[0]}
-                      onChange={(e) => setPriceFilter([parseInt(e.target.value) || 0, priceFilter[1]])}
-                      className="w-20 pl-5 pr-2 py-1.5 border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded text-sm"
-                      min={0}
-                    />
-                  </div>
-                  <span className="text-slate-400">-</span>
-                  <div className="relative">
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                    <input
-                      type="number"
-                      value={priceFilter[1]}
-                      onChange={(e) => setPriceFilter([priceFilter[0], parseInt(e.target.value) || 2000])}
-                      className="w-20 pl-5 pr-2 py-1.5 border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded text-sm"
-                      min={0}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Star rating */}
-              <div className="mb-5 pb-5 border-b border-slate-100 dark:border-slate-700">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
-                  Star Rating
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {[5, 4, 3, 2, 1].map((stars) => (
+            <div className="sticky top-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[calc(100vh-120px)] overflow-y-auto">
+              {/* Filter Header */}
+              <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-slate-900 dark:text-white text-sm">Filters</h3>
+                  {(starFilter.length > 0 || priceFilter[0] > 0 || priceFilter[1] < 2000 || guestRatingFilter > 0 || amenityFilters.length > 0 || freeCancellationOnly || redditRecommendedOnly || propertyTypeFilter.length > 0 || distanceFilter < 10) && (
                     <button
-                      key={stars}
-                      onClick={() => toggleStarFilter(stars)}
-                      className={clsx(
-                        'flex items-center gap-1 px-3 py-1.5 rounded-full text-sm transition-all',
-                        starFilter.includes(stars)
-                          ? 'bg-primary-500 text-white'
-                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-                      )}
+                      onClick={() => {
+                        setStarFilter([]);
+                        setPriceFilter([0, 2000]);
+                        setGuestRatingFilter(0);
+                        setAmenityFilters([]);
+                        setFreeCancellationOnly(false);
+                        setRedditRecommendedOnly(false);
+                        setPropertyTypeFilter([]);
+                        setDistanceFilter(10);
+                      }}
+                      className="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
                     >
-                      <Star className="w-3 h-3" />
-                      {stars}
+                      Reset all
                     </button>
-                  ))}
+                  )}
                 </div>
               </div>
 
-              {/* Guest rating */}
-              <div className="mb-5 pb-5 border-b border-slate-100 dark:border-slate-700">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
-                  Guest Rating
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {[{ label: 'Any', value: 0 }, { label: '7+', value: 7 }, { label: '8+', value: 8 }, { label: '9+', value: 9 }].map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => setGuestRatingFilter(option.value)}
-                      className={clsx(
-                        'px-3 py-1.5 rounded-full text-sm transition-all',
-                        guestRatingFilter === option.value
-                          ? 'bg-primary-500 text-white'
-                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Property type */}
-              <div className="mb-5 pb-5 border-b border-slate-100 dark:border-slate-700">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
-                  Property Type
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {PROPERTY_TYPES.map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => setPropertyTypeFilter((prev) =>
-                        prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
-                      )}
-                      className={clsx(
-                        'px-3 py-1.5 rounded-full text-sm transition-all capitalize',
-                        propertyTypeFilter.includes(type)
-                          ? 'bg-primary-500 text-white'
-                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-                      )}
-                    >
-                      {type}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Distance from center */}
-              <div className="mb-5 pb-5 border-b border-slate-100 dark:border-slate-700">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
-                  Distance from center: {distanceFilter} km
-                </label>
-                <input
-                  type="range"
-                  min={1}
-                  max={10}
-                  value={distanceFilter}
-                  onChange={(e) => setDistanceFilter(parseInt(e.target.value))}
-                  className="w-full h-2 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
-                />
-                <div className="flex justify-between text-xs text-slate-400 mt-1">
-                  <span>1 km</span>
-                  <span>10 km</span>
-                </div>
-              </div>
-
-              {/* Amenities */}
-              <div className="mb-5 pb-5 border-b border-slate-100 dark:border-slate-700">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
-                  Amenities
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {['wifi', 'pool', 'gym', 'spa', 'breakfast', 'parking', 'restaurant', 'pet_friendly'].map((amenity) => (
-                    <label
-                      key={amenity}
-                      className="flex items-center gap-2 cursor-pointer"
-                    >
+              <div className="p-4 space-y-5">
+                {/* Price range - Compact */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 block">
+                    Price / Night
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
                       <input
-                        type="checkbox"
-                        checked={amenityFilters.includes(amenity)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setAmenityFilters((prev) => [...prev, amenity]);
-                          } else {
+                        type="number"
+                        value={priceFilter[0]}
+                        onChange={(e) => setPriceFilter([parseInt(e.target.value) || 0, priceFilter[1]])}
+                        className="w-full pl-6 pr-2 py-2 border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        min={0}
+                        placeholder="Min"
+                      />
+                    </div>
+                    <span className="text-slate-300 dark:text-slate-600">—</span>
+                    <div className="relative flex-1">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                      <input
+                        type="number"
+                        value={priceFilter[1]}
+                        onChange={(e) => setPriceFilter([priceFilter[0], parseInt(e.target.value) || 2000])}
+                        className="w-full pl-6 pr-2 py-2 border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        min={0}
+                        placeholder="Max"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Star rating - Horizontal pills */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 block">
+                    Star Rating
+                  </label>
+                  <div className="flex gap-1">
+                    {[5, 4, 3].map((stars) => (
+                      <button
+                        key={stars}
+                        onClick={() => toggleStarFilter(stars)}
+                        className={clsx(
+                          'flex-1 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-medium transition-all',
+                          starFilter.includes(stars)
+                            ? 'bg-primary-500 text-white'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                        )}
+                      >
+                        {stars}<Star className="w-3 h-3 fill-current" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Guest rating - Segmented control */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 block">
+                    Guest Rating
+                  </label>
+                  <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
+                    {[{ label: 'Any', value: 0 }, { label: '7+', value: 7 }, { label: '8+', value: 8 }, { label: '9+', value: 9 }].map((option) => (
+                      <button
+                        key={option.value}
+                        onClick={() => setGuestRatingFilter(option.value)}
+                        className={clsx(
+                          'flex-1 py-1.5 rounded-md text-xs font-medium transition-all',
+                          guestRatingFilter === option.value
+                            ? 'bg-white dark:bg-slate-600 text-primary-600 dark:text-primary-400 shadow-sm'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Distance slider - Clean */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                      Distance
+                    </label>
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      {distanceFilter} km
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={distanceFilter}
+                    onChange={(e) => setDistanceFilter(parseInt(e.target.value))}
+                    className="w-full h-1.5 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                  />
+                </div>
+
+                {/* Amenities - Compact grid */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 block">
+                    Amenities
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {['wifi', 'pool', 'gym', 'spa', 'breakfast', 'parking'].map((amenity) => (
+                      <button
+                        key={amenity}
+                        onClick={() => {
+                          if (amenityFilters.includes(amenity)) {
                             setAmenityFilters((prev) => prev.filter((a) => a !== amenity));
+                          } else {
+                            setAmenityFilters((prev) => [...prev, amenity]);
                           }
                         }}
-                        className="w-4 h-4 rounded border-slate-300 text-primary-500 focus:ring-primary-500"
-                      />
-                      <span className="text-sm text-slate-600 dark:text-slate-300 capitalize">
-                        {amenity.replace('_', ' ')}
-                      </span>
-                    </label>
-                  ))}
+                        className={clsx(
+                          'px-2.5 py-1 rounded-full text-xs font-medium transition-all capitalize',
+                          amenityFilters.includes(amenity)
+                            ? 'bg-primary-500 text-white'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
+                        )}
+                      >
+                        {amenity}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Quick toggles */}
+                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <div className={clsx(
+                      'w-9 h-5 rounded-full transition-colors relative',
+                      freeCancellationOnly ? 'bg-primary-500' : 'bg-slate-200 dark:bg-slate-600'
+                    )}>
+                      <div className={clsx(
+                        'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform',
+                        freeCancellationOnly ? 'translate-x-4' : 'translate-x-0.5'
+                      )} />
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={freeCancellationOnly}
+                      onChange={(e) => setFreeCancellationOnly(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <span className="text-sm text-slate-600 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">
+                      Free cancellation
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <div className={clsx(
+                      'w-9 h-5 rounded-full transition-colors relative',
+                      redditRecommendedOnly ? 'bg-orange-500' : 'bg-slate-200 dark:bg-slate-600'
+                    )}>
+                      <div className={clsx(
+                        'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform',
+                        redditRecommendedOnly ? 'translate-x-4' : 'translate-x-0.5'
+                      )} />
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={redditRecommendedOnly}
+                      onChange={(e) => setRedditRecommendedOnly(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <span className="text-sm text-slate-600 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white transition-colors flex items-center gap-1.5">
+                      <MessageCircle className="w-3.5 h-3.5 text-orange-500" />
+                      Reddit Picks Only
+                    </span>
+                  </label>
                 </div>
               </div>
-
-              {/* Quick filters */}
-              <div className="mb-5 space-y-2">
-                <label
-                  className="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    checked={freeCancellationOnly}
-                    onChange={(e) => setFreeCancellationOnly(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary-500 focus:ring-primary-500"
-                  />
-                  <span className="text-sm text-slate-700 dark:text-slate-300 font-medium">Free cancellation</span>
-                </label>
-                <label
-                  className="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    checked={redditRecommendedOnly}
-                    onChange={(e) => setRedditRecommendedOnly(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-orange-500 focus:ring-orange-500"
-                  />
-                  <span className="text-sm text-slate-700 dark:text-slate-300 font-medium flex items-center gap-1">
-                    <MessageCircle className="w-3.5 h-3.5 text-orange-500" />
-                    Reddit Recommended
-                  </span>
-                </label>
-              </div>
-
-              {/* Clear filters */}
-              {(starFilter.length > 0 || priceFilter[0] > 0 || priceFilter[1] < 2000 || guestRatingFilter > 0 || amenityFilters.length > 0 || freeCancellationOnly || redditRecommendedOnly || propertyTypeFilter.length > 0 || distanceFilter < 10) && (
-                <button
-                  onClick={() => {
-                    setStarFilter([]);
-                    setPriceFilter([0, 2000]);
-                    setGuestRatingFilter(0);
-                    setAmenityFilters([]);
-                    setFreeCancellationOnly(false);
-                    setRedditRecommendedOnly(false);
-                    setPropertyTypeFilter([]);
-                    setDistanceFilter(10);
-                  }}
-                  className="w-full py-2.5 mt-2 text-sm bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-medium rounded-lg transition-colors cursor-pointer active:scale-95"
-                >
-                  Clear all filters
-                </button>
-              )}
-            </Card>
+            </div>
           </div>
 
           {/* Hotel list */}
@@ -1130,12 +1279,28 @@ export default function Step5HotelsV2() {
                     >
                       <div className="flex gap-4">
                         {/* Image */}
-                        <div className="w-48 h-36 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 flex-shrink-0">
+                        <div className="relative w-48 h-36 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 flex-shrink-0">
                           <img
                             src={hotel.imageUrl}
                             alt={hotel.name}
                             className="w-full h-full object-cover"
+                            onError={(e) => {
+                              const img = e.target as HTMLImageElement;
+                              img.src = HOTEL_IMAGES[Math.floor(Math.random() * HOTEL_IMAGES.length)];
+                            }}
                           />
+                          {/* Source badge */}
+                          <div className="absolute top-2 left-2">
+                            {hotel.source === 'amadeus' ? (
+                              <span className="px-1.5 py-0.5 bg-green-500/90 text-white text-[10px] font-medium rounded backdrop-blur-sm">
+                                Live Price
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 bg-slate-500/80 text-white text-[10px] font-medium rounded backdrop-blur-sm">
+                                Est. Price
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         {/* Details */}
