@@ -126,6 +126,11 @@ export const DESTINATION_SUBREDDITS: Record<string, string[]> = {
   'Jamaica': ['Jamaica', 'travel', 'caribbean', 'beaches'],
   'Puerto Rico': ['PuertoRico', 'travel', 'caribbean', 'beaches'],
   'Dominican Republic': ['DominicanRepublic', 'travel', 'caribbean', 'beaches'],
+  'Punta Cana': ['DominicanRepublic', 'travel', 'caribbean', 'beaches', 'resorts'],
+  'Santo Domingo': ['DominicanRepublic', 'travel', 'caribbean', 'history'],
+  'Puerto Plata': ['DominicanRepublic', 'travel', 'caribbean', 'beaches'],
+  'La Romana': ['DominicanRepublic', 'travel', 'caribbean', 'golf'],
+  'Samana': ['DominicanRepublic', 'travel', 'caribbean', 'whales', 'nature'],
   'Cuba': ['cuba', 'travel', 'caribbean', 'backpacking'],
 
   // South Asia

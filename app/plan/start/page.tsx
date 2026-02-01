@@ -286,35 +286,35 @@ export default function StartPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-sky-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800 transition-colors duration-300">
-      <div className="max-w-3xl mx-auto px-4 py-12">
-        {/* Header */}
-        <div className="text-center mb-10">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Sparkles className="w-8 h-8 text-primary-500" />
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Plan a Trip</h1>
+      <div className="max-w-3xl mx-auto px-3 sm:px-4 py-6 sm:py-12">
+        {/* Header - compact on mobile */}
+        <div className="text-center mb-6 sm:mb-10">
+          <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-2 sm:mb-4">
+            <Sparkles className="w-6 h-6 sm:w-8 sm:h-8 text-primary-500" />
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">Plan a Trip</h1>
           </div>
-          <p className="text-slate-600 dark:text-slate-400">
+          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 hidden sm:block">
             Build your perfect itinerary with AI-powered recommendations
           </p>
         </div>
 
         {/* Destination Section */}
-        <Card className="mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <MapPin className="w-5 h-5 text-primary-500" />
-            <h2 className="font-semibold text-slate-900 dark:text-white">Where to?</h2>
+        <Card className="mb-4 sm:mb-6 p-4 sm:p-6">
+          <div className="flex items-center gap-2 mb-3 sm:mb-4">
+            <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-primary-500" />
+            <h2 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">Where to?</h2>
           </div>
 
           {/* Current Destinations */}
           {destinations.length > 0 && (
-            <div className="space-y-3 mb-4">
+            <div className="space-y-2 sm:space-y-3 mb-4">
               {destinations.map((dest, index) => (
                 <div
                   key={dest.destinationId}
-                  className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl"
+                  className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg sm:rounded-xl"
                 >
                   {/* Destination image */}
-                  <div className="w-14 h-14 rounded-lg overflow-hidden bg-slate-200 dark:bg-slate-600 flex-shrink-0">
+                  <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-lg overflow-hidden bg-slate-200 dark:bg-slate-600 flex-shrink-0">
                     {dest.heroImageUrl && (
                       <img
                         src={dest.heroImageUrl}
@@ -372,16 +372,16 @@ export default function StartPage() {
 
           {/* Search/Add destination */}
           {showSearch ? (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
                 <input
                   ref={inputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search any city, country, or region..."
-                  className="w-full pl-12 pr-12 py-3 border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder-slate-400 dark:placeholder-slate-400"
+                  placeholder="Search city, country, region..."
+                  className="w-full pl-9 sm:pl-12 pr-10 sm:pr-12 py-2.5 sm:py-3 text-sm sm:text-base border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg sm:rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder-slate-400 dark:placeholder-slate-400"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleCustomDestination();
                     if (e.key === 'Escape') {
@@ -419,13 +419,17 @@ export default function StartPage() {
                       <Loader2 className="w-4 h-4 text-primary-500 animate-spin" />
                     </div>
                   )}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
                     {searchResults.slice(0, 8).map((dest, index) => (
                       <button
                         key={`${dest.name}-${index}`}
                         type="button"
                         onClick={() => handleAddDestination(dest)}
-                        className="relative group overflow-hidden rounded-xl aspect-[4/3] bg-gradient-to-br from-primary-400 to-primary-600"
+                        className={clsx(
+                          "relative group overflow-hidden rounded-lg sm:rounded-xl aspect-[4/3] bg-gradient-to-br from-primary-400 to-primary-600",
+                          // Hide items 5-8 on mobile (show only first 4)
+                          index >= 4 && "hidden sm:block"
+                        )}
                       >
                         <img
                           src={dest.imageUrl || `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop&q=80`}
@@ -444,9 +448,9 @@ export default function StartPage() {
                           }}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-                        <div className="absolute bottom-0 left-0 right-0 p-2 text-left">
-                          <p className="font-medium text-white text-sm">{dest.name}</p>
-                          <p className="text-xs text-white/80">{dest.country}</p>
+                        <div className="absolute bottom-0 left-0 right-0 p-1.5 sm:p-2 text-left">
+                          <p className="font-medium text-white text-xs sm:text-sm leading-tight">{dest.name}</p>
+                          <p className="text-[10px] sm:text-xs text-white/80">{dest.country}</p>
                         </div>
                       </button>
                     ))}
@@ -471,9 +475,9 @@ export default function StartPage() {
             <button
               type="button"
               onClick={() => setShowSearch(true)}
-              className="w-full p-4 border-2 border-dashed border-slate-200 dark:border-slate-600 rounded-xl text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all flex items-center justify-center gap-2"
+              className="w-full p-3 sm:p-4 border-2 border-dashed border-slate-200 dark:border-slate-600 rounded-lg sm:rounded-xl text-sm sm:text-base text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all flex items-center justify-center gap-1.5 sm:gap-2"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
               <span>Add another destination</span>
             </button>
           )}
@@ -496,10 +500,10 @@ export default function StartPage() {
         </Card>
 
         {/* Dates Section - Required */}
-        <Card className="mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Moon className="w-5 h-5 text-primary-500" />
-            <h2 className="font-semibold text-slate-900 dark:text-white">When are you traveling?</h2>
+        <Card className="mb-4 sm:mb-6 p-4 sm:p-6">
+          <div className="flex items-center gap-2 mb-3 sm:mb-4">
+            <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-primary-500" />
+            <h2 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">When are you traveling?</h2>
           </div>
 
           <DateRangePicker
@@ -519,46 +523,46 @@ export default function StartPage() {
         </Card>
 
         {/* Trip Style Tags */}
-        <Card className="mb-6">
-          <div className="flex items-center justify-between mb-4">
+        <Card className="mb-4 sm:mb-6 p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-primary-500" />
-              <h2 className="font-semibold text-slate-900 dark:text-white">Trip Style</h2>
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-primary-500" />
+              <h2 className="text-sm sm:text-base font-semibold text-slate-900 dark:text-white">Trip Style</h2>
             </div>
-            <span className="text-sm text-slate-400">(optional)</span>
+            <span className="text-xs sm:text-sm text-slate-400">(optional)</span>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2">
             {TRIP_STYLE_TAGS.map((tag) => (
               <button
                 key={tag.id}
                 type="button"
                 onClick={() => handleStyleTagToggle(tag.id)}
                 className={clsx(
-                  'px-4 py-2 rounded-full text-sm font-medium transition-all',
+                  'px-3 py-1.5 sm:px-4 sm:py-2 rounded-full text-xs sm:text-sm font-medium transition-all',
                   selectedStyleTags.includes(tag.id)
                     ? 'bg-primary-500 text-white'
                     : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                 )}
               >
-                <span className="mr-1">{tag.icon}</span>
+                <span className="mr-0.5 sm:mr-1">{tag.icon}</span>
                 {tag.label}
               </button>
             ))}
           </div>
         </Card>
 
-        {/* Invite Tripmates */}
-        <Card className="mb-8">
+        {/* Invite Tripmates - compact link on mobile, card on desktop */}
+        <div className="mb-6 sm:mb-8">
           <button
             type="button"
             onClick={() => setShowInviteModal(true)}
-            className="w-full flex items-center justify-center gap-2 py-3 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors"
+            className="w-full flex items-center justify-center gap-1.5 sm:gap-2 py-2 sm:py-3 text-sm sm:text-base text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors sm:bg-white sm:dark:bg-slate-800 sm:rounded-xl sm:shadow-sm sm:border sm:border-slate-100 sm:dark:border-slate-700"
           >
-            <Users className="w-5 h-5" />
+            <Users className="w-4 h-4 sm:w-5 sm:h-5" />
             <span className="font-medium">+ Invite tripmates</span>
           </button>
-        </Card>
+        </div>
 
         {/* Start Planning Button */}
         <Button
