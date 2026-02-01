@@ -271,7 +271,7 @@ export default function ScheduledItem({
           <div
             onClick={() => setShowDetailModal(true)}
             className={clsx(
-              'group flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer',
+              'group flex items-start gap-2 sm:gap-3 p-2 sm:p-3 rounded-xl border transition-all cursor-pointer',
               snapshot.isDragging
                 ? 'shadow-lg border-primary-300 dark:border-primary-500 bg-white dark:bg-slate-800 rotate-1'
                 : isRestaurant
@@ -279,17 +279,17 @@ export default function ScheduledItem({
                 : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md'
             )}
           >
-            {/* Drag handle */}
+            {/* Drag handle - hidden on small mobile */}
             <div
               {...provided.dragHandleProps}
-              className="flex-shrink-0 p-1 text-slate-300 dark:text-slate-500 hover:text-slate-500 dark:hover:text-slate-300 cursor-grab mt-1"
+              className="hidden sm:flex flex-shrink-0 p-1 text-slate-300 dark:text-slate-500 hover:text-slate-500 dark:hover:text-slate-300 cursor-grab mt-1"
             >
               <GripVertical className="w-4 h-4" />
             </div>
 
             {/* Number badge */}
             <div className={clsx(
-              'flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold',
+              'flex-shrink-0 w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-bold mt-1',
               isRestaurant
                 ? 'bg-amber-500 text-white'
                 : 'bg-primary-500 text-white'
@@ -298,9 +298,9 @@ export default function ScheduledItem({
             </div>
 
             {/* Photo thumbnail with fallback initial */}
-            <div className="w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900/50 dark:to-primary-800/50 relative">
+            <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900/50 dark:to-primary-800/50 relative">
               {/* Fallback initial - always rendered behind */}
-              <span className="absolute inset-0 flex items-center justify-center text-primary-400 dark:text-primary-300 font-bold text-lg z-0">
+              <span className="absolute inset-0 flex items-center justify-center text-primary-400 dark:text-primary-300 font-bold text-sm sm:text-lg z-0">
                 {item.name?.charAt(0)?.toUpperCase() || '?'}
               </span>
               {/* Image on top - hides on error to reveal initial */}
@@ -318,12 +318,12 @@ export default function ScheduledItem({
 
             {/* Content */}
             <div className="flex-1 min-w-0">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">
+              <div className="flex items-start justify-between gap-1 sm:gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
                     {item.name}
                   </p>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  <div className="flex flex-wrap items-center gap-x-1.5 sm:gap-x-2 gap-y-1 mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-slate-500 dark:text-slate-400">
                     {/* Rating */}
                     {item.rating && (
                       <span className="flex items-center gap-0.5">
@@ -356,8 +356,8 @@ export default function ScheduledItem({
                     )}
                   </div>
 
-                  {/* Opening hours */}
-                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                  {/* Opening hours - hidden on very small screens */}
+                  <p className="hidden sm:block text-xs text-slate-400 dark:text-slate-500 mt-1">
                     {getHoursDisplay()}
                   </p>
 
@@ -424,12 +424,15 @@ export default function ScheduledItem({
                   )}
                 </div>
 
-                {/* Remove button */}
+                {/* Remove button - always visible on mobile */}
                 <button
-                  onClick={() => unscheduleItem(item.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    unscheduleItem(item.id);
+                  }}
+                  className="sm:opacity-0 sm:group-hover:opacity-100 p-1 sm:p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all flex-shrink-0"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </button>
               </div>
             </div>

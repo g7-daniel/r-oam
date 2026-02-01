@@ -215,18 +215,18 @@ export default function CollectionsPanel() {
                           snapshot.isDragging && 'shadow-lg border-primary-300 dark:border-primary-500 rotate-2'
                         )}
                       >
-                        {/* Drag handle */}
+                        {/* Drag handle - hidden on mobile */}
                         <div
                           {...provided.dragHandleProps}
-                          className="flex-shrink-0 p-1 text-slate-300 dark:text-slate-500 hover:text-slate-500 dark:hover:text-slate-300 cursor-grab"
+                          className="hidden sm:flex flex-shrink-0 p-1 text-slate-300 dark:text-slate-500 hover:text-slate-500 dark:hover:text-slate-300 cursor-grab"
                         >
                           <GripVertical className="w-4 h-4" />
                         </div>
 
                         {/* Image with fallback initial */}
-                        <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900/50 dark:to-primary-800/50 relative">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900/50 dark:to-primary-800/50 relative">
                           {/* Fallback initial - always rendered behind */}
-                          <span className="absolute inset-0 flex items-center justify-center text-primary-400 dark:text-primary-300 font-bold text-base z-0">
+                          <span className="absolute inset-0 flex items-center justify-center text-primary-400 dark:text-primary-300 font-bold text-sm sm:text-base z-0">
                             {item.name?.charAt(0)?.toUpperCase() || '?'}
                           </span>
                           {/* Image on top - hides on error to reveal initial */}
@@ -244,8 +244,8 @@ export default function CollectionsPanel() {
 
                         {/* Content */}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
+                          <div className="flex items-start justify-between gap-1 sm:gap-2">
+                            <div className="min-w-0 flex-1">
                               {/* Reddit source badge */}
                               {item.source?.type === 'reddit' && item.source.subreddit && (
                                 <div className="flex items-center gap-1.5 mb-0.5">
@@ -258,20 +258,20 @@ export default function CollectionsPanel() {
                                   </span>
                                 </div>
                               )}
-                              <p className="font-medium text-sm text-slate-900 dark:text-white truncate">
+                              <p className="font-medium text-xs sm:text-sm text-slate-900 dark:text-white truncate">
                                 {item.name}
                               </p>
-                              <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                              <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 text-[10px] sm:text-xs text-slate-500 dark:text-slate-400">
                                 <span>{getCategoryIcon(item.category)}</span>
                                 {item.rating && (
                                   <span className="flex items-center gap-0.5">
-                                    <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                                    <Star className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-400 fill-amber-400" />
                                     {item.rating.toFixed(1)}
                                   </span>
                                 )}
                                 {item.durationMinutes && (
                                   <span className="flex items-center gap-0.5">
-                                    <Clock className="w-3 h-3" />
+                                    <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                                     {item.durationMinutes >= 60
                                       ? `${Math.floor(item.durationMinutes / 60)}h`
                                       : `${item.durationMinutes}m`}
@@ -280,12 +280,12 @@ export default function CollectionsPanel() {
                               </div>
                             </div>
 
-                            {/* Remove button */}
+                            {/* Remove button - always visible on mobile */}
                             <button
                               onClick={() => removeFromCollection(activeCollection, item.id)}
-                              className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-all"
+                              className="sm:opacity-0 sm:group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-all flex-shrink-0"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                             </button>
                           </div>
                         </div>

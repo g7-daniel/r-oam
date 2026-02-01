@@ -82,14 +82,14 @@ export default function MobileItineraryBuilder({
 
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
-      <div className="h-screen flex flex-col bg-slate-50">
+      <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-900">
         {/* Compact header for mobile */}
         <TripHeader />
 
         {/* Main content area */}
         <div className="flex-1 overflow-hidden">
           {activeTab === 'collections' && (
-            <div className="h-full bg-white">
+            <div className="h-full bg-white dark:bg-slate-800">
               <CollectionsPanel />
             </div>
           )}
@@ -118,15 +118,15 @@ export default function MobileItineraryBuilder({
         </div>
 
         {/* Bottom tab bar */}
-        <div className="flex-shrink-0 bg-white border-t border-slate-200 safe-area-bottom">
+        <div className="flex-shrink-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 safe-area-bottom">
           <div className="flex">
             <button
               onClick={() => setActiveTab('collections')}
               className={clsx(
                 'flex-1 flex flex-col items-center gap-1 py-3 transition-colors',
                 activeTab === 'collections'
-                  ? 'text-primary-600'
-                  : 'text-slate-400'
+                  ? 'text-primary-600 dark:text-primary-400'
+                  : 'text-slate-400 dark:text-slate-500'
               )}
             >
               <FolderHeart className="w-5 h-5" />
@@ -138,8 +138,8 @@ export default function MobileItineraryBuilder({
               className={clsx(
                 'flex-1 flex flex-col items-center gap-1 py-3 transition-colors',
                 activeTab === 'itinerary'
-                  ? 'text-primary-600'
-                  : 'text-slate-400'
+                  ? 'text-primary-600 dark:text-primary-400'
+                  : 'text-slate-400 dark:text-slate-500'
               )}
             >
               <Calendar className="w-5 h-5" />
@@ -151,8 +151,8 @@ export default function MobileItineraryBuilder({
               className={clsx(
                 'flex-1 flex flex-col items-center gap-1 py-3 transition-colors',
                 activeTab === 'map'
-                  ? 'text-primary-600'
-                  : 'text-slate-400'
+                  ? 'text-primary-600 dark:text-primary-400'
+                  : 'text-slate-400 dark:text-slate-500'
               )}
             >
               <Map className="w-5 h-5" />
@@ -161,7 +161,7 @@ export default function MobileItineraryBuilder({
 
             <button
               onClick={() => setShowAISheet(true)}
-              className="flex-1 flex flex-col items-center gap-1 py-3 text-slate-400"
+              className="flex-1 flex flex-col items-center gap-1 py-3 text-slate-400 dark:text-slate-500"
             >
               <div className="w-5 h-5 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
                 <MessageSquare className="w-3 h-3 text-white" />
@@ -181,23 +181,23 @@ export default function MobileItineraryBuilder({
             />
 
             {/* Sheet */}
-            <div className="fixed bottom-0 left-0 right-0 h-[70vh] bg-white rounded-t-2xl z-50 flex flex-col shadow-xl">
+            <div className="fixed bottom-0 left-0 right-0 h-[70vh] bg-white dark:bg-slate-800 rounded-t-2xl z-50 flex flex-col shadow-xl">
               {/* Handle */}
               <div className="flex-shrink-0 py-3 flex justify-center">
-                <div className="w-10 h-1 bg-slate-300 rounded-full" />
+                <div className="w-10 h-1 bg-slate-300 dark:bg-slate-600 rounded-full" />
               </div>
 
               {/* Header */}
-              <div className="flex-shrink-0 px-4 pb-2 flex items-center justify-between border-b border-slate-100">
+              <div className="flex-shrink-0 px-4 pb-2 flex items-center justify-between border-b border-slate-100 dark:border-slate-700">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
                     <MessageSquare className="w-4 h-4 text-white" />
                   </div>
-                  <span className="font-semibold text-slate-900">Ask Snoo</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">Ask Snoo</span>
                 </div>
                 <button
                   onClick={() => setShowAISheet(false)}
-                  className="p-2 text-slate-400 hover:text-slate-600"
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                 >
                   <X className="w-5 h-5" />
                 </button>

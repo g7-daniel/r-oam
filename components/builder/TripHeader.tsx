@@ -72,12 +72,12 @@ export default function TripHeader() {
   };
 
   return (
-    <div className="h-14 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 flex items-center justify-between flex-shrink-0 transition-colors duration-300">
+    <div className="h-14 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 sm:px-4 flex items-center justify-between flex-shrink-0 transition-colors duration-300">
       {/* Left section - Back & Trip name */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1 sm:gap-3 min-w-0 flex-1">
         <a
           href="/plan/start"
-          className="p-2 -ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+          className="p-2 -ml-1 sm:-ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors flex-shrink-0"
         >
           <ChevronLeft className="w-5 h-5" />
         </a>
@@ -94,20 +94,20 @@ export default function TripHeader() {
                 setIsEditingName(false);
               }
             }}
-            className="text-lg font-semibold text-slate-900 dark:text-white bg-transparent border-b-2 border-primary-500 outline-none px-1"
+            className="text-base sm:text-lg font-semibold text-slate-900 dark:text-white bg-transparent border-b-2 border-primary-500 outline-none px-1 min-w-0"
           />
         ) : (
           <button
             onClick={() => setIsEditingName(true)}
-            className="text-lg font-semibold text-slate-900 dark:text-white hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+            className="text-base sm:text-lg font-semibold text-slate-900 dark:text-white hover:text-primary-600 dark:hover:text-primary-400 transition-colors truncate"
           >
             {tripName}
           </button>
         )}
       </div>
 
-      {/* Center section - Trip info */}
-      <div className="flex items-center gap-6 text-sm text-slate-500 dark:text-slate-400">
+      {/* Center section - Trip info (hidden on mobile) */}
+      <div className="hidden lg:flex items-center gap-6 text-sm text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-1.5">
           <Calendar className="w-4 h-4" />
           <span>{dateRange}</span>
@@ -124,7 +124,7 @@ export default function TripHeader() {
       </div>
 
       {/* Right section - Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
         {/* Share button */}
         <div className="relative">
           <button

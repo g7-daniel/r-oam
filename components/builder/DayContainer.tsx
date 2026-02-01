@@ -85,36 +85,37 @@ export default function DayContainer({
             onToggleExpand();
             onSelect();
           }}
-          className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+          className="w-full flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {isExpanded ? (
-              <ChevronDown className="w-5 h-5 text-slate-400" />
+              <ChevronDown className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 flex-shrink-0" />
             ) : (
-              <ChevronRight className="w-5 h-5 text-slate-400" />
+              <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 flex-shrink-0" />
             )}
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-slate-400" />
-              <span className="font-semibold text-slate-900 dark:text-white">Day {dayNumber}</span>
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 flex-shrink-0 hidden sm:block" />
+              <span className="font-semibold text-sm sm:text-base text-slate-900 dark:text-white">Day {dayNumber}</span>
               {date && (
-                <span className="text-slate-500 dark:text-slate-400">
-                  - {format(date, 'EEEE, MMM d')}
+                <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 truncate">
+                  <span className="hidden sm:inline">- </span>{format(date, 'EEE, MMM d')}
                 </span>
               )}
             </div>
             {(isArrivalDay || isDepartureDay) && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 rounded-full text-xs font-medium">
-                <Plane className="w-3 h-3" />
-                {isArrivalDay ? 'Arrival' : 'Departure'}
+              <span className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 rounded-full text-[10px] sm:text-xs font-medium flex-shrink-0">
+                <Plane className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                <span className="hidden sm:inline">{isArrivalDay ? 'Arrival' : 'Departure'}</span>
+                <span className="sm:hidden">{isArrivalDay ? 'Arr' : 'Dep'}</span>
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-slate-500 dark:text-slate-400 flex-shrink-0">
             {sortedItems.length > 0 && (
               <>
-                <span>{sortedItems.length} places</span>
+                <span>{sortedItems.length} <span className="hidden sm:inline">places</span></span>
                 {totalDistanceKm > 0 && (
-                  <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded-full text-xs">
+                  <span className="hidden sm:inline px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded-full text-xs">
                     {totalDistanceKm.toFixed(1)} mi total
                   </span>
                 )}
@@ -128,21 +129,22 @@ export default function DayContainer({
           <div className="border-t border-slate-100 dark:border-slate-700">
             {/* Action buttons */}
             {sortedItems.length > 0 && (
-              <div className="px-4 py-2 bg-slate-50 dark:bg-slate-700/50 flex items-center gap-2 border-b border-slate-100 dark:border-slate-700">
+              <div className="px-2 sm:px-4 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-700/50 flex items-center gap-1 sm:gap-2 border-b border-slate-100 dark:border-slate-700 overflow-x-auto">
                 <button
                   onClick={handleAutoFill}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Auto-fill day
+                  <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <span className="hidden sm:inline">Auto-fill day</span>
+                  <span className="sm:hidden">Auto-fill</span>
                 </button>
                 <button
                   onClick={handleOptimize}
                   disabled={sortedItems.length < 2 || isOptimizing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
-                  <Route className="w-3.5 h-3.5" />
-                  {isOptimizing ? 'Optimizing...' : 'Optimize route'}
+                  <Route className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  {isOptimizing ? 'Optimizing...' : <><span className="hidden sm:inline">Optimize route</span><span className="sm:hidden">Optimize</span></>}
                 </button>
               </div>
             )}
@@ -154,22 +156,23 @@ export default function DayContainer({
                   ref={provided.innerRef}
                   {...provided.droppableProps}
                   className={clsx(
-                    'min-h-[100px] p-3 transition-colors',
+                    'min-h-[80px] sm:min-h-[100px] p-2 sm:p-3 transition-colors',
                     snapshot.isDraggingOver && 'bg-primary-50 dark:bg-primary-900/20'
                   )}
                 >
                   {sortedItems.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-center">
-                      <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-3">
-                        <Plus className="w-6 h-6 text-slate-400" />
+                    <div className="flex flex-col items-center justify-center py-4 sm:py-8 text-center">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-2 sm:mb-3">
+                        <Plus className="w-5 h-5 sm:w-6 sm:h-6 text-slate-400" />
                       </div>
-                      <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">No places yet</p>
-                      <p className="text-xs text-slate-400 dark:text-slate-500">
-                        Drag places here or click "+ Add a place"
+                      <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mb-0.5 sm:mb-1">No places yet</p>
+                      <p className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500">
+                        <span className="hidden sm:inline">Drag places here or click "+ Add a place"</span>
+                        <span className="sm:hidden">Tap + to add places</span>
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 sm:space-y-2">
                       {sortedItems.map((item, index) => (
                         <ScheduledItem
                           key={item.id}
@@ -199,9 +202,9 @@ export default function DayContainer({
             ) : (
               <button
                 onClick={() => setShowAddPlace(true)}
-                className="w-full px-4 py-3 flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-t border-slate-100 dark:border-slate-700 transition-colors"
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-t border-slate-100 dark:border-slate-700 transition-colors"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 Add a place
               </button>
             )}
