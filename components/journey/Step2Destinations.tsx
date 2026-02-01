@@ -31,6 +31,8 @@ export default function Step2Destinations() {
   const [showSearch, setShowSearch] = useState(false);
   const [searchResults, setSearchResults] = useState<DestinationData[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [pendingDestination, setPendingDestination] = useState<DestinationData | null>(null);
+  const [pendingNights, setPendingNights] = useState(3);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastScrollRef = useRef<number>(0);
@@ -88,36 +90,57 @@ export default function Step2Destinations() {
 
   const handleAddDestination = useCallback(
     (destData: DestinationData) => {
-      const place: Place = {
-        name: destData.name,
-        countryCode: destData.countryCode,
-        lat: destData.lat,
-        lng: destData.lng,
-      };
+      // If this is the first destination, add directly
+      if (destinations.length === 0) {
+        const place: Place = {
+          name: destData.name,
+          countryCode: destData.countryCode,
+          lat: destData.lat,
+          lng: destData.lng,
+        };
+        const nightsToAllocate = tripNights > 0 ? tripNights : 3;
+        const destId = addDestination(place, nightsToAllocate);
+        setDestinationHeroImage(destId, destData.imageUrl);
+        setShowSearch(false);
+        setSearchQuery('');
+        return;
+      }
 
-      // Smart night allocation:
-      // - If no destinations yet, allocate all available nights (or default 3 if no dates)
-      // - If destinations exist, allocate remaining nights (min 1)
+      // For 2nd+ destination, show the nights selection modal
       const currentTotalNights = destinations.reduce((sum, d) => sum + d.nights, 0);
-      const availableNights = tripNights > 0 ? tripNights - currentTotalNights : 0;
-      const nightsToAllocate = destinations.length === 0
-        ? (tripNights > 0 ? tripNights : 3)  // First destination gets all nights
-        : Math.max(1, availableNights);       // Subsequent destinations get remaining
-
-      const destId = addDestination(place, nightsToAllocate);
-      setDestinationHeroImage(destId, destData.imageUrl);
+      const suggestedNights = tripNights > 0
+        ? Math.max(1, Math.floor((tripNights - currentTotalNights) / 2) || 2)
+        : 3;
+      setPendingNights(suggestedNights);
+      setPendingDestination(destData);
       setShowSearch(false);
       setSearchQuery('');
-      // Scroll to the newly added destination after a brief delay
-      setTimeout(() => {
-        const newCard = document.querySelector(`[data-destination-id="${destId}"]`);
-        if (newCard) {
-          newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
     },
     [addDestination, setDestinationHeroImage, destinations, tripNights]
   );
+
+  const confirmAddDestination = useCallback(() => {
+    if (!pendingDestination) return;
+
+    const place: Place = {
+      name: pendingDestination.name,
+      countryCode: pendingDestination.countryCode,
+      lat: pendingDestination.lat,
+      lng: pendingDestination.lng,
+    };
+
+    const destId = addDestination(place, pendingNights);
+    setDestinationHeroImage(destId, pendingDestination.imageUrl);
+    setPendingDestination(null);
+
+    // Scroll to the newly added destination
+    setTimeout(() => {
+      const newCard = document.querySelector(`[data-destination-id="${destId}"]`);
+      if (newCard) {
+        newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  }, [pendingDestination, pendingNights, addDestination, setDestinationHeroImage]);
 
   const handleCustomDestination = useCallback(() => {
     if (!searchQuery.trim()) return;
@@ -129,28 +152,18 @@ export default function Step2Destinations() {
       return;
     }
 
-    // Create a custom place
-    const place: Place = {
+    // Create a custom destination data object
+    const customDestData: DestinationData = {
       name: searchQuery.trim(),
-      countryCode: 'XX', // Will be improved later
+      country: 'Custom',
+      countryCode: 'XX',
       lat: 0,
       lng: 0,
+      imageUrl: `https://source.unsplash.com/400x300/?${encodeURIComponent(searchQuery + ' travel')}`,
     };
 
-    // Smart night allocation for custom destinations
-    const currentTotalNights = destinations.reduce((sum, d) => sum + d.nights, 0);
-    const availableNights = tripNights > 0 ? tripNights - currentTotalNights : 0;
-    const nightsToAllocate = destinations.length === 0
-      ? (tripNights > 0 ? tripNights : 3)
-      : Math.max(1, availableNights);
-
-    const destId = addDestination(place, nightsToAllocate);
-    // Use Unsplash for custom destination image
-    const imageUrl = `https://source.unsplash.com/400x300/?${encodeURIComponent(searchQuery + ' travel')}`;
-    setDestinationHeroImage(destId, imageUrl);
-    setShowSearch(false);
-    setSearchQuery('');
-  }, [searchQuery, addDestination, setDestinationHeroImage, handleAddDestination]);
+    handleAddDestination(customDestData);
+  }, [searchQuery, handleAddDestination]);
 
   const handleNightsChange = (destId: string, delta: number, currentNights: number) => {
     // Calculate max nights this destination can have
@@ -410,6 +423,115 @@ export default function Step2Destinations() {
         <p className="text-center text-sm text-slate-500">
           Planning a multi-city trip? Add more destinations above to create your perfect itinerary.
         </p>
+      )}
+
+      {/* Nights Selection Modal for 2nd+ destination */}
+      {pendingDestination && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-xl">
+            {/* Header with destination preview */}
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
+                <img
+                  src={pendingDestination.imageUrl}
+                  alt={pendingDestination.name}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = `https://source.unsplash.com/200x200/?${encodeURIComponent(pendingDestination.name + ' travel')}`;
+                  }}
+                />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Adding {pendingDestination.name}
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  How many nights will you stay?
+                </p>
+              </div>
+            </div>
+
+            {/* Nights selector */}
+            <div className="bg-slate-50 dark:bg-slate-700 rounded-xl p-4 mb-6">
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => setPendingNights(Math.max(1, pendingNights - 1))}
+                  disabled={pendingNights <= 1}
+                  className="w-12 h-12 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Minus className="w-5 h-5" />
+                </button>
+                <div className="text-center">
+                  <span className="text-4xl font-bold text-slate-900 dark:text-white">{pendingNights}</span>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">nights</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPendingNights(Math.min(30, pendingNights + 1))}
+                  disabled={pendingNights >= 30}
+                  className="w-12 h-12 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Summary of trip allocation */}
+            {tripNights > 0 && (
+              <div className="mb-6 text-sm text-slate-600 dark:text-slate-300">
+                <p className="font-medium mb-2">Trip breakdown:</p>
+                <ul className="space-y-1">
+                  {destinations.map((d, i) => (
+                    <li key={d.destinationId} className="flex justify-between">
+                      <span>{i + 1}. {d.place.name}</span>
+                      <span className="font-medium">{d.nights} nights</span>
+                    </li>
+                  ))}
+                  <li className="flex justify-between text-primary-600 dark:text-primary-400">
+                    <span>{destinations.length + 1}. {pendingDestination.name}</span>
+                    <span className="font-medium">{pendingNights} nights</span>
+                  </li>
+                  <li className="flex justify-between pt-2 border-t border-slate-200 dark:border-slate-600 font-medium">
+                    <span>Total</span>
+                    <span className={clsx(
+                      totalNights + pendingNights === tripNights
+                        ? 'text-green-600'
+                        : totalNights + pendingNights > tripNights
+                        ? 'text-amber-600'
+                        : 'text-slate-600 dark:text-slate-300'
+                    )}>
+                      {totalNights + pendingNights} / {tripNights} nights
+                    </span>
+                  </li>
+                </ul>
+                {totalNights + pendingNights > tripNights && (
+                  <p className="mt-2 text-xs text-amber-600">
+                    Tip: You can adjust nights for each destination after adding.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingDestination(null)}
+                className="flex-1 px-4 py-3 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmAddDestination}
+                className="flex-1 px-4 py-3 bg-primary-500 text-white rounded-xl hover:bg-primary-600 transition-colors font-medium"
+              >
+                Add Destination
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
