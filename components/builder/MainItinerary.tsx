@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useTripStoreV2 } from '@/stores/tripStoreV2';
 import CitySection from './CitySection';
 import DayContainer from './DayContainer';
-import { addDays, format } from 'date-fns';
+import { addDays } from 'date-fns';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface MainItineraryProps {
@@ -28,8 +28,6 @@ export default function MainItinerary({
 
   // Build hotel schedule from check-in/check-out items
   const hotelSchedule = useMemo(() => {
-    const schedule: { dayIndex: number; hotelName: string; isCheckIn: boolean; isCheckOut: boolean }[] = [];
-
     // Find all check-in and check-out items
     const checkIns = scheduledItems.filter(item => item.category === 'hotel_checkin');
     const checkOuts = scheduledItems.filter(item => item.category === 'hotel_checkout');

@@ -797,7 +797,6 @@ export async function POST(request: NextRequest) {
 
       // Pet-friendly filter - prioritize but don't exclude
       if (travelingWithPets?.hasPet) {
-        const beforeCount = filteredHotels.length;
         const petFriendlyHotels = filteredHotels.filter(hotel => {
           const nameLower = hotel.name.toLowerCase();
           return PET_FRIENDLY_CHAINS.some(chain => nameLower.includes(chain)) ||

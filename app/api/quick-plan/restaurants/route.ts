@@ -136,32 +136,8 @@ export async function POST(request: NextRequest) {
       dairy_free: 'dairy free',
     };
 
-    // FIX 2.5: Build search queries that incorporate ALL dietary restrictions
-    const buildDietarySearchTerms = (baseTerm: string): string[] => {
-      if (activeDietaryRestrictions.length === 0) {
-        return [baseTerm];
-      }
-
-      // Primary search with first restriction
-      const primary = activeDietaryRestrictions[0];
-      const primaryPrefix = dietaryPrefixes[primary] || '';
-
-      // For multiple restrictions, create combined searches
-      if (activeDietaryRestrictions.length > 1) {
-        const combined = activeDietaryRestrictions
-          .map(r => dietaryPrefixes[r])
-          .filter(Boolean)
-          .join(' ');
-        return [
-          `${primaryPrefix} ${baseTerm}`.trim(),
-          `${combined} ${baseTerm}`.trim(),
-        ];
-      }
-
-      return [`${primaryPrefix} ${baseTerm}`.trim()];
-    };
-
-    // Legacy support - still use single prefix for cuisine mapping
+    // FIX 2.5: Build dietary prefix from active restrictions
+    // Use the first restriction as prefix for search queries
     const dietaryPrefix = activeDietaryRestrictions.length > 0 && dietaryPrefixes[activeDietaryRestrictions[0]]
       ? `${dietaryPrefixes[activeDietaryRestrictions[0]]} `
       : '';

@@ -6,10 +6,6 @@ import {
   Send,
   Loader2,
   Plus,
-  Star,
-  MapPin,
-  Utensils,
-  X,
   Clock,
   ArrowUp,
 } from 'lucide-react';
