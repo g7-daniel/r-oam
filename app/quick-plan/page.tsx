@@ -2,7 +2,11 @@
 
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { ArrowLeft, Zap } from 'lucide-react';
+import { ArrowLeft, Zap, Loader2 } from 'lucide-react';
+import { useJsApiLoader } from '@react-google-maps/api';
+
+// Libraries needed for Places Autocomplete
+const GOOGLE_MAPS_LIBRARIES: ('places')[] = ['places'];
 
 // Lazy load the chat UI
 const QuickPlanChat = dynamic(
@@ -11,6 +15,33 @@ const QuickPlanChat = dynamic(
 );
 
 export default function QuickPlanPage() {
+  // Load Google Maps script with Places library
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
+    libraries: GOOGLE_MAPS_LIBRARIES,
+  });
+
+  // Show loading state while Google Maps loads
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-orange-100 dark:bg-orange-900/30 rounded-2xl flex items-center justify-center mx-auto mb-6 animate-pulse">
+            <Zap className="w-8 h-8 text-orange-600 dark:text-orange-400" />
+          </div>
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
+            <p className="text-slate-600 dark:text-slate-400">Loading Quick Plan...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error if Google Maps failed to load
+  if (loadError) {
+    console.error('Google Maps load error:', loadError);
+  }
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
       {/* Header */}
