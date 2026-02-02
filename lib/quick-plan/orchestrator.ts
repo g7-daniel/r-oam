@@ -10,6 +10,7 @@ import { detectTradeoffs } from './tradeoff-engine';
 import { getSeasonalWarnings, formatSeasonalWarnings, hasSignificantWarnings, type SeasonalWarning } from './seasonal-data';
 import { detectThemeParkDestination, getThemeParkGuidance, generateThemeParkItinerary } from './theme-park-data';
 import { detectSurfDestination, getSurfRecommendations } from './surf-data';
+import { getEventsForDates, hasSignificantEvents, type LocalEvent } from './events-api';
 
 // LLM calls go through API to avoid browser issues
 async function callLLM(messages: { role: string; content: string }[], temperature = 0.7): Promise<string> {
@@ -2199,6 +2200,17 @@ Respond with just the field name.`;
       }
     }
 
+    // Phase 5 Fix 5.2: Add event alerts to the next question after dates are set
+    const pendingEventAlert = (this.state as any).pendingEventAlert;
+    if (pendingEventAlert) {
+      const eventInfo = pendingEventAlert.tip
+        ? `\n\n📅 **Event alert**: ${pendingEventAlert.warning}\n💡 ${pendingEventAlert.tip}`
+        : `\n\n📅 **Event alert**: ${pendingEventAlert.warning}`;
+      snooMessage = `${snooMessage}${eventInfo}`;
+      // Clear the pending alert
+      delete (this.state as any).pendingEventAlert;
+    }
+
     return {
       id: `q-${field}-${Date.now()}`,
       field: config.field,
@@ -2290,6 +2302,28 @@ Respond with just the field name.`;
           if (warnings.length > 0) {
             this.state.seasonalWarnings = warnings;
             console.log(`[Orchestrator] Found ${warnings.length} seasonal warnings for ${destName}`);
+          }
+
+          // Phase 5 Fix 5.2: Check for local events during trip dates
+          if (dates.endDate) {
+            const eventsCheck = hasSignificantEvents(destName, dates.startDate, dates.endDate);
+            if (eventsCheck.hasEvents) {
+              const eventsData = getEventsForDates(destName, dates.startDate, dates.endDate);
+              (this.state as any).localEvents = eventsData.events;
+              (this.state as any).eventWarnings = eventsData.warnings;
+              (this.state as any).eventTips = eventsData.tips;
+
+              // Log event awareness
+              console.log(`[Orchestrator] Found ${eventsCheck.highImpactCount} high-impact events for ${destName}:`, eventsCheck.eventNames);
+
+              // Store event info for display in next message (will be shown by question handler)
+              if (eventsCheck.highImpactCount > 0 && eventsData.warnings.length > 0) {
+                (this.state as any).pendingEventAlert = {
+                  warning: eventsData.warnings[0],
+                  tip: eventsData.tips[0] || null,
+                };
+              }
+            }
           }
         }
         break;

@@ -1,6 +1,8 @@
 import type { Experience, ExperienceCategory, PlaceResult, DirectionsResult, TransitInfo } from '@/types';
+import { fetchWithTimeout } from './api-cache';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
+const GOOGLE_MAPS_TIMEOUT = 15000; // 15 second timeout
 
 // Google Places result type for hotel searches
 export interface GooglePlaceResult {
@@ -49,8 +51,10 @@ export async function searchHotelsWithPagination(
     }
 
     try {
-      const response = await fetch(
-        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
       );
       const data = await response.json();
 
@@ -98,8 +102,10 @@ export async function searchHotelsByGeocode(
     }
 
     try {
-      const response = await fetch(
-        `${GOOGLE_MAPS_BASE_URL}/place/nearbysearch/json?${params}`
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/place/nearbysearch/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
       );
       const data = await response.json();
 
@@ -134,13 +140,29 @@ export async function searchLuxuryHotels(
   const results: GooglePlaceResult[] = [];
   const seenPlaceIds = new Set<string>();
 
-  // Luxury-specific search queries
+  // Luxury-specific search queries - comprehensive list of luxury brands and keywords
   const luxuryQueries = [
     `luxury resort ${areaName} ${destination}`,
     `5 star hotel ${areaName} ${destination}`,
+    `best luxury hotel ${areaName}`,
+    // Major luxury brands
     `four seasons ${areaName}`,
     `ritz carlton ${areaName}`,
+    `st regis ${areaName}`,
+    `park hyatt ${areaName}`,
+    `rosewood ${areaName}`,
+    `mandarin oriental ${areaName}`,
+    `aman ${areaName}`,
+    `one&only ${areaName}`,
+    `six senses ${areaName}`,
+    `excellence ${areaName}`,
+    `secrets ${areaName}`,
+    `eden roc ${areaName}`,
+    `cap cana ${areaName}`,
+    // Generic high-end searches
     `premium resort ${areaName} ${destination}`,
+    `5 star beachfront ${areaName}`,
+    `adults only luxury ${areaName}`,
   ];
 
   for (const query of luxuryQueries) {
@@ -155,8 +177,10 @@ export async function searchLuxuryHotels(
     });
 
     try {
-      const response = await fetch(
-        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
       );
       const data = await response.json();
 
@@ -208,8 +232,10 @@ export async function geocodeLocation(
   });
 
   try {
-    const response = await fetch(
-      `${GOOGLE_MAPS_BASE_URL}/geocode/json?${params}`
+    const response = await fetchWithTimeout(
+      `${GOOGLE_MAPS_BASE_URL}/geocode/json?${params}`,
+      {},
+      GOOGLE_MAPS_TIMEOUT
     );
     const data = await response.json();
 
@@ -249,8 +275,10 @@ export async function searchPlaces(
     params.append('radius', radius.toString());
   }
 
-  const response = await fetch(
-    `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
+  const response = await fetchWithTimeout(
+    `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+    {},
+    GOOGLE_MAPS_TIMEOUT
   );
 
   if (!response.ok) {
@@ -275,8 +303,10 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceResult | nu
     key: apiKey,
   });
 
-  const response = await fetch(
-    `${GOOGLE_MAPS_BASE_URL}/place/details/json?${params}`
+  const response = await fetchWithTimeout(
+    `${GOOGLE_MAPS_BASE_URL}/place/details/json?${params}`,
+    {},
+    GOOGLE_MAPS_TIMEOUT
   );
 
   if (!response.ok) {
@@ -305,8 +335,10 @@ export async function getDirections(
     key: apiKey,
   });
 
-  const response = await fetch(
-    `${GOOGLE_MAPS_BASE_URL}/directions/json?${params}`
+  const response = await fetchWithTimeout(
+    `${GOOGLE_MAPS_BASE_URL}/directions/json?${params}`,
+    {},
+    GOOGLE_MAPS_TIMEOUT
   );
 
   if (!response.ok) {
@@ -338,8 +370,10 @@ export async function getDistanceMatrix(
     key: apiKey,
   });
 
-  const response = await fetch(
-    `${GOOGLE_MAPS_BASE_URL}/distancematrix/json?${params}`
+  const response = await fetchWithTimeout(
+    `${GOOGLE_MAPS_BASE_URL}/distancematrix/json?${params}`,
+    {},
+    GOOGLE_MAPS_TIMEOUT
   );
 
   if (!response.ok) {
@@ -578,6 +612,150 @@ export function getPhotoUrl(photoReference: string, maxWidth = 800): string {
   return `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=${maxWidth}&photo_reference=${photoReference}&key=${apiKey}`;
 }
 
+// ============================================================================
+// PHASE 5 FIX 5.1: VERIFIED HOTEL AMENITIES
+// Fetches actual amenities from Google Places instead of guessing
+// ============================================================================
+
+export interface VerifiedHotelAmenities {
+  hasPool: boolean | null;
+  hasGym: boolean | null;
+  hasSpa: boolean | null;
+  hasRestaurant: boolean | null;
+  servesBreakfast: boolean | null;
+  hasFreeWifi: boolean | null;
+  hasParking: boolean | null;
+  wheelchairAccessible: boolean | null;
+  petFriendly: boolean | null;
+  hasBeachAccess: boolean | null;
+  // Raw data for additional parsing
+  rawTypes: string[];
+  rawAmenityText: string;
+  confidence: 'verified' | 'inferred' | 'unknown';
+}
+
+/**
+ * Fetches verified amenities for a hotel from Google Places API
+ * Uses place details and reviews to extract actual amenity information
+ */
+export async function getHotelAmenities(placeId: string): Promise<VerifiedHotelAmenities> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+
+  const defaultResult: VerifiedHotelAmenities = {
+    hasPool: null,
+    hasGym: null,
+    hasSpa: null,
+    hasRestaurant: null,
+    servesBreakfast: null,
+    hasFreeWifi: null,
+    hasParking: null,
+    wheelchairAccessible: null,
+    petFriendly: null,
+    hasBeachAccess: null,
+    rawTypes: [],
+    rawAmenityText: '',
+    confidence: 'unknown',
+  };
+
+  if (!apiKey) {
+    return defaultResult;
+  }
+
+  try {
+    // Fetch extended place details including reviews for amenity mentions
+    const params = new URLSearchParams({
+      place_id: placeId,
+      fields: [
+        'name',
+        'types',
+        'wheelchair_accessible_entrance',
+        'serves_breakfast',
+        'reviews',
+        'editorial_summary',
+      ].join(','),
+      key: apiKey,
+    });
+
+    const response = await fetchWithTimeout(
+      `${GOOGLE_MAPS_BASE_URL}/place/details/json?${params}`,
+      {},
+      GOOGLE_MAPS_TIMEOUT
+    );
+
+    if (!response.ok) {
+      return defaultResult;
+    }
+
+    const data = await response.json();
+    const result = data.result;
+
+    if (!result) {
+      return defaultResult;
+    }
+
+    // Extract amenities from types array
+    const types = (result.types || []) as string[];
+
+    // Build text corpus from reviews and summary for keyword extraction
+    const reviewTexts = (result.reviews || [])
+      .map((r: any) => r.text || '')
+      .join(' ')
+      .toLowerCase();
+    const summaryText = (result.editorial_summary?.overview || '').toLowerCase();
+    const combinedText = `${reviewTexts} ${summaryText}`;
+
+    // Keyword-based amenity detection from reviews/description
+    const amenities: VerifiedHotelAmenities = {
+      hasPool: detectAmenity(combinedText, ['pool', 'swimming pool', 'infinity pool', 'rooftop pool']),
+      hasGym: detectAmenity(combinedText, ['gym', 'fitness center', 'fitness room', 'workout']),
+      hasSpa: detectAmenity(combinedText, ['spa', 'massage', 'sauna', 'wellness center']),
+      hasRestaurant: detectAmenity(combinedText, ['restaurant', 'on-site dining', 'breakfast buffet']),
+      servesBreakfast: result.serves_breakfast ?? detectAmenity(combinedText, ['breakfast', 'morning meal', 'complimentary breakfast']),
+      hasFreeWifi: detectAmenity(combinedText, ['free wifi', 'complimentary wifi', 'wifi included', 'free internet']),
+      hasParking: detectAmenity(combinedText, ['parking', 'valet', 'garage', 'free parking']),
+      wheelchairAccessible: result.wheelchair_accessible_entrance ?? detectAmenity(combinedText, ['wheelchair', 'accessible', 'ada compliant', 'mobility']),
+      petFriendly: detectAmenity(combinedText, ['pet friendly', 'pets allowed', 'dog friendly', 'pets welcome']),
+      hasBeachAccess: detectAmenity(combinedText, ['beach access', 'beachfront', 'private beach', 'beach club', 'on the beach']),
+      rawTypes: types,
+      rawAmenityText: combinedText.substring(0, 500), // Store snippet for debugging
+      confidence: combinedText.length > 100 ? 'inferred' : 'unknown',
+    };
+
+    // Upgrade confidence if we got direct API fields
+    if (result.wheelchair_accessible_entrance !== undefined || result.serves_breakfast !== undefined) {
+      amenities.confidence = 'verified';
+    }
+
+    return amenities;
+  } catch (error) {
+    console.error('[getHotelAmenities] Error:', error);
+    return defaultResult;
+  }
+}
+
+/**
+ * Helper to detect amenity presence from text
+ * Returns true if found, false if explicitly denied, null if unknown
+ */
+function detectAmenity(text: string, keywords: string[]): boolean | null {
+  const negatives = ['no ', 'not ', "don't have", "doesn't have", 'lacks', 'missing', 'without'];
+
+  for (const keyword of keywords) {
+    const index = text.indexOf(keyword);
+    if (index !== -1) {
+      // Check if preceded by negative
+      const contextStart = Math.max(0, index - 20);
+      const context = text.substring(contextStart, index);
+      if (negatives.some(neg => context.includes(neg))) {
+        return false;
+      }
+      return true;
+    }
+  }
+
+  return null; // Unknown
+}
+
 // Search for hotels using Google Places API
 export async function searchHotelsGoogle(
   cityName: string,
@@ -632,8 +810,10 @@ export async function searchHotelsGoogle(
     }
 
     try {
-      const response = await fetch(
-        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
       );
 
       if (response.ok) {
@@ -665,13 +845,22 @@ export async function searchHotelsGoogle(
     console.log(`Google Places: Filtered ${beforeCount} -> ${uniquePlaces.length} hotels by distance (50km max)`);
   }
 
-  // Detect luxury hotels by name
+  // Detect luxury hotels by name - comprehensive list
   const luxuryBrands = [
+    // Ultra-luxury
     'st regis', 'st. regis', 'four seasons', 'ritz carlton', 'ritz-carlton',
     'mandarin oriental', 'peninsula', 'waldorf', 'aman', 'rosewood',
-    'park hyatt', 'w hotel', 'edition', 'conrad', 'fairmont', 'sofitel',
-    'intercontinental', 'jw marriott', 'eden roc', 'one&only', 'six senses',
-    'banyan tree', 'shangri-la', 'langham', 'raffles', 'belmond'
+    'park hyatt', 'edition', 'one&only', 'six senses', 'capella', 'faena',
+    'bulgari', 'armani', 'belmond', 'raffles', 'oberoi',
+    // Premium luxury
+    'w hotel', 'conrad', 'fairmont', 'sofitel', 'lxr', 'curio',
+    'intercontinental', 'jw marriott', 'eden roc', 'andaz', 'kimpton',
+    'banyan tree', 'shangri-la', 'langham', 'anantara',
+    // Caribbean/DR specific luxury
+    'excellence', 'secrets', 'zoetry', 'breathless', 'dreams',
+    'tortuga bay', 'cap cana', 'puntacana resort', 'casa de campo',
+    // Resort indicators
+    'the luxury collection', 'autograph collection'
   ];
 
   const isLuxuryHotel = (name: string) => {
