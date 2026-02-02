@@ -23,6 +23,7 @@ import type {
 import { finalizeQuickPlanTrip } from '@/lib/quick-plan/trip-transformer';
 import { useToast } from '@/components/ui/Toast';
 import { RotateCcw, Send, MessageCircle, ArrowLeft, SkipForward } from 'lucide-react';
+import { ProgressIndicatorCompact } from './ProgressIndicator';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -1426,16 +1427,24 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
                 <p className="text-xs text-slate-500 dark:text-slate-400">Your AI travel buddy</p>
               </div>
             </div>
-            {/* Start Over button */}
-            <button
-              onClick={handleStartOver}
-              disabled={isProcessing}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Start over from the beginning"
-            >
-              <RotateCcw className="w-4 h-4" />
-              <span className="hidden sm:inline">Start Over</span>
-            </button>
+            <div className="flex items-center gap-3">
+              {/* Progress indicator - FIX 4.12 */}
+              <ProgressIndicatorCompact currentPhase={phase} className="hidden sm:flex" />
+              {/* Start Over button */}
+              <button
+                onClick={handleStartOver}
+                disabled={isProcessing}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Start over from the beginning"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span className="hidden sm:inline">Start Over</span>
+              </button>
+            </div>
+          </div>
+          {/* Mobile progress indicator */}
+          <div className="sm:hidden mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
+            <ProgressIndicatorCompact currentPhase={phase} />
           </div>
         </div>
 
