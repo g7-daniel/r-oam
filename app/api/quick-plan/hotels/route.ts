@@ -27,9 +27,21 @@ export async function GET(request: NextRequest) {
   const lat = params.get('lat') ? parseFloat(params.get('lat')!) : null;
   const lng = params.get('lng') ? parseFloat(params.get('lng')!) : null;
   const minRating = parseFloat(params.get('minRating') || '4.0');
-  const budgetMin = parseInt(params.get('budgetMin') || '0');
-  const budgetMax = parseInt(params.get('budgetMax') || '10000');
   const limit = parseInt(params.get('limit') || '10');
+
+  // FIX 2.1: Proper budget validation
+  const budgetMinRaw = params.get('budgetMin');
+  const budgetMaxRaw = params.get('budgetMax');
+
+  const budgetMin = budgetMinRaw ? Math.max(0, parseInt(budgetMinRaw) || 0) : 0;
+  const budgetMax = budgetMaxRaw ? Math.min(10000, parseInt(budgetMaxRaw) || 10000) : 10000;
+
+  if (budgetMin > budgetMax) {
+    return NextResponse.json(
+      { error: 'budgetMin cannot be greater than budgetMax' },
+      { status: 400 }
+    );
+  }
 
   if (!areaName && !destination) {
     return NextResponse.json(
@@ -312,13 +324,16 @@ function shouldFilterForAccessibility(
 //   Budget-friendly: $100-200, Mid-range: $200-400, Upscale: $400-700, Luxury: $700+
 // Note: Google price_level is often missing or inaccurate for luxury hotels
 // So for high budgets, we use broader filtering and rely on luxury brand detection
-function getBudgetPriceLevel(budgetMax: number): { min: number; max: number; isLuxury: boolean } | null {
-  if (budgetMax <= 200) return { min: 1, max: 2, isLuxury: false };      // Budget-friendly
-  if (budgetMax <= 400) return { min: 2, max: 3, isLuxury: false };      // Mid-range
-  if (budgetMax <= 700) return { min: 3, max: 4, isLuxury: false };      // Upscale - prioritize higher-end
-  // Luxury ($700+): don't filter by price_level since many luxury hotels have null/missing price_level
-  // Instead, we'll use searchLuxuryHotels which searches by brand names and ratings
-  return { min: 3, max: 4, isLuxury: true };  // Luxury - use broad filter, luxury search handles quality
+// FIX 2.2: Add backpacker budget tier with proper categorization
+function getBudgetPriceLevel(budgetMax: number): { min: number; max: number; isLuxury: boolean; isBackpacker: boolean } | null {
+  if (budgetMax <= 50) return { min: 1, max: 1, isLuxury: false, isBackpacker: true };   // Hostel/backpacker
+  if (budgetMax <= 100) return { min: 1, max: 2, isLuxury: false, isBackpacker: true };  // Budget/backpacker
+  if (budgetMax <= 200) return { min: 1, max: 2, isLuxury: false, isBackpacker: false }; // Budget-friendly
+  if (budgetMax <= 400) return { min: 2, max: 3, isLuxury: false, isBackpacker: false }; // Mid-range
+  if (budgetMax <= 700) return { min: 3, max: 4, isLuxury: false, isBackpacker: false }; // Upscale
+  if (budgetMax <= 1500) return { min: 3, max: 4, isLuxury: true, isBackpacker: false }; // Luxury
+  // Ultra-luxury ($1500+): don't filter by price_level since many luxury hotels have null/missing price_level
+  return { min: 4, max: 4, isLuxury: true, isBackpacker: false };  // Ultra-luxury
 }
 
 // Pet-friendly hotel indicators
@@ -466,13 +481,15 @@ export async function POST(request: NextRequest) {
         dbAvailable = false;
       }
 
-      // Determine if we need luxury search
+      // Determine if we need luxury or backpacker search
       const isLuxuryBudget = priceLevelRange?.isLuxury || false;
+      const isBackpackerBudget = priceLevelRange?.isBackpacker || false;
 
       // For LUXURY budgets, ALWAYS do fresh Google search to find premium properties
+      // For BACKPACKER budgets, search for hostels and budget accommodations
       // Don't rely on database which may have mid-range hotels from previous searches
       // For non-luxury, use geocode search if few DB results
-      const needsGoogleSearch = isLuxuryBudget || hotels.length < 3;
+      const needsGoogleSearch = isLuxuryBudget || isBackpackerBudget || hotels.length < 3;
 
       if (needsGoogleSearch) {
         console.log(`[Hotels API] ${isLuxuryBudget ? 'LUXURY budget - searching for premium hotels' : 'Few DB results'} for ${areaName}`);
@@ -494,6 +511,35 @@ export async function POST(request: NextRequest) {
               destination,
               20
             );
+          } else if (isBackpackerBudget) {
+            // FIX 2.3: Search for hostels and budget accommodations for backpacker budgets
+            console.log(`[Hotels API] Using BACKPACKER search for ${areaName} (budget: $${preferences.budgetMax} or less)`);
+
+            // Search for hostels and budget accommodations with text search
+            nearbyHotels = [];
+            const hostelQueries = [
+              `hostel ${areaName} ${destination}`,
+              `budget hotel ${areaName}`,
+              `guesthouse ${areaName}`,
+              `backpacker accommodation ${areaName}`,
+            ];
+
+            const seenIds = new Set<string>();
+            for (const query of hostelQueries) {
+              try {
+                const results = await searchHotelsWithPagination(query, 10);
+                for (const result of results) {
+                  if (result.place_id && !seenIds.has(result.place_id) &&
+                      (!result.price_level || result.price_level <= 2)) {
+                    seenIds.add(result.place_id);
+                    nearbyHotels.push(result);
+                  }
+                }
+              } catch (e) {
+                console.warn(`Hostel search failed for "${query}":`, e);
+              }
+            }
+            console.log(`[Hotels API] Found ${nearbyHotels.length} budget/hostel options`);
           } else {
             // Standard search within 50km radius
             nearbyHotels = await searchHotelsByGeocode(

@@ -48,18 +48,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'API key not configured' }, { status: 500 });
     }
 
+    // FIX 2.10: Coordinate validation function
+    const isValidCoordinate = (lat: number, lng: number): boolean => {
+      return (
+        typeof lat === 'number' &&
+        typeof lng === 'number' &&
+        !isNaN(lat) &&
+        !isNaN(lng) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng <= 180 &&
+        !(lat === 0 && lng === 0) // Null island check
+      );
+    };
+
     // Build hotel coordinates list for proximity filtering
     const hotelCoords: { areaId: string; areaName: string; lat: number; lng: number }[] = [];
     for (const area of areas || []) {
       const hotel = hotels?.[area.id];
-      if (hotel?.lat && hotel?.lng) {
+      if (hotel?.lat && hotel?.lng && isValidCoordinate(hotel.lat, hotel.lng)) {
         hotelCoords.push({
           areaId: area.id,
           areaName: area.name,
           lat: hotel.lat,
           lng: hotel.lng,
         });
-      } else if (area.centerLat && area.centerLng) {
+      } else if (area.centerLat && area.centerLng && isValidCoordinate(area.centerLat, area.centerLng)) {
         // Fallback to area center if no hotel coordinates
         hotelCoords.push({
           areaId: area.id,
@@ -67,6 +82,8 @@ export async function POST(request: NextRequest) {
           lat: area.centerLat,
           lng: area.centerLng,
         });
+      } else {
+        console.warn(`[Restaurants API] Invalid coordinates for area ${area.name}, skipping`);
       }
     }
 
@@ -147,10 +164,13 @@ export async function POST(request: NextRequest) {
 
     const results: Record<string, RestaurantCandidate[]> = {};
 
+    // FIX 2.4: Global deduplication - move globalSeenPlaceIds OUTSIDE the cuisine loop
+    // This prevents the same restaurant appearing in multiple cuisine categories
+    const globalSeenPlaceIds = new Set<string>();
+
     for (const cuisine of cuisineTypes) {
       const searchTerms = cuisineSearchTerms[cuisine] || [`${cuisine} restaurant`];
       const allRestaurants: RestaurantCandidate[] = [];
-      const seenPlaceIds = new Set<string>();
 
       // Search near each hotel location (with caching)
       for (const hotel of hotelCoords) {
@@ -190,8 +210,8 @@ export async function POST(request: NextRequest) {
 
             if (data?.results) {
                 for (const place of data.results) {
-                  if (place.place_id && !seenPlaceIds.has(place.place_id)) {
-                    seenPlaceIds.add(place.place_id);
+                  if (place.place_id && !globalSeenPlaceIds.has(place.place_id)) {
+                    globalSeenPlaceIds.add(place.place_id);
 
                     // Calculate distance from this hotel
                     const placeLat = place.geometry?.location?.lat;

@@ -22,7 +22,7 @@ import type {
 } from '@/types/quick-plan';
 import { finalizeQuickPlanTrip } from '@/lib/quick-plan/trip-transformer';
 import { useToast } from '@/components/ui/Toast';
-import { RotateCcw, Send, MessageCircle } from 'lucide-react';
+import { RotateCcw, Send, MessageCircle, ArrowLeft, SkipForward } from 'lucide-react';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -199,6 +199,40 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     orchestrator.addUserNote(field, note);
     console.log(`[QuickPlanChat] Added note for ${field}: ${note.substring(0, 50)}...`);
   }, [orchestrator]);
+
+  // FIX 4.2: Go Back functionality
+  const handleGoBack = useCallback(async () => {
+    const success = orchestrator.goToPreviousQuestion();
+    if (success) {
+      // Get the new current question after going back
+      const question = await orchestrator.selectNextQuestion();
+      if (question) {
+        setCurrentQuestion(question);
+        orchestrator.state.currentQuestion = question;
+      }
+      console.log('[QuickPlanChat] Went back to previous question');
+    } else {
+      console.log('[QuickPlanChat] Cannot go back - at first question');
+    }
+  }, [orchestrator]);
+
+  // FIX 4.3: Skip functionality
+  const handleSkip = useCallback(async () => {
+    if (!currentQuestion) return;
+    orchestrator.processUserResponse(currentQuestion.id, 'SKIP');
+    const question = await orchestrator.selectNextQuestion();
+    if (question) {
+      setCurrentQuestion(question);
+      orchestrator.state.currentQuestion = question;
+    }
+    console.log('[QuickPlanChat] Skipped question:', currentQuestion.field);
+  }, [orchestrator, currentQuestion]);
+
+  // Check if we can go back (have question history)
+  const canGoBack = orchestrator.getQuestionHistory().length > 1;
+
+  // Check if current question is skippable (optional)
+  const canSkip = currentQuestion && !currentQuestion.required;
 
   // ============================================================================
   // ACKNOWLEDGMENT MESSAGES - Make conversation feel more personal
@@ -1439,6 +1473,29 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           <AnimatePresence mode="wait">
             {currentQuestion && !isProcessing && (
               <div ref={inputRef}>
+                {/* FIX 4.2 & 4.3: Go Back and Skip buttons */}
+                <div className="flex items-center justify-between mb-2">
+                  {canGoBack ? (
+                    <button
+                      onClick={handleGoBack}
+                      className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      Go back
+                    </button>
+                  ) : (
+                    <div /> // Spacer
+                  )}
+                  {canSkip && (
+                    <button
+                      onClick={handleSkip}
+                      className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
+                    >
+                      Skip
+                      <SkipForward className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
                 <ReplyCard
                   type={currentQuestion.inputType}
                   config={currentQuestion.inputConfig}

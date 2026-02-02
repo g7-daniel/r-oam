@@ -289,6 +289,7 @@ export interface TripPreferences {
 // ACTIVITIES
 // ============================================================================
 
+// FIX 3.11: Expanded activity types for better trip matching
 export type ActivityType =
   | 'surf'
   | 'snorkel'
@@ -300,12 +301,27 @@ export type ActivityType =
   | 'adventure'
   | 'cultural'
   | 'food_tour'
+  | 'cooking_class'      // Added
   | 'nightlife'
   | 'beach'
   | 'spa_wellness'
+  | 'yoga'               // Added
+  | 'meditation'         // Added
   | 'golf'
   | 'shopping'
-  | 'photography';
+  | 'photography'
+  | 'wine_tasting'       // Added
+  | 'music_festival'     // Added
+  | 'temple_visit'       // Added
+  | 'full_moon_party'    // Added
+  | 'rock_climbing'      // Added
+  | 'kayaking'           // Added
+  | 'paddleboarding'     // Added
+  | 'fishing'            // Added
+  | 'sailing'            // Added
+  | 'cycling'            // Added
+  | 'skiing'             // Added
+  | 'snowboarding';      // Added
 
 export interface ActivityIntent {
   type: ActivityType;
@@ -980,8 +996,10 @@ export interface OrchestratorState {
     destination: ConfidenceLevel;
     dates: ConfidenceLevel;
     party: ConfidenceLevel;
+    tripOccasion: ConfidenceLevel;  // FIX 1.8: Added
     accessibility: ConfidenceLevel;
     budget: ConfidenceLevel;
+    pace: ConfidenceLevel;          // FIX 1.1: Added
     vibe: ConfidenceLevel;
     activities: ConfidenceLevel;
     areas: ConfidenceLevel;

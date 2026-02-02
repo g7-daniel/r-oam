@@ -12,25 +12,43 @@ import { detectThemeParkDestination, getThemeParkGuidance, generateThemeParkItin
 import { detectSurfDestination, getSurfRecommendations } from './surf-data';
 import { getEventsForDates, hasSignificantEvents, type LocalEvent } from './events-api';
 
-// LLM calls go through API to avoid browser issues
-async function callLLM(messages: { role: string; content: string }[], temperature = 0.7): Promise<string> {
-  try {
-    const response = await fetch('/api/quick-plan/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, temperature }),
-    });
+// FIX 1.9: LLM calls with retry logic and graceful error recovery
+async function callLLM(
+  messages: { role: string; content: string }[],
+  temperature = 0.7,
+  retries = 2
+): Promise<string> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch('/api/quick-plan/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages, temperature }),
+      });
 
-    if (!response.ok) {
-      throw new Error('LLM API call failed');
+      if (!response.ok) {
+        throw new Error(`LLM API call failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (!data.content) {
+        throw new Error('Empty LLM response');
+      }
+      return data.content;
+    } catch (error) {
+      console.warn(`LLM call attempt ${attempt + 1}/${retries + 1} failed:`, error);
+
+      if (attempt === retries) {
+        // Return graceful fallback message after all retries exhausted
+        console.error('All LLM retries exhausted, using fallback response');
+        return "I'm having a bit of trouble processing that. Let me try a different approach.";
+      }
+
+      // Wait before retry (exponential backoff)
+      await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 500));
     }
-
-    const data = await response.json();
-    return data.content || '';
-  } catch (error) {
-    console.warn('LLM call failed, using fallback:', error);
-    return '';
   }
+  return '';
 }
 import type {
   OrchestratorState,
@@ -311,6 +329,33 @@ const ACTIVITY_MIN_AGES: Record<string, number> = {
   photography: 0,     // Photography - all ages
   water_sports: 6,    // Jet ski, parasailing - 6+
 };
+
+// FIX 1.4: Filter activities based on child ages
+function filterActivitiesForChildAges(
+  activityTypes: string[],
+  childAges: number[]
+): { allowed: string[]; restricted: string[]; warnings: string[] } {
+  if (!childAges || childAges.length === 0) {
+    return { allowed: activityTypes, restricted: [], warnings: [] };
+  }
+
+  const minChildAge = Math.min(...childAges);
+  const allowed: string[] = [];
+  const restricted: string[] = [];
+  const warnings: string[] = [];
+
+  for (const activity of activityTypes) {
+    const minAge = ACTIVITY_MIN_AGES[activity] || 0;
+    if (minChildAge >= minAge) {
+      allowed.push(activity);
+    } else {
+      restricted.push(activity);
+      warnings.push(`${activity} typically requires age ${minAge}+ (your youngest is ${minChildAge})`);
+    }
+  }
+
+  return { allowed, restricted, warnings };
+}
 
 // ============================================================================
 // SNOO PERSONALITY TEMPLATES
@@ -1455,8 +1500,10 @@ export class QuickPlanOrchestrator {
         destination: 'unknown',
         dates: 'unknown',
         party: 'unknown',
+        tripOccasion: 'unknown',    // FIX 1.8: Added
         accessibility: 'unknown',
         budget: 'unknown',
+        pace: 'unknown',            // FIX 1.1: Added
         vibe: 'unknown',
         activities: 'unknown',
         areas: 'unknown',
@@ -1580,6 +1627,134 @@ export class QuickPlanOrchestrator {
     this.log('orchestrator', `Confidence updated: ${field} = ${level}`, { field, level });
   }
 
+  // ============================================================================
+  // FIX 1.12: FREE-TEXT INPUT HANDLING
+  // ============================================================================
+
+  /**
+   * Handle free-text input from user at any point in the flow
+   * Analyzes intent and either answers question or stores as preference note
+   */
+  async processFreeTextInput(text: string): Promise<{
+    type: 'question' | 'preference' | 'command';
+    response?: string;
+    actionTaken?: string;
+  }> {
+    const textLower = text.toLowerCase().trim();
+
+    // Check for common commands
+    if (textLower.includes('start over') || textLower.includes('restart') || textLower === 'reset') {
+      return { type: 'command', actionTaken: 'restart' };
+    }
+
+    if (textLower.includes('go back') || textLower.includes('previous') || textLower === 'back') {
+      const success = this.goToPreviousQuestion();
+      return {
+        type: 'command',
+        actionTaken: success ? 'goBack' : 'goBackFailed',
+        response: success ? "Going back to the previous question." : "Can't go back from here - this is the first question.",
+      };
+    }
+
+    if (textLower === 'skip' || textLower === 'not sure' || textLower === 'next') {
+      return { type: 'command', actionTaken: 'skip' };
+    }
+
+    // Check for preference modifications
+    const prefPatterns = [
+      { pattern: /actually.*(want|need|prefer)/i, type: 'preference' as const },
+      { pattern: /can we (add|include|change)/i, type: 'preference' as const },
+      { pattern: /i forgot.*(mention|say|tell)/i, type: 'preference' as const },
+      { pattern: /also|btw|by the way/i, type: 'preference' as const },
+    ];
+
+    for (const { pattern, type } of prefPatterns) {
+      if (pattern.test(text)) {
+        // Store as user note for the current field
+        const currentField = this.state.currentQuestion?.field || 'general';
+        this.addUserNote(currentField, text);
+        return {
+          type,
+          response: "Got it! I've noted that down. Let me factor that into your recommendations.",
+          actionTaken: `addedNote:${currentField}`,
+        };
+      }
+    }
+
+    // Check for questions
+    if (text.includes('?')) {
+      // Use LLM to generate helpful response
+      try {
+        const response = await callLLM([
+          { role: 'system', content: 'You are Snoo, a friendly travel planning assistant. Answer briefly and helpfully. If the question is about the planning process, explain what info you need.' },
+          { role: 'user', content: text },
+        ]);
+        return { type: 'question', response };
+      } catch {
+        return {
+          type: 'question',
+          response: "That's a great question! Let me get back to the planning and I can help answer that once I know more about your trip.",
+        };
+      }
+    }
+
+    // Default: treat as additional context
+    this.addUserNote('general', text);
+    return {
+      type: 'preference',
+      response: "Thanks for letting me know! I'll keep that in mind.",
+    };
+  }
+
+  // ============================================================================
+  // FIX 1.13: GO BACK FUNCTIONALITY
+  // ============================================================================
+
+  /**
+   * Go back to previous question to change an answer
+   */
+  goToPreviousQuestion(): boolean {
+    const questionHistory = (this.state as any).questionHistory || [];
+
+    if (questionHistory.length < 2) {
+      console.log('[Orchestrator] Cannot go back - at first question or no history');
+      return false; // Can't go back from first question
+    }
+
+    // Get the previous question's field
+    const currentField = questionHistory[questionHistory.length - 1];
+    const previousField = questionHistory[questionHistory.length - 2];
+
+    console.log('[Orchestrator] Going back from', currentField, 'to', previousField);
+
+    // Reset confidence for the previous field
+    if (previousField in this.state.confidence) {
+      (this.state.confidence as any)[previousField] = 'unknown';
+    }
+
+    // Clear the preference value for the previous field
+    if (previousField in this.state.preferences) {
+      delete (this.state.preferences as any)[previousField];
+    }
+
+    // Remove last item from history
+    questionHistory.pop();
+    (this.state as any).questionHistory = questionHistory;
+
+    // Clear current question to force re-evaluation
+    this.state.currentQuestion = null;
+
+    this.log('orchestrator', `Went back to ${previousField}`, { from: currentField, to: previousField });
+    return true;
+  }
+
+  /**
+   * Get the history of asked questions
+   */
+  getQuestionHistory(): string[] {
+    return (this.state as any).questionHistory || [];
+  }
+
   private getMissingRequiredFields(): string[] {
     const missing: string[] = [];
 
@@ -1603,9 +1778,10 @@ export class QuickPlanOrchestrator {
     }
 
     // Pet question asked after trip occasion (optional)
+    // FIX 1.6: Check for undefined specifically, not truthy (object {hasPet:false} is truthy)
     if (this.state.confidence.party !== 'unknown' &&
         (this.state.preferences as any).tripOccasion &&
-        !(this.state.preferences as any).travelingWithPets) {
+        (this.state.preferences as any).travelingWithPets === undefined) {
       missing.push('travelingWithPets');
     }
 
@@ -1634,6 +1810,18 @@ export class QuickPlanOrchestrator {
       missing.push('sustainabilityPreference');
     }
     if (this.state.confidence.activities === 'unknown') missing.push('activities');
+
+    // FIX 1.1 & 1.3: Add pace and vibe to required questions after activities
+    // These are critical for personalization but were being skipped
+    if (this.state.confidence.activities !== 'unknown' &&
+        !this.state.preferences.pace) {
+      missing.push('pace');
+    }
+
+    if (this.state.preferences.pace &&
+        !(this.state.preferences as any).vibe) {
+      missing.push('vibe');
+    }
 
     // Ask skill level after activities if user selected skill-based activities
     const SKILL_ACTIVITY_TYPES = ['surf', 'dive', 'snorkel', 'hiking', 'adventure', 'golf'];
@@ -1751,9 +1939,10 @@ export class QuickPlanOrchestrator {
       hasCuisinePreferences: !!(this.state.preferences as any).cuisinePreferences,
     });
 
-    // Dietary restrictions asked first (before cuisine preferences)
+    // FIX 1.7: Dietary restrictions asked after dining mode selected (not after 'complete')
+    // This ensures the question is asked right after user selects 'plan' mode
     if (wantsDiningHelp &&
-        this.state.confidence.dining === 'complete' &&
+        this.state.confidence.dining !== 'unknown' &&
         !(this.state.preferences as any).dietaryRestrictions) {
       console.log('[getMissingRequiredFields] >>> ADDING dietaryRestrictions TO MISSING <<<');
       missing.push('dietaryRestrictions');
@@ -2211,6 +2400,22 @@ Respond with just the field name.`;
       delete (this.state as any).pendingEventAlert;
     }
 
+    // FIX 1.4 continued: Show activity warnings for child ages
+    const activityWarnings = (this.state as any).activityWarnings;
+    if (activityWarnings && activityWarnings.length > 0) {
+      const warningList = activityWarnings.slice(0, 2).join('; ');
+      snooMessage = `${snooMessage}\n\n⚠️ **Note for families**: ${warningList}`;
+      // Clear warnings after showing
+      delete (this.state as any).activityWarnings;
+    }
+
+    // Show theme park warnings if any
+    const themeParkWarning = (this.state as any).themeParkWarning;
+    if (themeParkWarning) {
+      snooMessage = `${snooMessage}\n\n🎢 ${themeParkWarning}`;
+      delete (this.state as any).themeParkWarning;
+    }
+
     return {
       id: `q-${field}-${Date.now()}`,
       field: config.field,
@@ -2265,6 +2470,29 @@ Respond with just the field name.`;
   processUserResponse(questionId: string, response: unknown): void {
     const field = this.state.currentQuestion?.field;
     if (!field) return;
+
+    // FIX 1.13: Track question history for go-back functionality
+    const questionHistory = (this.state as any).questionHistory || [];
+    if (!questionHistory.includes(field)) {
+      questionHistory.push(field);
+      (this.state as any).questionHistory = questionHistory;
+    }
+
+    // FIX 1.14: Handle skip responses for optional questions
+    if (response === 'SKIP' || response === null || response === undefined) {
+      const config = FIELD_QUESTIONS[field];
+      if (config && !config.required) {
+        // Mark as intentionally skipped
+        this.setConfidence(field as keyof OrchestratorState['confidence'], 'inferred');
+        (this.state.preferences as any)[`${field}Skipped`] = true;
+        console.log(`[Orchestrator] User skipped optional field: ${field}`);
+        return;
+      } else {
+        // Required field - can't skip
+        console.log(`[Orchestrator] User tried to skip required field: ${field}, re-showing question`);
+        return; // Don't process, let the question re-appear
+      }
+    }
 
     // Handle tradeoff resolution
     if (field.startsWith('tradeoff:')) {
@@ -2349,6 +2577,46 @@ Respond with just the field name.`;
       case 'tripOccasion':
         const occasion = response as { id: string; label: string };
         (this.state.preferences as any).tripOccasion = occasion.id;
+        // FIX 1.8: Set confidence for tripOccasion
+        this.setConfidence('tripOccasion', 'confirmed');
+
+        // FIX 5.1: Apply Honeymoon Mode
+        if (occasion.id === 'honeymoon' || occasion.id === 'anniversary') {
+          (this.state.preferences as any).specialMode = 'romantic';
+          (this.state.preferences as any).vibeBoosts = ['romantic', 'intimate', 'luxury', 'secluded', 'sunset_views'];
+          (this.state.preferences as any).vibeFilters = ['party', 'backpacker', 'hostel', 'loud'];
+          (this.state.preferences as any).activityBoosts = ['spa_wellness', 'sunset_cruise', 'private_dinner', 'beach'];
+          (this.state.preferences as any).suggestUpgrade = true;
+          console.log('[Orchestrator] Honeymoon mode activated');
+        }
+
+        // FIX 5.2: Apply Backpacker Mode
+        if (occasion.id === 'backpacking' || occasion.id === 'gap_year' || occasion.id === 'budget_adventure') {
+          (this.state.preferences as any).specialMode = 'backpacker';
+          (this.state.preferences as any).accommodationTypes = ['hostel', 'guesthouse', 'budget_hotel'];
+          (this.state.preferences as any).vibeBoosts = ['backpacker', 'social', 'authentic', 'local', 'adventure'];
+          (this.state.preferences as any).activityBoosts = ['hiking', 'beach', 'cultural', 'food_tour', 'adventure'];
+          (this.state.preferences as any).optimizeForBudget = true;
+          console.log('[Orchestrator] Backpacker mode activated');
+        }
+
+        // Adventure mode
+        if (occasion.id === 'adventure' || occasion.id === 'extreme_sports') {
+          (this.state.preferences as any).specialMode = 'adventure';
+          (this.state.preferences as any).vibeBoosts = ['adventure', 'adrenaline', 'nature', 'outdoors'];
+          (this.state.preferences as any).activityBoosts = ['surf', 'diving', 'hiking', 'adventure', 'water_sports'];
+          console.log('[Orchestrator] Adventure mode activated');
+        }
+
+        // Wellness mode
+        if (occasion.id === 'wellness' || occasion.id === 'retreat') {
+          (this.state.preferences as any).specialMode = 'wellness';
+          (this.state.preferences as any).vibeBoosts = ['peaceful', 'wellness', 'nature', 'quiet', 'relaxed'];
+          (this.state.preferences as any).activityBoosts = ['spa_wellness', 'yoga', 'meditation', 'hiking', 'nature'];
+          (this.state.preferences as any).vibeFilters = ['party', 'nightlife', 'busy'];
+          console.log('[Orchestrator] Wellness mode activated');
+        }
+
         console.log('[Orchestrator] Trip occasion set:', occasion.id);
         break;
 
@@ -2426,11 +2694,28 @@ Respond with just the field name.`;
 
       case 'surfingDetails':
         const surfResponse = response as { id: string; label: string; isCustom?: boolean };
+        const surfLevel = surfResponse.id;
+
         (this.state.preferences as any).surfingDetails = {
-          level: surfResponse.id,
-          wantsLessons: surfResponse.id === 'never' || surfResponse.id === 'beginner',
+          level: surfLevel,
+          wantsLessons: surfLevel === 'never' || surfLevel === 'beginner',
           customNotes: surfResponse.isCustom ? surfResponse.label : undefined,
         };
+
+        // FIX 1.10: Apply surf level to area/experience filtering
+        if (surfLevel === 'never' || surfLevel === 'beginner') {
+          // Prioritize areas with surf schools and beginner-friendly breaks
+          (this.state.preferences as any).surfSchoolRequired = true;
+          (this.state.preferences as any).surfBreakType = 'beginner';
+        } else if (surfLevel === 'intermediate') {
+          // Allow intermediate spots with some variety
+          (this.state.preferences as any).surfBreakType = 'intermediate';
+        } else if (surfLevel === 'advanced' || surfLevel === 'expert') {
+          // Allow advanced spots with reef breaks, etc.
+          (this.state.preferences as any).allowAdvancedSpots = true;
+          (this.state.preferences as any).surfBreakType = 'advanced';
+        }
+
         console.log('[Orchestrator] Surfing details set:', (this.state.preferences as any).surfingDetails);
         break;
 
@@ -2494,6 +2779,23 @@ Respond with just the field name.`;
           avoidScary: themeParkIds.includes('avoid_scary'),
           customNotes: customThemeParkNotes,
         };
+
+        // FIX 1.11: Apply theme park preferences to itinerary planning
+        if (themeParkIds.includes('avoid_crowds')) {
+          (this.state.preferences as any).preferLowCrowdTimes = true;
+        }
+        if (themeParkIds.includes('thrill_seeker')) {
+          // Check child ages for ride restrictions
+          const parkChildAges = this.state.preferences.childAges || [];
+          if (parkChildAges.some(age => age < 10)) {
+            (this.state as any).themeParkWarning = 'Note: Some thrill rides have height/age restrictions for younger kids';
+          }
+        }
+        if (themeParkIds.includes('relaxed_pace')) {
+          // Suggest fewer parks per day
+          (this.state.preferences as any).parksPerDay = 1;
+        }
+
         console.log('[Orchestrator] Theme park prefs set:', (this.state.preferences as any).themeParkPreferences);
         break;
 
@@ -2521,11 +2823,26 @@ Respond with just the field name.`;
       case 'pace':
         const pace = response as { id: string; label: string };
         this.state.preferences.pace = pace.id as 'chill' | 'balanced' | 'packed';
-        this.setConfidence('vibe', 'complete'); // Pace answers the vibe question
+        // FIX 1.2: Set pace confidence, not vibe (vibe is a separate question)
+        this.setConfidence('pace', 'complete');
         break;
 
       case 'activities':
         const activities = response as { id: string; label: string; isCustom?: boolean }[];
+        const activityTypes = activities.map(a => a.id);
+        const childAges = this.state.preferences.childAges || [];
+
+        // FIX 1.4: Apply child age filtering to activities
+        if (childAges.length > 0) {
+          const filtered = filterActivitiesForChildAges(activityTypes, childAges);
+
+          if (filtered.restricted.length > 0) {
+            // Store warnings to show user in next message
+            (this.state as any).activityWarnings = filtered.warnings;
+            console.log('[Orchestrator] Activity warnings for child ages:', filtered.warnings);
+          }
+        }
+
         this.state.preferences.selectedActivities = activities.map(a => ({
           type: a.id as TripPreferences['selectedActivities'][0]['type'],
           priority: 'must-do' as const,

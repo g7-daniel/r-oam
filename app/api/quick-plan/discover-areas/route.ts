@@ -9,10 +9,130 @@ import { TripPreferences, AreaCandidate, RedditEvidence } from '@/types/quick-pl
 import { searchAreaRecommendations, AreaRecommendation } from '@/lib/reddit';
 import { discoverAreas, generateSplitOptions } from '@/lib/quick-plan/area-discovery';
 import { chatCompletion } from '@/lib/groq';
+import { prisma } from '@/lib/prisma';
+
+// Minimum hotels required for an area to be considered valid
+const MIN_HOTELS_FOR_VALID_AREA = 2;
 
 // Rate limiting: track last search per destination
 const searchTimestamps = new Map<string, number>();
 const SEARCH_COOLDOWN_MS = 60000; // 1 minute cooldown per destination
+
+/**
+ * Check hotel availability for an area by name
+ * Returns the count of hotels found in the database
+ */
+async function getHotelCountForArea(
+  areaName: string,
+  destination: string,
+  centerLat?: number,
+  centerLng?: number
+): Promise<number> {
+  try {
+    // Try multiple search strategies
+    let count = 0;
+
+    // Strategy 1: Search by area name in region/city fields
+    count = await prisma.hotel.count({
+      where: {
+        OR: [
+          { region: { contains: areaName, mode: 'insensitive' } },
+          { city: { contains: areaName, mode: 'insensitive' } },
+          { name: { contains: areaName, mode: 'insensitive' } },
+        ],
+        googleRating: { gte: 3.5 }, // Only count decent hotels
+      },
+    });
+
+    // Strategy 2: If no results by name and we have coordinates, search by proximity
+    if (count === 0 && centerLat && centerLng) {
+      // Search within ~10km radius (0.1 degrees ≈ 11km)
+      count = await prisma.hotel.count({
+        where: {
+          lat: { gte: centerLat - 0.1, lte: centerLat + 0.1 },
+          lng: { gte: centerLng - 0.1, lte: centerLng + 0.1 },
+          googleRating: { gte: 3.5 },
+        },
+      });
+    }
+
+    // Strategy 3: Search by destination country/region as fallback
+    if (count === 0) {
+      count = await prisma.hotel.count({
+        where: {
+          country: { contains: destination, mode: 'insensitive' },
+          googleRating: { gte: 3.5 },
+        },
+      });
+      // If searching by country, cap the "available" count to indicate general availability
+      if (count > 10) count = 10;
+    }
+
+    return count;
+  } catch (error) {
+    console.error(`Error checking hotels for ${areaName}:`, error);
+    return 0;
+  }
+}
+
+/**
+ * Validate areas have hotel availability and add hotel count metadata
+ */
+async function validateAreasWithHotels(
+  areas: AreaCandidate[],
+  destination: string
+): Promise<{ validatedAreas: AreaCandidate[]; excludedAreas: string[] }> {
+  const validatedAreas: AreaCandidate[] = [];
+  const excludedAreas: string[] = [];
+
+  for (const area of areas) {
+    const hotelCount = await getHotelCountForArea(
+      area.name,
+      destination,
+      area.centerLat,
+      area.centerLng
+    );
+
+    console.log(`[Area Validation] ${area.name}: ${hotelCount} hotels found`);
+
+    if (hotelCount >= MIN_HOTELS_FOR_VALID_AREA) {
+      validatedAreas.push({
+        ...area,
+        hotelCount, // Add hotel count for UI display
+      });
+    } else if (hotelCount > 0) {
+      // Has some hotels but below threshold - still include with warning
+      validatedAreas.push({
+        ...area,
+        hotelCount,
+        lowHotelInventory: true,
+      });
+    } else {
+      // No hotels at all - exclude but track
+      excludedAreas.push(area.name);
+      console.log(`[Area Validation] Excluding ${area.name} - no hotels found`);
+    }
+  }
+
+  // If we excluded too many areas and have very few left, be more lenient
+  if (validatedAreas.length < 2 && excludedAreas.length > 0) {
+    console.log(`[Area Validation] Only ${validatedAreas.length} areas passed validation, including excluded areas with warning`);
+    // Re-add excluded areas but flag them
+    for (const areaName of excludedAreas) {
+      const area = areas.find(a => a.name === areaName);
+      if (area) {
+        validatedAreas.push({
+          ...area,
+          hotelCount: 0,
+          lowHotelInventory: true,
+          needsHotelIndexing: true, // Signal that hotels should be indexed
+        });
+      }
+    }
+  }
+
+  return { validatedAreas, excludedAreas };
+}
 
 /**
  * Use LLM to discover areas based on destination and activities
@@ -92,11 +212,26 @@ Only respond with the JSON, no other text.`;
       { role: 'user', content: prompt },
     ], 0.3);
 
-    // Parse JSON from response
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.areas && Array.isArray(parsed.areas)) {
+    // FIX 2.9: Safe JSON parsing with multiple fallback strategies
+    let parsed: any = null;
+    try {
+      // Strategy 1: Find JSON object in response
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        // Strategy 2: Try parsing entire response as JSON
+        parsed = JSON.parse(response);
+      }
+    } catch (parseError) {
+      console.warn('[Area Discovery] Failed to parse LLM response as JSON:', parseError);
+      console.log('[Area Discovery] Raw response (first 500 chars):', response.substring(0, 500));
+
+      // Strategy 3: Attempt to extract areas from plain text
+      parsed = extractAreasFromText(response);
+    }
+
+    if (parsed?.areas && Array.isArray(parsed.areas)) {
         console.log(`LLM discovered ${parsed.areas.length} areas for ${destination}`);
         return parsed.areas.map((area: any, idx: number) => {
           // Build enhanced description with specific activities
@@ -123,13 +258,51 @@ Only respond with the JSON, no other text.`;
             specificActivities: area.specificActivities || [],
           };
         });
-      }
     }
   } catch (error) {
     console.error('LLM area discovery failed:', error);
   }
 
   return [];
+}
+
+/**
+ * FIX 2.9: Extract areas from plain text when JSON parsing fails
+ */
+function extractAreasFromText(text: string): { areas: any[] } | null {
+  const areas: any[] = [];
+
+  // Look for numbered lists or bullet points with area names
+  const patterns = [
+    /(?:^\d+\.\s*|^[-*•]\s*)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gm,
+    /\*\*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\*\*/g,
+    /(?:area|neighborhood|district|region):\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi,
+  ];
+
+  const seenNames = new Set<string>();
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null && areas.length < 8) {
+      const name = match[1]?.trim();
+      if (name && name.length > 2 && name.length < 50 && !seenNames.has(name.toLowerCase())) {
+        seenNames.add(name.toLowerCase());
+        areas.push({
+          name,
+          description: `Area extracted from LLM response`,
+          bestFor: [],
+          characteristics: [],
+        });
+      }
+    }
+  }
+
+  if (areas.length > 0) {
+    console.log(`[Area Discovery] Extracted ${areas.length} areas from text fallback`);
+    return { areas };
+  }
+
+  return null;
 }
 
 /**
@@ -304,8 +477,16 @@ export async function POST(request: NextRequest) {
     const areas = await discoverAreas(fullPreferences, combinedData);
     console.log(`Area discovery: Found ${areas.length} areas`);
 
+    // Validate hotel availability for discovered areas
+    console.log(`Area discovery: Validating hotel availability for ${areas.length} areas`);
+    const { validatedAreas: areasWithHotelData, excludedAreas } = await validateAreasWithHotels(
+      areas as AreaCandidate[],
+      destination
+    );
+    console.log(`Area discovery: ${areasWithHotelData.length} areas passed validation, ${excludedAreas.length} excluded`);
+
     // Add evidence to areas (prefer Reddit evidence, fall back to LLM note)
-    const areasWithEvidence = areas.map(area => {
+    const areasWithEvidence = areasWithHotelData.map(area => {
       // Find matching Reddit data
       const matchingReddit = combinedData.find(
         rd => !rd.llmGenerated && rd.mentionedAreas?.some((ma: any) =>
@@ -353,11 +534,15 @@ export async function POST(request: NextRequest) {
       redditPostCount: redditData.length,
       llmAreasCount: llmData.length,
       fromCache,
+      excludedAreas, // Areas excluded due to no hotel availability
       debug: {
         destination,
         redditAreasFound: redditData.length,
         llmAreasFound: llmData.length,
         mergedAreasCount: combinedData.length,
+        areasDiscovered: areas.length,
+        areasValidated: areasWithHotelData.length,
+        areasExcluded: excludedAreas.length,
         areasReturned: areasWithEvidence.length,
         splitsGenerated: splitOptions.length,
       },
