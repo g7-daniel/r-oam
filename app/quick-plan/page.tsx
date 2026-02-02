@@ -12,8 +12,8 @@ const QuickPlanChat = dynamic(
 );
 
 // Feature flag: use new chat UI or old wizard
-// Set NEXT_PUBLIC_QUICK_PLAN_CHAT=true in .env.local to enable new UI
-const USE_NEW_CHAT_UI = process.env.NEXT_PUBLIC_QUICK_PLAN_CHAT === 'true';
+// Set NEXT_PUBLIC_QUICK_PLAN_WIZARD=true in .env.local to use old wizard UI
+const USE_NEW_CHAT_UI = process.env.NEXT_PUBLIC_QUICK_PLAN_WIZARD !== 'true';
 
 export default function QuickPlanPage() {
   return (
