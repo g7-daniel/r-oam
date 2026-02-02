@@ -26,6 +26,43 @@ export default function MainItinerary({
     return new Set([0, 1, 2]);
   });
 
+  // Build hotel schedule from check-in/check-out items
+  const hotelSchedule = useMemo(() => {
+    const schedule: { dayIndex: number; hotelName: string; isCheckIn: boolean; isCheckOut: boolean }[] = [];
+
+    // Find all check-in and check-out items
+    const checkIns = scheduledItems.filter(item => item.category === 'hotel_checkin');
+    const checkOuts = scheduledItems.filter(item => item.category === 'hotel_checkout');
+
+    // Build a map of which hotel is active on each day
+    const hotelByDay = new Map<number, string>();
+
+    // Sort check-ins by day
+    const sortedCheckIns = [...checkIns].sort((a, b) =>
+      (a.scheduledDayIndex || 0) - (b.scheduledDayIndex || 0)
+    );
+
+    // For each check-in, mark all days until checkout
+    sortedCheckIns.forEach(checkIn => {
+      const startDay = checkIn.scheduledDayIndex || 0;
+      const hotelName = checkIn.hotelName || checkIn.name.replace('Check-in: ', '');
+
+      // Find matching checkout
+      const matchingCheckout = checkOuts.find(co =>
+        co.hotelName === checkIn.hotelName ||
+        co.name.replace('Check-out: ', '') === hotelName
+      );
+      const endDay = matchingCheckout?.scheduledDayIndex || startDay + 100; // Default to many days
+
+      // Mark all days from check-in to check-out (exclusive) as staying at this hotel
+      for (let d = startDay; d < endDay; d++) {
+        hotelByDay.set(d, hotelName);
+      }
+    });
+
+    return hotelByDay;
+  }, [scheduledItems]);
+
   // Build day-by-destination mapping
   const dayStructure = useMemo(() => {
     const structure: {
@@ -34,10 +71,12 @@ export default function MainItinerary({
       cityIcon: string;
       nights: number;
       startDayIndex: number;
+      hotelName?: string;
       days: {
         dayIndex: number;
         date: Date | null;
         items: typeof scheduledItems;
+        hotelName?: string;
       }[];
       transitTo?: {
         destinationName: string;
@@ -61,12 +100,18 @@ export default function MainItinerary({
         'default': '📍',
       };
 
+      // Get selected hotel for this destination (fallback)
+      const selectedHotel = dest.hotels?.selectedHotelId
+        ? dest.hotels.results?.find(h => h.id === dest.hotels.selectedHotelId)
+        : null;
+
       const cityData = {
         destinationId: dest.destinationId,
         destinationName: dest.place.name,
         cityIcon: cityIcons[dest.place.name] || cityIcons.default,
         nights: dest.nights,
         startDayIndex: currentDayIndex,
+        hotelName: selectedHotel?.name,
         days: [] as typeof structure[0]['days'],
         transitTo: undefined as typeof structure[0]['transitTo'],
       };
@@ -79,10 +124,14 @@ export default function MainItinerary({
         // Get scheduled items for this day
         const dayItems = scheduledItems.filter(item => item.scheduledDayIndex === dayIndex);
 
+        // Get hotel name from schedule (derived from check-in/check-out) or fallback
+        const dayHotelName = hotelSchedule.get(dayIndex) || selectedHotel?.name;
+
         cityData.days.push({
           dayIndex,
           date,
           items: dayItems,
+          hotelName: dayHotelName,
         });
       }
 
@@ -101,7 +150,7 @@ export default function MainItinerary({
     });
 
     return structure;
-  }, [destinations, basics.startDate, scheduledItems]);
+  }, [destinations, basics.startDate, scheduledItems, hotelSchedule]);
 
   const toggleDayExpanded = (dayIndex: number) => {
     setExpandedDays(prev => {
@@ -183,6 +232,7 @@ export default function MainItinerary({
                     isArrivalDay={isArrivalDay}
                     isDepartureDay={isDepartureDay}
                     destinationId={city.destinationId}
+                    hotelName={day.hotelName}
                   />
                 );
               })}

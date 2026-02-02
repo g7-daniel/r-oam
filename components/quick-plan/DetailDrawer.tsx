@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Star, DollarSign, MapPin, Clock, ExternalLink, MessageSquare, Check } from 'lucide-react';
 import type { HotelCandidate, RestaurantCandidate, Evidence } from '@/types/quick-plan';
@@ -46,6 +47,42 @@ export default function DetailDrawer({
   type,
   item,
 }: DetailDrawerProps) {
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Handle escape key to close drawer
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+
+  // Focus close button when drawer opens
+  useEffect(() => {
+    if (isOpen && closeButtonRef.current) {
+      closeButtonRef.current.focus();
+    }
+  }, [isOpen]);
+
+  // Prevent body scroll when drawer is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
   if (!item) return null;
 
   return (
@@ -59,15 +96,20 @@ export default function DetailDrawer({
             exit={{ opacity: 0 }}
             onClick={onClose}
             className="fixed inset-0 bg-black z-40"
+            aria-hidden="true"
           />
 
           {/* Drawer - slide up from bottom */}
           <motion.div
+            ref={drawerRef}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl z-50 max-h-[85vh] overflow-hidden flex flex-col shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="drawer-title"
           >
             {/* Handle bar */}
             <div className="flex justify-center pt-2 pb-1">
@@ -80,7 +122,7 @@ export default function DetailDrawer({
                 <p className="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">
                   {type === 'hotel' ? 'Hotel' : type === 'restaurant' ? 'Restaurant' : 'Experience'}
                 </p>
-                <h2 className="font-semibold text-slate-900 text-lg leading-tight">{item.name}</h2>
+                <h2 id="drawer-title" className="font-semibold text-slate-900 text-lg leading-tight">{item.name}</h2>
                 {(item as HotelCandidate | RestaurantCandidate).address && (
                   <p className="text-sm text-slate-500 mt-0.5 flex items-center gap-1">
                     <MapPin className="w-3 h-3" />
@@ -102,8 +144,10 @@ export default function DetailDrawer({
                 )}
               </div>
               <button
+                ref={closeButtonRef}
                 onClick={onClose}
                 className="p-2 hover:bg-slate-100 rounded-full transition-colors -mr-2"
+                aria-label="Close drawer"
               >
                 <X className="w-5 h-5 text-slate-400" />
               </button>
@@ -161,6 +205,7 @@ function HotelDetails({ hotel }: { hotel: HotelCandidate }) {
           <img
             src={hotel.imageUrl}
             alt={hotel.name}
+            loading="lazy"
             className="w-full h-full object-cover"
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = 'none';
@@ -293,6 +338,7 @@ function RestaurantDetails({ restaurant }: { restaurant: RestaurantCandidate }) 
           <img
             src={restaurant.imageUrl}
             alt={restaurant.name}
+            loading="lazy"
             className="w-full h-full object-cover"
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = 'none';
@@ -404,6 +450,7 @@ function ExperienceDetails({ experience }: { experience: ExperienceItem }) {
           <img
             src={experience.imageUrl}
             alt={experience.name}
+            loading="lazy"
             className="w-full h-full object-cover"
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = 'none';

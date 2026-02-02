@@ -1,7 +1,9 @@
 import type { SentimentData, RedditPost, RedditComment } from '@/types';
+import { fetchWithTimeout } from './api-cache';
 
 // Use Reddit's public JSON API (no authentication required)
 const REDDIT_BASE_URL = 'https://www.reddit.com';
+const REDDIT_TIMEOUT = 10000; // 10 second timeout for Reddit API
 
 export function getSubredditsForBudget(budgetPerPerson: number): string[] {
   if (budgetPerPerson >= 5000) {
@@ -23,7 +25,7 @@ export async function searchReddit(
 
     for (const subreddit of subreddits.slice(0, 3)) {
       try {
-        const response = await fetch(
+        const response = await fetchWithTimeout(
           `${REDDIT_BASE_URL}/r/${subreddit}/search.json?q=${encodeURIComponent(
             query
           )}&sort=relevance&limit=${limit}&restrict_sr=true`,
@@ -31,7 +33,8 @@ export async function searchReddit(
             headers: {
               'User-Agent': 'r-oam/1.0 (Reddit-Powered Travel Planner)',
             },
-          }
+          },
+          REDDIT_TIMEOUT
         );
 
         if (response.ok) {
@@ -69,13 +72,14 @@ export async function getPostComments(
   limit = 10
 ): Promise<RedditComment[]> {
   try {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${REDDIT_BASE_URL}/r/${subreddit}/comments/${postId}.json?limit=${limit}&depth=1`,
       {
         headers: {
           'User-Agent': 'r-oam/1.0 (Reddit-Powered Travel Planner)',
         },
-      }
+      },
+      REDDIT_TIMEOUT
     );
 
     if (!response.ok) {

@@ -131,6 +131,89 @@ export default function AddPlaceSearch({
 
     setIsLoading(true);
     try {
+      // Map categories to activity types for quick-plan API
+      const activityTypeMap: Record<string, string> = {
+        beaches: 'beach',
+        museums: 'cultural',
+        food_tours: 'food_tour',
+        nightlife: 'nightlife',
+        outdoor: 'hiking',
+        hidden_gems: 'cultural',
+        cultural: 'cultural',
+        wellness: 'spa_wellness',
+        adventure: 'adventure',
+        nature: 'nature',
+        landmarks: 'cultural',
+        water_sports: 'snorkel',
+        dining: 'dining',
+      };
+
+      // Check if this is a dining category
+      const isDiningCategory = categoryQuery && ['dining', 'restaurants', 'cafes', 'food'].includes(categoryQuery.toLowerCase());
+
+      if (isDiningCategory) {
+        // Use quick-plan restaurants API
+        const response = await fetch('/api/quick-plan/restaurants', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cuisineTypes: ['local', 'fine_dining'],
+            destination: destinationName,
+            hotels: {},
+            areas: [{
+              id: destinationId,
+              name: destinationName,
+              centerLat: destination?.place.lat,
+              centerLng: destination?.place.lng,
+            }],
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const allRestaurants = Object.values(data.restaurantsByCuisine || {}).flat() as PlaceResult[];
+          if (allRestaurants.length > 0) {
+            setPlaces(allRestaurants.map(r => ({
+              ...r,
+              category: 'dining',
+            })));
+            setIsLoading(false);
+            return;
+          }
+        }
+      } else if (categoryQuery) {
+        // Use quick-plan experiences API
+        const activityType = activityTypeMap[categoryQuery] || categoryQuery;
+        const response = await fetch('/api/quick-plan/experiences', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            activityTypes: [activityType],
+            destination: destinationName,
+            hotels: {},
+            areas: [{
+              id: destinationId,
+              name: destinationName,
+              centerLat: destination?.place.lat,
+              centerLng: destination?.place.lng,
+            }],
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const experiences = data.experiencesByType?.[activityType] || [];
+          if (experiences.length > 0) {
+            setPlaces(experiences.map((e: any) => ({
+              ...e,
+              category: categoryQuery,
+            })));
+            setIsLoading(false);
+            return;
+          }
+        }
+      }
+
       // Try Reddit-first if we have selected subreddits and a category
       if (selectedSubreddits.size > 0 && categoryQuery) {
         const redditResponse = await fetch('/api/recommendations', {

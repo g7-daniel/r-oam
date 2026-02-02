@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchWithTimeout } from '@/lib/api-cache';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
+const GOOGLE_API_TIMEOUT = 10000; // 10 second timeout
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -26,8 +28,10 @@ export async function GET(request: NextRequest) {
       key: apiKey,
     });
 
-    const response = await fetch(
-      `${GOOGLE_MAPS_BASE_URL}/place/autocomplete/json?${params}`
+    const response = await fetchWithTimeout(
+      `${GOOGLE_MAPS_BASE_URL}/place/autocomplete/json?${params}`,
+      {},
+      GOOGLE_API_TIMEOUT
     );
 
     if (!response.ok) {
@@ -53,8 +57,10 @@ export async function GET(request: NextRequest) {
             key: apiKey,
           });
 
-          const detailsResponse = await fetch(
-            `${GOOGLE_MAPS_BASE_URL}/place/details/json?${detailsParams}`
+          const detailsResponse = await fetchWithTimeout(
+            `${GOOGLE_MAPS_BASE_URL}/place/details/json?${detailsParams}`,
+            {},
+            GOOGLE_API_TIMEOUT
           );
 
           if (!detailsResponse.ok) {

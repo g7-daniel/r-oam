@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useTripStoreV2 } from '@/stores/tripStoreV2';
-import { Droppable, Draggable } from 'react-beautiful-dnd';
+import { Droppable, Draggable } from '@hello-pangea/dnd';
 import {
   MapPin,
   Utensils,

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTripStoreV2 } from '@/stores/tripStoreV2';
-import { DragDropContext, DropResult } from 'react-beautiful-dnd';
+import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import LeftSidebar from './LeftSidebar';
 import MainItinerary from './MainItinerary';
 import RightMapPanel from './RightMapPanel';
@@ -108,22 +108,22 @@ export default function ItineraryBuilder() {
 
         {/* Main content area */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Left Sidebar */}
+          {/* Left Sidebar - Browse & Saved (narrower) */}
           <div className={clsx(
-            "border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col",
+            "border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden flex flex-col flex-shrink-0",
             isMapExpanded
-              ? "w-[420px] lg:w-[460px] xl:w-[500px] flex-shrink-0"
-              : "flex-1"
+              ? "w-[320px] lg:w-[360px] xl:w-[400px]"
+              : "w-[280px] lg:w-[320px] xl:w-[360px]"
           )}>
             <LeftSidebar />
           </div>
 
-          {/* Main Area */}
+          {/* Main Area - Itinerary (wider) */}
           <div className={clsx(
-            "overflow-hidden flex flex-col",
+            "overflow-hidden flex flex-col flex-1 min-w-0",
             isMapExpanded
-              ? "flex-1"
-              : "flex-1"
+              ? ""
+              : ""
           )}>
             <MainItinerary
               selectedDayIndex={selectedDayIndex}

@@ -46,7 +46,7 @@ export interface CollectionItem {
   reservationTime?: string;
   destinationId?: string;
   source?: {
-    type: 'reddit' | 'ai' | 'curated' | 'google';
+    type: 'reddit' | 'ai' | 'curated' | 'google' | 'system';
     subreddit?: string;        // Source subreddit name
     quote?: string;
     upvotes?: number;          // Reddit upvotes
@@ -59,6 +59,9 @@ export interface CollectionItem {
   // Scheduling info
   scheduledDayIndex?: number;
   order?: number;
+  // Hotel check-in/check-out specific
+  hotelId?: string;
+  hotelName?: string;
 }
 
 // ============ CUSTOM LIST TYPE ============

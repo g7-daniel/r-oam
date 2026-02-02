@@ -3,9 +3,12 @@
  * Provides real-time hotel pricing from Booking.com
  */
 
+import { fetchWithTimeout } from './api-cache';
+
 const RAPIDAPI_HOST = 'booking-com15.p.rapidapi.com';
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '';
 const BASE_URL = `https://${RAPIDAPI_HOST}/api/v1`;
+const BOOKING_TIMEOUT = 15000; // 15 second timeout
 
 // Debug: Log if key is configured
 if (!RAPIDAPI_KEY) {
@@ -73,13 +76,13 @@ async function fetchBookingAPI<T>(endpoint: string, params: Record<string, strin
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
 
   try {
-    const response = await fetch(url.toString(), {
+    const response = await fetchWithTimeout(url.toString(), {
       method: 'GET',
       headers: {
         'x-rapidapi-host': RAPIDAPI_HOST,
         'x-rapidapi-key': RAPIDAPI_KEY,
       },
-    });
+    }, BOOKING_TIMEOUT);
 
     if (!response.ok) {
       console.error(`Booking.com API error: ${response.status} ${response.statusText}`);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Draggable } from 'react-beautiful-dnd';
+import { Draggable } from '@hello-pangea/dnd';
 import { useTripStoreV2 } from '@/stores/tripStoreV2';
 import {
   GripVertical,
@@ -103,6 +103,9 @@ export default function ScheduledItem({
   } : null;
 
   const isRestaurant = item.category === 'dining' || item.category === 'restaurants';
+  const isHotelCheckIn = item.category === 'hotel_checkin';
+  const isHotelCheckOut = item.category === 'hotel_checkout';
+  const isHotelItem = isHotelCheckIn || isHotelCheckOut;
 
   // Get opening hours display
   const getHoursDisplay = () => {
@@ -269,11 +272,14 @@ export default function ScheduledItem({
 
           {/* Item card */}
           <div
-            onClick={() => setShowDetailModal(true)}
+            onClick={() => !isHotelItem && setShowDetailModal(true)}
             className={clsx(
-              'group flex items-start gap-2 sm:gap-3 p-2 sm:p-3 rounded-xl border transition-all cursor-pointer',
+              'group flex items-start gap-2 sm:gap-3 p-2 sm:p-3 rounded-xl border transition-all',
+              !isHotelItem && 'cursor-pointer',
               snapshot.isDragging
                 ? 'shadow-lg border-primary-300 dark:border-primary-500 bg-white dark:bg-slate-800 rotate-1'
+                : isHotelItem
+                ? 'bg-violet-50/50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800'
                 : isRestaurant
                 ? 'bg-amber-50/50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 hover:border-amber-300 dark:hover:border-amber-700 hover:shadow-md'
                 : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md'
@@ -290,7 +296,9 @@ export default function ScheduledItem({
             {/* Number badge */}
             <div className={clsx(
               'flex-shrink-0 w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-bold mt-1',
-              isRestaurant
+              isHotelItem
+                ? 'bg-violet-500 text-white'
+                : isRestaurant
                 ? 'bg-amber-500 text-white'
                 : 'bg-primary-500 text-white'
             )}>

@@ -236,3 +236,95 @@ export function calculateRouteTravelTime(
   }
   return totalTime;
 }
+
+/**
+ * Estimate inter-area transit time (for trip planning between destinations)
+ * This accounts for longer distances that may require flights
+ */
+export function estimateInterAreaTransit(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): {
+  distanceKm: number;
+  timeText: string;
+  mode: 'drive' | 'flight' | 'train';
+  details: string;
+} {
+  const distanceKm = calculateDistance(lat1, lng1, lat2, lng2);
+
+  // Very short distance (same city/nearby)
+  if (distanceKm < 30) {
+    const minutes = Math.round((distanceKm / 40) * 60) + 10; // ~40km/h + buffer
+    return {
+      distanceKm,
+      timeText: `${minutes} min`,
+      mode: 'drive',
+      details: `${Math.round(distanceKm)} km drive`,
+    };
+  }
+
+  // Medium distance - driveable
+  if (distanceKm < 300) {
+    const hours = distanceKm / 60; // ~60km/h average with stops
+    if (hours < 1) {
+      return {
+        distanceKm,
+        timeText: `${Math.round(hours * 60)} min`,
+        mode: 'drive',
+        details: `${Math.round(distanceKm)} km drive`,
+      };
+    }
+    return {
+      distanceKm,
+      timeText: `${hours.toFixed(1)}h drive`,
+      mode: 'drive',
+      details: `${Math.round(distanceKm)} km`,
+    };
+  }
+
+  // Long distance but potentially trainable (Europe, Japan, etc.)
+  if (distanceKm < 800) {
+    const driveHours = distanceKm / 70; // Highway driving
+    const trainHours = distanceKm / 150; // High-speed train estimate
+    return {
+      distanceKm,
+      timeText: `${Math.round(driveHours)}h drive or ${trainHours.toFixed(1)}h train`,
+      mode: 'train',
+      details: `${Math.round(distanceKm)} km - train recommended`,
+    };
+  }
+
+  // Very long distance - consider flying
+  const flightHours = Math.max(1, distanceKm / 800); // ~800km/h + 2h airport time
+  const totalFlightTime = flightHours + 2; // Add airport buffer
+
+  if (totalFlightTime < 3) {
+    return {
+      distanceKm,
+      timeText: `~${Math.round(totalFlightTime)}h flight`,
+      mode: 'flight',
+      details: `${Math.round(distanceKm)} km - short flight`,
+    };
+  }
+
+  return {
+    distanceKm,
+    timeText: `${Math.round(totalFlightTime)}h+ flight`,
+    mode: 'flight',
+    details: `${Math.round(distanceKm)} km - flight recommended`,
+  };
+}
+
+/**
+ * Get transport mode emoji for inter-area travel
+ */
+export function getInterAreaTransportIcon(mode: 'drive' | 'flight' | 'train'): string {
+  switch (mode) {
+    case 'drive': return '🚗';
+    case 'flight': return '✈️';
+    case 'train': return '🚄';
+    default: return '🚗';
+  }
+}

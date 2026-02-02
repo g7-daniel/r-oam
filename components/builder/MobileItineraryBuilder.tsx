@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { DragDropContext, DropResult } from 'react-beautiful-dnd';
+import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import { useTripStoreV2 } from '@/stores/tripStoreV2';
 import LeftSidebar from './LeftSidebar';
 import MainItinerary from './MainItinerary';

@@ -9,8 +9,10 @@ import type {
 } from '@/types';
 import { filterByDistance, calculateHaversineDistance } from '@/lib/utils/geo';
 import { DestinationConfig } from '@/lib/configs/destinations';
+import { fetchWithTimeout } from './api-cache';
 
 const AMADEUS_BASE_URL = 'https://test.api.amadeus.com';
+const AMADEUS_TIMEOUT = 15000; // 15 second timeout
 
 // Hotel chain image mappings for fallback when Amadeus doesn't provide images
 function getHotelFallbackImage(hotelName: string): string {
@@ -79,7 +81,7 @@ async function getAccessToken(): Promise<string> {
     throw new Error('Amadeus credentials not configured');
   }
 
-  const response = await fetch(`${AMADEUS_BASE_URL}/v1/security/oauth2/token`, {
+  const response = await fetchWithTimeout(`${AMADEUS_BASE_URL}/v1/security/oauth2/token`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -89,7 +91,7 @@ async function getAccessToken(): Promise<string> {
       client_id: clientId,
       client_secret: clientSecret,
     }),
-  });
+  }, AMADEUS_TIMEOUT);
 
   if (!response.ok) {
     throw new Error(`Failed to get Amadeus token: ${response.statusText}`);
@@ -145,13 +147,14 @@ export async function searchFlights(
     searchParams.append('travelClass', params.travelClass);
   }
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${AMADEUS_BASE_URL}/v2/shopping/flight-offers?${searchParams}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-    }
+    },
+    AMADEUS_TIMEOUT
   );
 
   if (!response.ok) {
@@ -242,13 +245,14 @@ export async function searchRoundTripFlights(
     searchParams.append('travelClass', params.travelClass);
   }
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${AMADEUS_BASE_URL}/v2/shopping/flight-offers?${searchParams}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-    }
+    },
+    AMADEUS_TIMEOUT
   );
 
   if (!response.ok) {
@@ -333,13 +337,14 @@ export async function searchHotels(
     hotelSource: 'ALL',
   });
 
-  const hotelListResponse = await fetch(
+  const hotelListResponse = await fetchWithTimeout(
     `${AMADEUS_BASE_URL}/v1/reference-data/locations/hotels/by-city?${hotelListParams}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-    }
+    },
+    AMADEUS_TIMEOUT
   );
 
   if (!hotelListResponse.ok) {
@@ -369,13 +374,14 @@ export async function searchHotels(
     currency: 'USD',
   });
 
-  const offersResponse = await fetch(
+  const offersResponse = await fetchWithTimeout(
     `${AMADEUS_BASE_URL}/v3/shopping/hotel-offers?${offersParams}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-    }
+    },
+    AMADEUS_TIMEOUT
   );
 
   if (!offersResponse.ok) {
@@ -469,11 +475,12 @@ export async function getHotelListByCity(cityCode: string): Promise<
     hotelSource: 'ALL',
   });
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${AMADEUS_BASE_URL}/v1/reference-data/locations/hotels/by-city?${params}`,
     {
       headers: { Authorization: `Bearer ${token}` },
-    }
+    },
+    AMADEUS_TIMEOUT
   );
 
   if (!response.ok) {
@@ -504,11 +511,12 @@ export async function getHotelListByGeocode(lat: number, lng: number, radiusKm: 
     hotelSource: 'ALL',
   });
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${AMADEUS_BASE_URL}/v1/reference-data/locations/hotels/by-geocode?${params}`,
     {
       headers: { Authorization: `Bearer ${token}` },
-    }
+    },
+    AMADEUS_TIMEOUT
   );
 
   if (!response.ok) {
@@ -597,11 +605,12 @@ export async function getHotelPricesByIds(
     currency: 'USD',
   });
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${AMADEUS_BASE_URL}/v3/shopping/hotel-offers?${params}`,
     {
       headers: { Authorization: `Bearer ${token}` },
-    }
+    },
+    AMADEUS_TIMEOUT
   );
 
   if (!response.ok) {
@@ -955,7 +964,7 @@ export async function getAirportAutocomplete(query: string): Promise<
 
   const token = await getAccessToken();
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${AMADEUS_BASE_URL}/v1/reference-data/locations?subType=AIRPORT,CITY&keyword=${encodeURIComponent(
       query
     )}&page%5Blimit%5D=10`,
@@ -963,7 +972,8 @@ export async function getAirportAutocomplete(query: string): Promise<
       headers: {
         Authorization: `Bearer ${token}`,
       },
-    }
+    },
+    AMADEUS_TIMEOUT
   );
 
   if (!response.ok) {

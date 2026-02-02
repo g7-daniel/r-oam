@@ -105,3 +105,33 @@ export function createCacheKey(prefix: string, params: Record<string, any>): str
     .join('|');
   return `${prefix}:${sortedParams}`;
 }
+
+/**
+ * Fetch with timeout support to prevent hanging requests
+ * @param url - The URL to fetch
+ * @param options - Fetch options
+ * @param timeoutMs - Timeout in milliseconds (default 30 seconds)
+ */
+export async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs: number = 30000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms: ${url}`);
+    }
+    throw error;
+  }
+}

@@ -5,8 +5,11 @@
  * API Docs: https://docs.makcorps.com/hotel-price-apis
  */
 
+import { fetchWithTimeout } from './api-cache';
+
 const MAKCORPS_API_KEY = process.env.MAKCORPS_API_KEY;
 const MAKCORPS_BASE_URL = 'https://api.makcorps.com';
+const MAKCORPS_TIMEOUT = 15000; // 15 second timeout
 
 export interface MakcorpsPrice {
   vendor: string;
@@ -66,7 +69,7 @@ export async function mapCityToMakcorps(
     const url = `${MAKCORPS_BASE_URL}/mapping?api_key=${MAKCORPS_API_KEY}&name=${encodeURIComponent(searchQuery)}`;
 
     console.log(`[Makcorps] Mapping city: "${searchQuery}"`);
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
     const data = await response.json();
 
     if (!response.ok || data.error || (data.message && !Array.isArray(data))) {
@@ -118,7 +121,7 @@ export async function mapHotelToMakcorps(
     const url = `${MAKCORPS_BASE_URL}/mapping?api_key=${MAKCORPS_API_KEY}&name=${encodeURIComponent(searchQuery)}`;
 
     console.log(`[Makcorps] Mapping hotel: "${searchQuery}"`);
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
     const data = await response.json();
 
     if (!response.ok || data.error || (data.message && !Array.isArray(data))) {
@@ -193,7 +196,7 @@ export async function getHotelsByCity(
       `api_key=${MAKCORPS_API_KEY}`;
 
     console.log(`[Makcorps] Fetching hotels for city: ${cityId}, page ${pagination}`);
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
     const data = await response.json();
 
     if (!response.ok || data.error || data.message) {
@@ -292,7 +295,7 @@ export async function getHotelPricing(
       `api_key=${MAKCORPS_API_KEY}`;
 
     console.log(`[Makcorps] Fetching /hotel prices for: ${hotelId}`);
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
     const data = await response.json();
 
     if (!response.ok || data.error || data.message) {

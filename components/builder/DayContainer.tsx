@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Droppable } from 'react-beautiful-dnd';
+import { Droppable } from '@hello-pangea/dnd';
 import { useTripStoreV2 } from '@/stores/tripStoreV2';
 import ScheduledItem from './ScheduledItem';
 import AddPlaceSearch from './AddPlaceSearch';
@@ -13,6 +13,7 @@ import {
   Route,
   Calendar,
   Plane,
+  Building2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import clsx from 'clsx';
@@ -30,6 +31,7 @@ interface DayContainerProps {
   isArrivalDay?: boolean;
   isDepartureDay?: boolean;
   destinationId: string;
+  hotelName?: string;
 }
 
 export default function DayContainer({
@@ -44,6 +46,7 @@ export default function DayContainer({
   isArrivalDay,
   isDepartureDay,
   destinationId,
+  hotelName,
 }: DayContainerProps) {
   const { optimizeDay, autoFillDay } = useTripStoreV2();
   const [showAddPlace, setShowAddPlace] = useState(false);
@@ -107,6 +110,12 @@ export default function DayContainer({
                 <Plane className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                 <span className="hidden sm:inline">{isArrivalDay ? 'Arrival' : 'Departure'}</span>
                 <span className="sm:hidden">{isArrivalDay ? 'Arr' : 'Dep'}</span>
+              </span>
+            )}
+            {hotelName && (
+              <span className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 rounded-full text-[10px] sm:text-xs font-medium flex-shrink-0 max-w-[140px] sm:max-w-[200px] truncate">
+                <Building2 className="w-2.5 h-2.5 sm:w-3 sm:h-3 flex-shrink-0" />
+                <span className="truncate">{hotelName}</span>
               </span>
             )}
           </div>

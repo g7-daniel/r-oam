@@ -4,8 +4,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchWithTimeout } from '@/lib/api-cache';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
+const GOOGLE_API_TIMEOUT = 10000; // 10 second timeout
 
 interface PlaceDetails {
   placeId: string;
@@ -33,8 +35,10 @@ async function getPlaceDetails(placeId: string): Promise<PlaceDetails | null> {
       key: GOOGLE_MAPS_API_KEY,
     });
 
-    const response = await fetch(
-      `https://maps.googleapis.com/maps/api/place/details/json?${params}`
+    const response = await fetchWithTimeout(
+      `https://maps.googleapis.com/maps/api/place/details/json?${params}`,
+      {},
+      GOOGLE_API_TIMEOUT
     );
 
     const data = await response.json();
@@ -80,8 +84,10 @@ async function searchPlace(query: string, type?: string): Promise<PlaceDetails[]
       params.set('type', type);
     }
 
-    const response = await fetch(
-      `https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`
+    const response = await fetchWithTimeout(
+      `https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`,
+      {},
+      GOOGLE_API_TIMEOUT
     );
 
     const data = await response.json();
