@@ -18,6 +18,14 @@ const MONTH_NAMES = [
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+// Format date as YYYY-MM-DD without timezone conversion
+function formatDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export default function DateRangePicker({
   startDate,
   endDate,
@@ -79,7 +87,7 @@ export default function DateRangePicker({
   };
 
   const handleDateClick = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = formatDateString(date);
 
     // Check if date is before minimum
     if (minDate && dateStr < minDate) return;
@@ -106,29 +114,31 @@ export default function DateRangePicker({
 
   const isDateInRange = (date: Date) => {
     if (!startDate || !endDate) return false;
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = formatDateString(date);
     return dateStr > startDate && dateStr < endDate;
   };
 
   const isStartDate = (date: Date) => {
     if (!startDate) return false;
-    return date.toISOString().split('T')[0] === startDate;
+    return formatDateString(date) === startDate;
   };
 
   const isEndDate = (date: Date) => {
     if (!endDate) return false;
-    return date.toISOString().split('T')[0] === endDate;
+    return formatDateString(date) === endDate;
   };
 
   const isDisabled = (date: Date) => {
     if (date < today) return true;
-    if (minDate && date.toISOString().split('T')[0] < minDate) return true;
+    if (minDate && formatDateString(date) < minDate) return true;
     return false;
   };
 
   const formatDisplayDate = (dateStr: string | null) => {
     if (!dateStr) return '';
-    const date = new Date(dateStr);
+    // Parse YYYY-MM-DD without timezone conversion
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
     return date.toLocaleDateString('en-US', {
       weekday: 'short',
       month: 'short',
@@ -138,8 +148,11 @@ export default function DateRangePicker({
 
   const getTripDuration = () => {
     if (!startDate || !endDate) return null;
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    // Parse YYYY-MM-DD without timezone conversion
+    const [sy, sm, sd] = startDate.split('-').map(Number);
+    const [ey, em, ed] = endDate.split('-').map(Number);
+    const start = new Date(sy, sm - 1, sd);
+    const end = new Date(ey, em - 1, ed);
     const nights = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
     return nights;
   };
@@ -192,17 +205,17 @@ export default function DateRangePicker({
         )}
       </div>
 
-      {/* Calendar Dropdown */}
+      {/* Calendar Dropdown - centered modal for better visibility */}
       {isOpen && (
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 z-40"
+            className="fixed inset-0 z-40 bg-black/20"
             onClick={() => setIsOpen(false)}
           />
 
-          {/* Calendar */}
-          <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-200 p-4 z-50">
+          {/* Calendar - centered modal */}
+          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-white rounded-xl shadow-xl border border-slate-200 p-4 z-50 max-h-[80vh] overflow-y-auto">
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
               <button
@@ -294,8 +307,8 @@ export default function DateRangePicker({
                       end.setDate(end.getDate() + days);
 
                       onChange(
-                        start.toISOString().split('T')[0],
-                        end.toISOString().split('T')[0]
+                        formatDateString(start),
+                        formatDateString(end)
                       );
                       setSelectingEnd(false);
                       setIsOpen(false);

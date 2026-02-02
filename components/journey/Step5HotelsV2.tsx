@@ -488,9 +488,17 @@ export default function Step5HotelsV2() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const HOTELS_PER_PAGE = 50;
+  // Track hotels currently fetching pricing
+  const [pricingLoadingIds, setPricingLoadingIds] = useState<Set<string>>(new Set());
 
-  // Handler for Snoo Reddit recommendations
+  // Handler for Snoo Reddit recommendations - only applies when subreddits are selected
   const handleRedditHotelsFound = (hotels: RedditHotel[]) => {
+    // Only set Reddit recommendations if user has subreddits selected
+    if (selectedSubreddits.size === 0) {
+      console.log('Ignoring Snoo recommendations - no subreddits selected');
+      return;
+    }
+
     setRedditHotels(hotels);
     // Mark these hotels in the main list as Reddit-recommended
     if (activeDestination && hotels.length > 0) {
@@ -545,6 +553,7 @@ export default function Step5HotelsV2() {
       const checkOutDate = new Date(checkInDate);
       checkOutDate.setDate(checkOutDate.getDate() + activeDestination.nights);
 
+      console.log('Reddit: Fetching recommendations for', activeDestination.place.name, 'with subreddits:', Array.from(selectedSubreddits));
       const response = await fetch('/api/reddit/hotels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -563,60 +572,139 @@ export default function Step5HotelsV2() {
         }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        const hotels = data.hotels || [];
-        setRedditHotels(hotels);
+      console.log('Reddit: Response status:', response.status);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Reddit API error:', response.status, errorText);
+        return;
+      }
 
-        // Mark matching hotels in the main list with Reddit info
-        if (hotels.length > 0 && activeDestination.hotels.results.length > 0) {
-          // Create a map of Reddit hotel info for quick lookup
-          const redditHotelMap: Record<string, { upvotes: number; mentionCount: number }> = {};
-          hotels.forEach((rh: RedditHotel) => {
-            redditHotelMap[rh.name.toLowerCase()] = {
-              upvotes: rh.upvotes || 0,
-              mentionCount: rh.mentionCount || 1,
-            };
-          });
+      const data = await response.json();
+      const hotels = data.hotels || [];
+      console.log(`Reddit API returned ${hotels.length} hotels:`, hotels.map((h: any) => h.name));
+      setRedditHotels(hotels);
 
-          // Mark matching hotels as Reddit recommended
-          const updatedResults = activeDestination.hotels.results.map(hotel => {
-            // Try to find a Reddit match
-            let redditInfo: { upvotes: number; mentionCount: number } | undefined;
-            const hotelNameLower = hotel.name.toLowerCase();
+      if (hotels.length === 0) {
+        console.log('Reddit: No hotels found. Try different subreddits or destination.');
+        return;
+      }
 
-            for (const redditName of Object.keys(redditHotelMap)) {
-              if (fuzzyMatchHotelName(hotelNameLower, redditName)) {
-                redditInfo = redditHotelMap[redditName];
-                break;
-              }
+      // CORE FIX: Add Reddit hotels to results AND mark existing matches
+      const existingResults = activeDestination.hotels.results || [];
+
+      // Create a map of Reddit hotel info for quick lookup
+      const redditHotelMap: Record<string, { hotel: any; upvotes: number; mentionCount: number }> = {};
+      hotels.forEach((rh: any) => {
+        const key = rh.name?.toLowerCase().trim() || '';
+        if (key && !redditHotelMap[key]) { // Avoid duplicate Reddit entries
+          redditHotelMap[key] = {
+            hotel: rh,
+            upvotes: rh.upvotes || 0,
+            mentionCount: rh.mentionCount || 1,
+          };
+        }
+      });
+
+      // Track hotel names we've already processed to avoid duplicates
+      const processedNames = new Set<string>();
+      const matchedRedditNames = new Set<string>();
+
+      // Mark matching existing hotels as Reddit recommended
+      const updatedResults = existingResults
+        .filter(hotel => {
+          // Deduplicate by normalized name
+          const normalizedName = hotel.name.toLowerCase().trim().replace(/\s+/g, ' ');
+          if (processedNames.has(normalizedName)) {
+            console.log(`Removing duplicate: ${hotel.name}`);
+            return false;
+          }
+          processedNames.add(normalizedName);
+          return true;
+        })
+        .map(hotel => {
+          let redditInfo: { upvotes: number; mentionCount: number } | undefined;
+          const hotelNameLower = hotel.name.toLowerCase();
+
+          for (const redditName of Object.keys(redditHotelMap)) {
+            if (fuzzyMatchHotelName(hotelNameLower, redditName)) {
+              redditInfo = redditHotelMap[redditName];
+              matchedRedditNames.add(redditName);
+              break;
             }
+          }
 
-            return {
-              ...hotel,
-              isRedditRecommended: !!redditInfo,
-              redditUpvotes: redditInfo?.upvotes || 0,
-            };
-          });
+          return {
+            ...hotel,
+            isRedditRecommended: !!redditInfo,
+            redditUpvotes: redditInfo?.upvotes || 0,
+          };
+        });
 
-          // Sort: Reddit picks first (by upvotes), then others
-          const sortedResults = [...updatedResults].sort((a, b) => {
-            // Reddit recommended hotels come first
-            if (a.isRedditRecommended && !b.isRedditRecommended) return -1;
-            if (!a.isRedditRecommended && b.isRedditRecommended) return 1;
-            // Among Reddit picks, sort by upvotes
-            if (a.isRedditRecommended && b.isRedditRecommended) {
-              return ((b as any).redditUpvotes || 0) - ((a as any).redditUpvotes || 0);
-            }
-            // For non-Reddit hotels, keep original order (by rating/distance)
-            return 0;
-          });
+      // ADD Reddit hotels that weren't matched to existing results
+      const newRedditHotels: HotelType[] = [];
+      for (const [redditNameLower, info] of Object.entries(redditHotelMap)) {
+        // Skip if already matched to an existing hotel
+        if (matchedRedditNames.has(redditNameLower)) continue;
 
-          setHotelResults(activeDestination.destinationId, sortedResults);
+        // Skip if we already have this name in our processed list
+        const normalizedRedditName = redditNameLower.trim().replace(/\s+/g, ' ');
+        if (processedNames.has(normalizedRedditName)) {
+          console.log(`Skipping duplicate Reddit hotel: ${info.hotel.name}`);
+          continue;
+        }
+
+        if (info.hotel.name) {
+          processedNames.add(normalizedRedditName);
+          const rh = info.hotel;
+          // Create a hotel entry from Reddit data
+          const newHotel: HotelType = {
+            id: rh.id || `reddit-${normalizedRedditName.replace(/\s+/g, '-').slice(0, 30)}`,
+            name: rh.name,
+            address: rh.address || activeDestination.place.name,
+            city: activeDestination.place.name,
+            countryCode: activeDestination.place.countryCode || 'XX',
+            stars: Math.round(rh.rating) || 4,
+            pricePerNight: rh.pricePerNight || rh.priceEstimate || 250,
+            totalPrice: rh.totalPrice || ((rh.pricePerNight || 250) * activeDestination.nights),
+            currency: 'USD',
+            imageUrl: rh.imageUrl || HOTEL_IMAGES[Math.floor(Math.random() * HOTEL_IMAGES.length)],
+            amenities: ['wifi'],
+            distanceToCenter: 10, // Unknown - set moderate distance
+            lat: rh.lat || activeDestination.place.lat || 0,
+            lng: rh.lng || activeDestination.place.lng || 0,
+            guestRating: rh.rating ? rh.rating * 2 : 8.0,
+            isRedditRecommended: true,
+            redditUpvotes: info.upvotes,
+            source: 'reddit',
+            hasRealPricing: rh.priceIsReal === true,
+          };
+          newRedditHotels.push(newHotel);
         }
       }
+
+      console.log(`Reddit: ${matchedRedditNames.size} matched existing, ${newRedditHotels.length} new hotels added, ${processedNames.size} total unique`);
+
+      // Combine: Reddit-only hotels first, then matched+existing
+      const allHotels = [...newRedditHotels, ...updatedResults];
+
+      // Sort: Reddit picks first (by upvotes), then others
+      const sortedResults = allHotels.sort((a, b) => {
+        // Reddit recommended hotels come first
+        if (a.isRedditRecommended && !b.isRedditRecommended) return -1;
+        if (!a.isRedditRecommended && b.isRedditRecommended) return 1;
+        // Among Reddit picks, sort by upvotes
+        if (a.isRedditRecommended && b.isRedditRecommended) {
+          return ((b as any).redditUpvotes || 0) - ((a as any).redditUpvotes || 0);
+        }
+        // For non-Reddit hotels, keep original order (by rating/distance)
+        return 0;
+      });
+
+      setHotelResults(activeDestination.destinationId, sortedResults);
     } catch (error) {
       console.error('Failed to fetch Reddit recommendations:', error);
+      // Show a message but don't block
+      setRedditHotels([]);
     } finally {
       setIsLoadingReddit(false);
     }
@@ -722,26 +810,30 @@ export default function Step5HotelsV2() {
 
         if (Array.isArray(apiHotels) && apiHotels.length > 0) {
           // Transform API response to match our schema and add images
+          // Layer 1 returns hotels without pricing - that's fetched on demand via Layer 2
           const hotels: HotelType[] = apiHotels.map((h: any, idx: number) => ({
             id: h.id,
+            placeId: h.placeId, // Needed for Layer 2 pricing lookup
             name: h.name,
             address: h.address || activeDestination.place.name,
             city: h.city || activeDestination.place.name,
-            countryCode: activeDestination.place.countryCode || 'XX',
+            countryCode: activeDestination.place.countryCode || h.countryCode || 'XX',
             stars: h.stars || 4,
-            pricePerNight: Math.round(h.pricePerNight),
-            totalPrice: Math.round(h.totalPrice),
+            // Layer 1 may return null pricing - use estimate if not available
+            pricePerNight: h.pricePerNight != null ? Math.round(h.pricePerNight) : 200,
+            totalPrice: h.totalPrice != null ? Math.round(h.totalPrice) : 200 * activeDestination.nights,
             currency: h.currency || 'USD',
             imageUrl: h.imageUrl || HOTEL_IMAGES[idx % HOTEL_IMAGES.length],
             amenities: h.amenities || ['wifi'],
             distanceToCenter: h.distanceToCenter || 1.0,
-            lat: h.latitude || 0,
-            lng: h.longitude || 0,
+            lat: h.latitude || h.lat || 0,
+            lng: h.longitude || h.lng || 0,
             guestRating: h.guestRating || null,
             reviewCount: h.reviewCount || 0,
             isRedditRecommended: false, // Will be set after Reddit fetch
-            source: h.source || 'amadeus',
+            source: h.source || 'google_places_index',
             hasRealPricing: h.hasRealPricing === true,
+            pricingStatus: h.pricingStatus || (h.hasRealPricing ? 'available' : 'not_fetched'),
           }));
           setHotelResults(activeDestination.destinationId, hotels);
           hotelsFetched = true;
@@ -774,12 +866,33 @@ export default function Step5HotelsV2() {
   // Use stringified subreddits to avoid Set reference comparison issues
   const subredditsKey = Array.from(selectedSubreddits).sort().join(',');
   useEffect(() => {
-    if (activeDestination && selectedSubreddits.size > 0) {
-      const debounceTimer = setTimeout(() => {
-        fetchRedditRecommendations();
-      }, 500);
-      return () => clearTimeout(debounceTimer);
+    if (!activeDestination) return;
+
+    // If no subreddits selected, CLEAR all Reddit recommendations
+    if (selectedSubreddits.size === 0) {
+      console.log('Reddit: No subreddits selected, clearing ALL Reddit picks');
+      setRedditHotels([]);
+      // ALWAYS clear isRedditRecommended from all existing hotels
+      const existingResults = activeDestination.hotels.results || [];
+      const redditCount = existingResults.filter(h => h.isRedditRecommended).length;
+      console.log(`Reddit: Clearing ${redditCount} hotels with isRedditRecommended flag`);
+
+      // Force clear even if count is 0 (in case of stale data)
+      const clearedResults = existingResults.map(hotel => ({
+        ...hotel,
+        isRedditRecommended: false,
+        redditUpvotes: 0,
+      }));
+      setHotelResults(activeDestination.destinationId, clearedResults);
+      console.log('Reddit: Cleared all Reddit flags');
+      return;
     }
+
+    console.log(`Reddit: Subreddits changed to [${subredditsKey}], fetching recommendations...`);
+    const debounceTimer = setTimeout(() => {
+      fetchRedditRecommendations();
+    }, 500);
+    return () => clearTimeout(debounceTimer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDestination?.destinationId, subredditsKey]);
 
@@ -791,8 +904,9 @@ export default function Step5HotelsV2() {
     if (hotelNameSearch.trim() && !hotel.name.toLowerCase().includes(hotelNameSearch.toLowerCase().trim())) {
       return false;
     }
-    // Price filter
-    if (hotel.pricePerNight < priceFilter[0] || hotel.pricePerNight > priceFilter[1]) {
+    // Price filter - handle null pricing (show hotels without pricing if filter allows estimate range)
+    const price = hotel.pricePerNight || 200; // Default estimate
+    if (price < priceFilter[0] || price > priceFilter[1]) {
       return false;
     }
     // Star filter
@@ -832,6 +946,67 @@ export default function Step5HotelsV2() {
     const currentSelection = activeDestination.hotels.selectedHotelId;
     selectHotel(activeDestination.destinationId, currentSelection === hotelId ? null : hotelId);
   };
+
+  // Fetch pricing for a single hotel (Layer 2)
+  const fetchPricing = useCallback(async (placeId: string) => {
+    if (!activeDestination || pricingLoadingIds.has(placeId)) return;
+
+    // Calculate dates
+    const today = new Date();
+    today.setDate(today.getDate() + 7);
+    const startDate = basics.startDate || today.toISOString().split('T')[0];
+    const startDateObj = new Date(startDate);
+
+    const destIndex = destinations.findIndex(d => d.destinationId === activeDestination.destinationId);
+    let offsetDays = 0;
+    for (let i = 0; i < destIndex; i++) {
+      offsetDays += destinations[i].nights;
+    }
+
+    const checkInDate = new Date(startDateObj);
+    checkInDate.setDate(checkInDate.getDate() + offsetDays);
+    const checkOutDate = new Date(checkInDate);
+    checkOutDate.setDate(checkOutDate.getDate() + activeDestination.nights);
+
+    setPricingLoadingIds(prev => new Set(prev).add(placeId));
+
+    try {
+      const params = new URLSearchParams({
+        placeId,
+        checkIn: checkInDate.toISOString().split('T')[0],
+        checkOut: checkOutDate.toISOString().split('T')[0],
+        adults: String(basics.travelers.adults),
+      });
+
+      const response = await fetch(`/api/hotels/pricing?${params}`);
+      if (response.ok) {
+        const data = await response.json();
+
+        // Update the hotel in results with pricing
+        const updatedResults = activeDestination.hotels.results.map(hotel => {
+          if ((hotel as any).placeId === placeId) {
+            return {
+              ...hotel,
+              pricePerNight: data.pricePerNight || hotel.pricePerNight,
+              totalPrice: data.totalPrice || (data.pricePerNight ? data.pricePerNight * activeDestination.nights : hotel.totalPrice),
+              hasRealPricing: data.hasAvailability,
+              pricingStatus: data.hasAvailability ? 'available' : 'unavailable',
+            };
+          }
+          return hotel;
+        });
+        setHotelResults(activeDestination.destinationId, updatedResults);
+      }
+    } catch (error) {
+      console.error('Failed to fetch pricing:', error);
+    } finally {
+      setPricingLoadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(placeId);
+        return next;
+      });
+    }
+  }, [activeDestination, basics, destinations, setHotelResults, pricingLoadingIds]);
 
   const toggleStarFilter = (stars: number) => {
     setStarFilter((prev) =>
@@ -1292,7 +1467,7 @@ export default function Step5HotelsV2() {
                 <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
                   <span>
                     Showing {Math.min(currentPage * HOTELS_PER_PAGE, filteredHotels.length)} of {filteredHotels.length} hotels
-                    {filteredHotels.filter(h => h.isRedditRecommended).length > 0 && (
+                    {selectedSubreddits.size > 0 && filteredHotels.filter(h => h.isRedditRecommended).length > 0 && (
                       <span className="ml-2 text-orange-500">
                         ({filteredHotels.filter(h => h.isRedditRecommended).length} Reddit picks)
                       </span>
@@ -1316,7 +1491,9 @@ export default function Step5HotelsV2() {
                       className={clsx(
                         'cursor-pointer transition-all',
                         isSelected
-                          ? 'ring-2 ring-primary-500 bg-primary-50 dark:bg-primary-900/30'
+                          ? 'ring-2 ring-primary-500 !bg-primary-50 dark:!bg-primary-900/30'
+                          : hotel.isRedditRecommended && selectedSubreddits.size > 0
+                          ? '!bg-orange-50 dark:!bg-orange-900/20 border-orange-200 dark:border-orange-800 hover:shadow-md'
                           : 'hover:shadow-md'
                       )}
                       onClick={() => setModalHotel(hotel)}
@@ -1333,8 +1510,8 @@ export default function Step5HotelsV2() {
                               img.src = HOTEL_IMAGES[Math.floor(Math.random() * HOTEL_IMAGES.length)];
                             }}
                           />
-                          {/* Reddit Pick badge - prominent position */}
-                          {hotel.isRedditRecommended && (
+                          {/* Reddit Pick badge - only show when subreddits are selected */}
+                          {hotel.isRedditRecommended && selectedSubreddits.size > 0 && (
                             <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-1 bg-orange-500 text-white text-xs font-medium rounded-full shadow-sm">
                               <MessageCircle className="w-3 h-3" />
                               Reddit Pick
@@ -1344,9 +1521,13 @@ export default function Step5HotelsV2() {
                           {/* Price type badge - only show if not Reddit recommended */}
                           {!hotel.isRedditRecommended && (
                             <div className="absolute top-2 left-2">
-                              {hotel.hasRealPricing ? (
+                              {(hotel as any).pricingStatus === 'available' || hotel.hasRealPricing ? (
                                 <span className="px-1.5 py-0.5 bg-green-500/90 text-white text-[10px] font-medium rounded backdrop-blur-sm">
                                   Live Price
+                                </span>
+                              ) : (hotel as any).pricingStatus === 'unavailable' ? (
+                                <span className="px-1.5 py-0.5 bg-amber-500/90 text-white text-[10px] font-medium rounded backdrop-blur-sm">
+                                  No Rates
                                 </span>
                               ) : (
                                 <span className="px-1.5 py-0.5 bg-slate-500/80 text-white text-[10px] font-medium rounded backdrop-blur-sm">
@@ -1414,29 +1595,51 @@ export default function Step5HotelsV2() {
                         </div>
 
                         {/* Price */}
-                        <div className="text-right flex-shrink-0">
-                          <div className="flex items-baseline justify-end gap-1">
-                            {!hotel.hasRealPricing && (
-                              <span className="text-sm text-slate-400">~</span>
-                            )}
-                            <p className={clsx(
-                              "text-2xl font-bold",
-                              hotel.hasRealPricing
-                                ? "text-green-600 dark:text-green-400"
-                                : "text-slate-900 dark:text-white"
-                            )}>
-                              ${hotel.pricePerNight}
-                            </p>
-                          </div>
-                          <p className="text-sm text-slate-500 dark:text-slate-400">
-                            per night {!hotel.hasRealPricing && <span className="text-xs italic">(est.)</span>}
-                          </p>
-                          <p className="text-lg font-semibold text-primary-600 dark:text-primary-400 mt-2">
-                            ${hotel.totalPrice.toLocaleString()}
-                          </p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {activeDestination.nights} nights total
-                          </p>
+                        <div className="text-right flex-shrink-0 min-w-[120px]">
+                          {/* Pricing status display */}
+                          {(hotel as any).pricingStatus === 'available' || hotel.hasRealPricing ? (
+                            <>
+                              <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                                ${hotel.pricePerNight}
+                              </p>
+                              <p className="text-sm text-slate-500 dark:text-slate-400">per night</p>
+                              <p className="text-lg font-semibold text-primary-600 dark:text-primary-400 mt-2">
+                                ${hotel.totalPrice.toLocaleString()}
+                              </p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                {activeDestination.nights} nights total
+                              </p>
+                            </>
+                          ) : (hotel as any).pricingStatus === 'unavailable' ? (
+                            <>
+                              <p className="text-slate-400 dark:text-slate-500 text-sm mb-1">No live rates</p>
+                              <p className="text-xl font-bold text-slate-600 dark:text-slate-300">
+                                ~${hotel.pricePerNight}
+                              </p>
+                              <p className="text-xs text-slate-400 italic">estimated</p>
+                            </>
+                          ) : pricingLoadingIds.has((hotel as any).placeId) ? (
+                            <div className="flex flex-col items-end">
+                              <Loader2 className="w-5 h-5 animate-spin text-primary-500 mb-1" />
+                              <span className="text-sm text-slate-400">Checking rates...</span>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-xl font-bold text-slate-600 dark:text-slate-300 mb-1">
+                                ~${hotel.pricePerNight}
+                              </p>
+                              <p className="text-xs text-slate-400 italic mb-2">estimated</p>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  fetchPricing((hotel as any).placeId);
+                                }}
+                                className="px-3 py-1.5 bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400 text-xs font-medium rounded-lg hover:bg-primary-200 dark:hover:bg-primary-900 transition-colors"
+                              >
+                                Get live price
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </Card>

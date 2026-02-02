@@ -11,6 +11,7 @@ export default function HomePage() {
         <ThemeToggle />
       </div>
 
+
       {/* Subtle gradient background */}
       <div className="absolute inset-0 pointer-events-none">
         <div
@@ -38,20 +39,65 @@ export default function HomePage() {
           <span className="text-slate-700 dark:text-slate-300">Just honest recommendations from Reddit.</span>
         </p>
 
-        {/* CTA Button with pulse animation */}
-        <Link
-          href="/plan/start"
-          className="group relative inline-flex items-center justify-center"
-        >
-          {/* Animated glow ring */}
-          <span className="absolute inset-0 rounded-full bg-orange-500/30 blur-md animate-ping" style={{ animationDuration: '2s' }} />
-          <span className="absolute inset-0 rounded-full bg-orange-500/20 blur-lg scale-110 group-hover:scale-125 transition-transform duration-500" />
+        {/* CTA Buttons */}
+        <div className="flex flex-col gap-8 items-center justify-center">
+          {/* AI Quick Plan - Main CTA */}
+          <Link
+            href="/quick-plan"
+            className="group relative inline-flex items-center justify-center"
+          >
+            {/* Outer mega aura - pulsing slow */}
+            <span
+              className="absolute w-64 h-24 rounded-full bg-orange-500/20 blur-2xl animate-pulse"
+              style={{ animationDuration: '3s' }}
+            />
+            {/* Middle aura - breathing effect */}
+            <span
+              className="absolute w-56 h-20 rounded-full bg-orange-400/30 blur-xl"
+              style={{
+                animation: 'breathe 2s ease-in-out infinite',
+              }}
+            />
+            {/* Inner glow ring */}
+            <span className="absolute inset-0 rounded-full bg-orange-500/20 blur-lg scale-110 group-hover:scale-125 transition-transform duration-500" />
 
-          {/* Button */}
-          <span className="relative px-10 py-4 bg-orange-500 hover:bg-orange-600 text-white text-lg font-semibold rounded-full transition-all duration-300 hover:shadow-[0_0_40px_rgba(255,69,0,0.4)]">
-            START PLANNING
-          </span>
-        </Link>
+            {/* Button */}
+            <span className="relative px-10 py-4 bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 hover:from-orange-500 hover:via-orange-600 hover:to-orange-700 text-white text-lg font-semibold rounded-full transition-all duration-300 shadow-lg shadow-orange-500/40 hover:shadow-[0_0_50px_rgba(255,69,0,0.5)] flex items-center gap-3 group-hover:scale-105">
+              {/* Lightning icon */}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="drop-shadow-[0_0_6px_rgba(255,255,255,0.8)]"
+              >
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+              Plan/r
+            </span>
+          </Link>
+
+          {/* Classic Planning - Secondary smaller option */}
+          <Link
+            href="/plan/start"
+            className="group relative inline-flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity duration-300"
+          >
+            <span className="relative px-6 py-2 text-slate-500 dark:text-slate-400 text-sm font-medium rounded-full border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-300 hover:bg-slate-50 dark:hover:bg-slate-800/50 flex items-center gap-2">
+              <span className="text-slate-400 dark:text-slate-500">slow</span>
+              <span className="text-orange-500">r/</span>
+              <span className="text-slate-600 dark:text-slate-400">owm</span>
+            </span>
+          </Link>
+        </div>
+
+        {/* Custom animation keyframes */}
+        <style jsx>{`
+          @keyframes breathe {
+            0%, 100% { transform: scale(1); opacity: 0.3; }
+            50% { transform: scale(1.2); opacity: 0.5; }
+          }
+        `}</style>
 
         {/* Beta badge */}
         <div className="mt-16">

@@ -28,6 +28,9 @@ export interface RedditHotel {
   priceRange?: string;
   estimatedPrice?: number;
   priceEstimate?: number;
+  pricePerNight?: number;
+  totalPrice?: number;
+  priceIsReal?: boolean;
   subreddit?: string;
   upvotes?: number;
   url?: string;
@@ -48,6 +51,10 @@ interface HotelSnooChatProps {
   destinationName: string;
   lat?: number;
   lng?: number;
+  cityCode?: string;
+  checkInDate?: string;
+  checkOutDate?: string;
+  adults?: number;
   onHotelsFound?: (hotels: RedditHotel[]) => void;
 }
 
@@ -88,7 +95,7 @@ const QUESTIONS = [
   },
 ];
 
-export default function HotelSnooChat({ destinationName, lat, lng, onHotelsFound }: HotelSnooChatProps) {
+export default function HotelSnooChat({ destinationName, lat, lng, cityCode, checkInDate, checkOutDate, adults, onHotelsFound }: HotelSnooChatProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
@@ -130,6 +137,10 @@ export default function HotelSnooChat({ destinationName, lat, lng, onHotelsFound
           destination: destinationName,
           lat,
           lng,
+          cityCode,
+          checkInDate,
+          checkOutDate,
+          adults,
           preferences: finalAnswers,
         }),
       });

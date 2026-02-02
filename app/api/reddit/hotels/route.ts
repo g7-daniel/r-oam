@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { searchHotelRecommendations, checkHotelRedditStatus, searchReddit, analyzeSentiment } from '@/lib/reddit';
 import { searchPlaces } from '@/lib/google-maps';
 import { calculateHaversineDistance } from '@/lib/utils/geo';
+import { getAmadeusPricesForHotels } from '@/lib/amadeus';
 
-// Minimum upvote threshold for quality filtering
-const MIN_UPVOTES = 20;
+// Minimum upvote threshold for quality filtering (lowered for better coverage)
+const MIN_UPVOTES = 5;
 
 // Budget mapping for preferences
 const BUDGET_MAP: Record<string, number> = {
@@ -181,7 +182,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { destination, preferences, subreddits, lat, lng } = body;
+    const { destination, preferences, subreddits, lat, lng, cityCode, checkInDate, checkOutDate, adults } = body;
     const destinationCoords = lat && lng ? { lat, lng } : undefined;
 
     if (!destination) {
@@ -210,11 +211,26 @@ export async function POST(request: NextRequest) {
 
     if (subreddits && subreddits.length > 0) {
       // Search each selected subreddit for hotel mentions
+      // Include luxury-specific queries for fatfire/luxurytravel subreddits
+      const isLuxurySearch = subreddits.some((s: string) =>
+        ['fatfire', 'fattravel', 'luxurytravel'].includes(s.toLowerCase())
+      );
+
       const searchQueries = [
         `${destination} hotel recommendation`,
         `${destination} where to stay`,
         `${destination} best hotel`,
         `${destination} resort`,
+        // Add luxury-specific searches
+        ...(isLuxurySearch ? [
+          `${destination} luxury hotel`,
+          `${destination} Amanera`,
+          `${destination} Four Seasons`,
+          `${destination} Ritz Carlton`,
+          `${destination} St Regis`,
+          `${destination} five star`,
+          `${destination} high end resort`,
+        ] : []),
       ];
 
       const hotelMentions = new Map<string, {
@@ -286,21 +302,32 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      console.log(`Reddit search found ${hotelMentions.size} unique hotel mentions before filtering`);
+
       // Convert to array and sort by mentions + upvotes
       const rawRecommendations = Array.from(hotelMentions.values())
         .filter(h => {
           // Filter: must have positive sentiment, and name must look like a real hotel
-          if (h.count < 1 || h.totalScore < 0) return false;
+          if (h.count < 1 || h.totalScore < 0) {
+            console.log(`Filtered out "${h.name}" - sentiment: ${h.totalScore}`);
+            return false;
+          }
 
           const name = h.name.toLowerCase();
           // Must be at least 2 words OR contain a known brand
           const words = h.name.trim().split(/\s+/);
           const hasKnownBrand = KNOWN_HOTEL_BRANDS.some(brand => name.includes(brand));
-          if (words.length < 2 && !hasKnownBrand) return false;
+          if (words.length < 2 && !hasKnownBrand) {
+            console.log(`Filtered out "${h.name}" - not a known brand and < 2 words`);
+            return false;
+          }
 
           // Reject names that are just locations
           const locationWords = ['in', 'at', 'the', 'and', 'a', 'an'];
-          if (locationWords.includes(words[0].toLowerCase())) return false;
+          if (locationWords.includes(words[0].toLowerCase())) {
+            console.log(`Filtered out "${h.name}" - starts with location word`);
+            return false;
+          }
 
           return true;
         })
@@ -355,6 +382,51 @@ export async function POST(request: NextRequest) {
       const verifiedResults = await Promise.all(verificationPromises);
       recommendations = verifiedResults.filter(Boolean) as any[];
 
+      // FALLBACK: If luxury search but few results, add known luxury hotels for the destination
+      if (isLuxurySearch && recommendations.length < 5) {
+        console.log(`Reddit: Only ${recommendations.length} luxury hotels found, adding fallback luxury hotels`);
+
+        // Known luxury hotels by destination
+        const LUXURY_HOTELS_BY_DEST: Record<string, string[]> = {
+          'dominican republic': ['Amanera', 'Casa de Campo', 'Eden Roc Cap Cana', 'St. Regis Cap Cana', 'Tortuga Bay'],
+          'punta cana': ['Eden Roc Cap Cana', 'Excellence Punta Cana', 'Sanctuary Cap Cana', 'Secrets Cap Cana'],
+          'mexico': ['Four Seasons Punta Mita', 'One&Only Palmilla', 'Las Ventanas al Paraiso', 'Rosewood Mayakoba'],
+          'costa rica': ['Four Seasons Peninsula Papagayo', 'Andaz Costa Rica', 'Nayara Gardens'],
+          'maldives': ['Soneva Fushi', 'One&Only Reethi Rah', 'Four Seasons Landaa Giraavaru', 'Cheval Blanc Randheli'],
+        };
+
+        const destLower = destination.toLowerCase();
+        const fallbackHotels = LUXURY_HOTELS_BY_DEST[destLower] || [];
+        const existingNames = recommendations.map(r => r.name?.toLowerCase() || '');
+
+        for (const hotelName of fallbackHotels) {
+          if (existingNames.includes(hotelName.toLowerCase())) continue;
+
+          const verified = await verifyHotelWithGoogle(hotelName, destination, destinationCoords);
+          if (verified) {
+            recommendations.push({
+              rawName: hotelName,
+              hotelName: verified.name,
+              name: verified.name,
+              mentionCount: 1,
+              sentimentScore: 0.8, // Assume positive since it's a known luxury brand
+              quotes: [`Known luxury hotel in ${destination}`],
+              subreddits: ['luxurytravel'],
+              upvotes: 100, // Synthetic upvotes to ensure it appears
+              lat: verified.lat,
+              lng: verified.lng,
+              rating: verified.rating,
+              address: verified.address,
+              imageRef: verified.imageRef,
+              priceLevel: verified.priceLevel,
+              verified: true,
+              isFallback: true,
+            });
+            console.log(`Added fallback luxury hotel: ${verified.name}`);
+          }
+        }
+      }
+
     } else {
       // Fall back to default budget-based search
       const rawRecommendations = await searchHotelRecommendations(destination, budget);
@@ -387,10 +459,36 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Get hotels with coordinates for Amadeus price lookup
+    const hotelsWithCoords = recommendations
+      .filter((h: any) => h.name || h.hotelName)
+      .map((h: any) => ({
+        name: h.name || h.hotelName,
+        lat: h.lat,
+        lng: h.lng,
+      }));
+
+    // Fetch real prices from Amadeus if we have the required params
+    let amadeusPrices = new Map<string, { pricePerNight: number; totalPrice: number; amadeusName: string }>();
+    if (checkInDate && checkOutDate && hotelsWithCoords.length > 0) {
+      try {
+        amadeusPrices = await getAmadeusPricesForHotels(
+          hotelsWithCoords,
+          cityCode || '',
+          checkInDate,
+          checkOutDate,
+          adults || 2
+        );
+      } catch (error) {
+        console.error('Failed to get Amadeus prices for Reddit hotels:', error);
+      }
+    }
+
     // Score and filter recommendations based on preferences
     const scoredHotels = recommendations.map((hotel: any) => {
       let score = hotel.upvotes || hotel.mentionCount || 0;
       const hotelText = `${hotel.name || hotel.hotelName} ${hotel.description || ''}`.toLowerCase();
+      const hotelName = hotel.name || hotel.hotelName || '';
 
       // Boost for style match
       for (const keyword of styleKeywords) {
@@ -421,14 +519,50 @@ export async function POST(request: NextRequest) {
         score += 100;
       }
 
-      // Estimate price based on priceLevel from Google (0-4) or budget preference
-      let priceEstimate = 200;
-      if (hotel.priceLevel !== undefined) {
-        priceEstimate = [80, 150, 250, 400, 600][hotel.priceLevel] || 200;
-      } else if (preferences?.budget === 'luxury') {
-        priceEstimate = 450;
-      } else if (preferences?.budget === 'budget') {
-        priceEstimate = 100;
+      // Check if we have a real Amadeus price for this hotel
+      const amadeusPrice = amadeusPrices.get(hotelName.toLowerCase());
+      let pricePerNight: number;
+      let totalPrice: number | undefined;
+      let priceIsReal = false;
+
+      if (amadeusPrice) {
+        // Use real Amadeus price
+        pricePerNight = Math.round(amadeusPrice.pricePerNight);
+        totalPrice = Math.round(amadeusPrice.totalPrice);
+        priceIsReal = true;
+      } else {
+        // Estimate price based on multiple factors
+        const hotelNameLower = hotelName.toLowerCase();
+        const hotelRating = hotel.rating || 4.0;
+
+        // Base price on priceLevel from Google if available
+        if (hotel.priceLevel !== undefined && hotel.priceLevel >= 0) {
+          pricePerNight = [80, 150, 250, 400, 600][hotel.priceLevel] || 200;
+        } else {
+          // Estimate based on brand tier + rating
+          const ultraLuxuryBrands = ['aman', 'four seasons', 'st. regis', 'st regis', 'ritz-carlton', 'ritz carlton', 'mandarin oriental', 'rosewood', 'waldorf', 'park hyatt', 'one&only', 'belmond', 'raffles', 'peninsula'];
+          const luxuryBrands = ['jw marriott', 'grand hyatt', 'sofitel', 'fairmont', 'langham', 'conrad', 'intercontinental', 'shangri-la', 'andaz', 'eden roc'];
+          const upscaleBrands = ['marriott', 'hilton', 'hyatt', 'westin', 'sheraton', 'le meridien', 'renaissance', 'doubletree', 'radisson'];
+
+          if (ultraLuxuryBrands.some(b => hotelNameLower.includes(b))) {
+            pricePerNight = Math.round(600 + (hotelRating - 4) * 300);
+          } else if (luxuryBrands.some(b => hotelNameLower.includes(b))) {
+            pricePerNight = Math.round(350 + (hotelRating - 4) * 100);
+          } else if (upscaleBrands.some(b => hotelNameLower.includes(b))) {
+            pricePerNight = Math.round(180 + (hotelRating - 3.5) * 100);
+          } else if (preferences?.budget === 'luxury') {
+            pricePerNight = Math.round(300 + (hotelRating - 4) * 150);
+          } else if (preferences?.budget === 'upscale') {
+            pricePerNight = Math.round(200 + (hotelRating - 3.5) * 80);
+          } else if (preferences?.budget === 'budget') {
+            pricePerNight = Math.round(80 + (hotelRating - 3) * 40);
+          } else {
+            pricePerNight = Math.round(150 + (hotelRating - 3.5) * 60);
+          }
+        }
+
+        // Ensure reasonable bounds
+        pricePerNight = Math.max(50, Math.min(1500, pricePerNight));
       }
 
       // Get image URL from Google if available
@@ -438,10 +572,13 @@ export async function POST(request: NextRequest) {
 
       return {
         ...hotel,
-        name: hotel.name || hotel.hotelName,
-        id: `reddit-${(hotel.name || hotel.hotelName).toLowerCase().replace(/\s+/g, '-').slice(0, 30)}`,
+        name: hotelName,
+        id: `reddit-${hotelName.toLowerCase().replace(/\s+/g, '-').slice(0, 30)}`,
         matchScore: score,
-        priceEstimate,
+        priceEstimate: pricePerNight,
+        pricePerNight,
+        totalPrice,
+        priceIsReal,
         imageUrl,
         tags: [
           preferences?.budget && `${preferences.budget} budget`,
