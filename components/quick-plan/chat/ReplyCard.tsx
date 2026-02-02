@@ -1275,6 +1275,21 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
             </div>
           ))}
         </div>
+
+        {/* Quick Questions - Phase 4 Fix 4.1 */}
+        <div className="px-3 pb-3">
+          <HotelQuestionsInput
+            hotels={sortedFilteredHotels}
+            onAnswer={(answer) => {
+              console.log('[HotelsCard] Quick question answered:', answer.question);
+            }}
+          />
+        </div>
+
+        {/* Accessibility Warning - Phase 4 Fix 4.2 */}
+        <div className="px-3 pb-3">
+          <AccessibilityWarning hotels={sortedFilteredHotels} />
+        </div>
       </div>
 
       {/* Detail Drawer */}
@@ -1287,6 +1302,202 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
         item={detailHotel}
       />
     </>
+  );
+}
+
+// ============================================================================
+// HOTEL QUICK QUESTIONS - Phase 4 Fix 4.1
+// Helps users compare hotels with one-tap questions
+// ============================================================================
+
+interface HotelQuestionAnswer {
+  question: string;
+  answer: string;
+  hotel?: HotelCandidate;
+}
+
+function HotelQuestionsInput({
+  hotels,
+  onAnswer,
+}: {
+  hotels: HotelCandidate[];
+  onAnswer: (answer: HotelQuestionAnswer) => void;
+}) {
+  const [activeAnswer, setActiveAnswer] = useState<HotelQuestionAnswer | null>(null);
+
+  // Define quick questions with answer logic
+  const quickQuestions = useMemo(() => [
+    {
+      label: 'Best pool?',
+      icon: '🏊',
+      getAnswer: () => {
+        const withPool = hotels.filter(h => {
+          const amenities = ((h as any).amenities || []).join(' ').toLowerCase();
+          return amenities.includes('pool') || amenities.includes('swimming');
+        });
+        if (withPool.length === 0) {
+          return { question: 'Which has the best pool?', answer: 'None of these hotels mention pool amenities in their listing.' };
+        }
+        // Sort by rating among those with pools
+        withPool.sort((a, b) => (b.googleRating || 0) - (a.googleRating || 0));
+        const best = withPool[0];
+        return {
+          question: 'Which has the best pool?',
+          answer: `${best.name} has a pool and the highest rating (${best.googleRating}/5) among options with pools.`,
+          hotel: best,
+        };
+      },
+    },
+    {
+      label: 'Near beach?',
+      icon: '🏖️',
+      getAnswer: () => {
+        const beachKeywords = ['beach', 'oceanfront', 'beachfront', 'seaside', 'waterfront', 'ocean view'];
+        const nearBeach = hotels.filter(h => {
+          const text = [h.name, h.address, ...((h as any).amenities || [])].join(' ').toLowerCase();
+          return beachKeywords.some(kw => text.includes(kw));
+        });
+        if (nearBeach.length === 0) {
+          return { question: 'Which is closest to the beach?', answer: 'None of these hotels mention beach proximity in their listing. Check Google Maps for distances.' };
+        }
+        nearBeach.sort((a, b) => (b.googleRating || 0) - (a.googleRating || 0));
+        const best = nearBeach[0];
+        return {
+          question: 'Which is closest to the beach?',
+          answer: `${best.name} appears to be near the beach based on its listing.`,
+          hotel: best,
+        };
+      },
+    },
+    {
+      label: 'Quietest?',
+      icon: '🤫',
+      getAnswer: () => {
+        const quietKeywords = ['quiet', 'peaceful', 'tranquil', 'serene', 'boutique', 'adult'];
+        const quietHotels = hotels.filter(h => {
+          const text = [h.name, h.address, ...((h as any).amenities || []), ...((h as any).vibes || [])].join(' ').toLowerCase();
+          return quietKeywords.some(kw => text.includes(kw));
+        });
+        if (quietHotels.length > 0) {
+          quietHotels.sort((a, b) => (b.googleRating || 0) - (a.googleRating || 0));
+          const best = quietHotels[0];
+          return {
+            question: 'Which is quietest?',
+            answer: `${best.name} appears to emphasize a quiet/peaceful atmosphere.`,
+            hotel: best,
+          };
+        }
+        // Fallback: suggest boutique or smaller hotels (lower review count might indicate smaller)
+        const sorted = [...hotels].sort((a, b) => (a.reviewCount || 0) - (b.reviewCount || 0));
+        const smallest = sorted[0];
+        return {
+          question: 'Which is quietest?',
+          answer: `${smallest.name} has fewer reviews (${smallest.reviewCount}) which may indicate a smaller, quieter property.`,
+          hotel: smallest,
+        };
+      },
+    },
+    {
+      label: 'Free breakfast?',
+      icon: '🍳',
+      getAnswer: () => {
+        const breakfastKeywords = ['breakfast included', 'free breakfast', 'complimentary breakfast', 'breakfast buffet'];
+        const withBreakfast = hotels.filter(h => {
+          const amenities = ((h as any).amenities || []).join(' ').toLowerCase();
+          return breakfastKeywords.some(kw => amenities.includes(kw));
+        });
+        if (withBreakfast.length === 0) {
+          return { question: 'Any with free breakfast?', answer: 'Breakfast info isn\'t listed for these hotels. Check booking sites for meal plans.' };
+        }
+        const names = withBreakfast.map(h => h.name).join(', ');
+        return {
+          question: 'Any with free breakfast?',
+          answer: `${names} ${withBreakfast.length === 1 ? 'offers' : 'offer'} complimentary breakfast.`,
+          hotel: withBreakfast[0],
+        };
+      },
+    },
+  ], [hotels]);
+
+  const handleQuestion = (q: typeof quickQuestions[0]) => {
+    const answer = q.getAnswer();
+    setActiveAnswer(answer);
+    onAnswer(answer);
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600">
+      <p className="text-xs text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1">
+        <MessageCircle className="w-3 h-3" />
+        Quick questions
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {quickQuestions.map((q) => (
+          <button
+            key={q.label}
+            onClick={() => handleQuestion(q)}
+            className={`text-xs px-2.5 py-1.5 rounded-full transition-colors ${
+              activeAnswer?.question === q.getAnswer().question
+                ? 'bg-orange-500 text-white'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
+            }`}
+          >
+            {q.icon} {q.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Answer display */}
+      <AnimatePresence>
+        {activeAnswer && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-2 p-2.5 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800"
+          >
+            <p className="text-xs font-medium text-orange-800 dark:text-orange-300 mb-1">
+              {activeAnswer.question}
+            </p>
+            <p className="text-xs text-orange-700 dark:text-orange-400">
+              {activeAnswer.answer}
+            </p>
+            {activeAnswer.hotel && (
+              <button
+                onClick={() => setActiveAnswer(null)}
+                className="mt-1.5 text-xs text-orange-600 dark:text-orange-400 hover:underline"
+              >
+                ✓ Got it
+              </button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ============================================================================
+// ACCESSIBILITY WARNING - Phase 4 Fix 4.2
+// Warns users when accessibility info is estimated, not verified
+// ============================================================================
+
+function AccessibilityWarning({ hotels }: { hotels: HotelCandidate[] }) {
+  const hasAccessibilityRequest = hotels.some(h => (h as any).accessibilityScore !== undefined);
+  const allEstimated = hotels.every(h => (h as any).accessibilityConfidence !== 'verified');
+
+  if (!hasAccessibilityRequest || !allEstimated) return null;
+
+  return (
+    <div className="mt-2 p-2.5 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+      <p className="text-xs text-amber-700 dark:text-amber-400 flex items-start gap-1.5">
+        <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+        <span>
+          <strong>Accessibility note:</strong> These accessibility scores are estimated from listing data.
+          Contact hotels directly to verify specific accessibility features for your needs.
+        </span>
+      </p>
+    </div>
   );
 }
 
