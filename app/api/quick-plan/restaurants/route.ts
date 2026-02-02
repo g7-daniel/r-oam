@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RestaurantCandidate } from '@/types/quick-plan';
 import { searchRestaurantRecommendations } from '@/lib/reddit';
+import { redditCache, placesCache, CACHE_TTL, createCacheKey } from '@/lib/api-cache';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 
@@ -64,20 +65,30 @@ export async function POST(request: NextRequest) {
 
     console.log('[Restaurants API] Hotel coordinates:', hotelCoords);
 
-    // Fetch Reddit restaurant recommendations for enrichment
+    // Fetch Reddit restaurant recommendations for enrichment (with caching)
     let redditRestaurants = new Map<string, { mentions: number; quote?: string; sentiment?: number }>();
     try {
-      // Pass destination and first area name for more targeted Reddit search
       const firstArea = areas?.[0]?.name;
-      const redditRecs = await searchRestaurantRecommendations(destination, firstArea);
-      for (const rec of redditRecs) {
-        redditRestaurants.set(rec.restaurantName.toLowerCase(), {
-          mentions: rec.mentionCount,
-          quote: rec.quotes[0],
-          sentiment: rec.sentimentScore,
-        });
+      const redditCacheKey = createCacheKey('reddit-restaurants', { destination, area: firstArea });
+
+      // Try cache first
+      const cachedReddit = redditCache.get<typeof redditRestaurants>(redditCacheKey);
+      if (cachedReddit) {
+        redditRestaurants = cachedReddit;
+        console.log(`[Restaurants API] Using cached Reddit data (${redditRestaurants.size} mentions)`);
+      } else {
+        const redditRecs = await searchRestaurantRecommendations(destination, firstArea);
+        for (const rec of redditRecs) {
+          redditRestaurants.set(rec.restaurantName.toLowerCase(), {
+            mentions: rec.mentionCount,
+            quote: rec.quotes[0],
+            sentiment: rec.sentimentScore,
+          });
+        }
+        // Cache the results
+        redditCache.set(redditCacheKey, redditRestaurants, CACHE_TTL.REDDIT);
+        console.log(`[Restaurants API] Found ${redditRestaurants.size} Reddit restaurant mentions (cached)`);
       }
-      console.log(`[Restaurants API] Found ${redditRestaurants.size} Reddit restaurant mentions`);
     } catch (e) {
       console.error('[Restaurants API] Reddit search failed:', e);
     }
@@ -112,25 +123,41 @@ export async function POST(request: NextRequest) {
       const allRestaurants: RestaurantCandidate[] = [];
       const seenPlaceIds = new Set<string>();
 
-      // Search near each hotel location
+      // Search near each hotel location (with caching)
       for (const hotel of hotelCoords) {
         for (const searchTerm of searchTerms.slice(0, 2)) {
           try {
-            const params = new URLSearchParams({
-              query: `${searchTerm} ${hotel.areaName} ${destination}`,
-              type: 'restaurant',
-              key: apiKey,
-              location: `${hotel.lat},${hotel.lng}`,
-              radius: String(MAX_DISTANCE_METERS),
+            const searchQuery = `${searchTerm} ${hotel.areaName} ${destination}`;
+            const cacheKey = createCacheKey('places-restaurants', {
+              query: searchQuery,
+              lat: hotel.lat.toFixed(2),
+              lng: hotel.lng.toFixed(2),
             });
 
-            const response = await fetch(
-              `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
-            );
+            // Check cache first
+            let data = placesCache.get<any>(cacheKey);
 
-            if (response.ok) {
-              const data = await response.json();
-              if (data.results) {
+            if (!data) {
+              const params = new URLSearchParams({
+                query: searchQuery,
+                type: 'restaurant',
+                key: apiKey,
+                location: `${hotel.lat},${hotel.lng}`,
+                radius: String(MAX_DISTANCE_METERS),
+              });
+
+              const response = await fetch(
+                `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
+              );
+
+              if (response.ok) {
+                data = await response.json();
+                // Cache the response
+                placesCache.set(cacheKey, data, CACHE_TTL.RESTAURANTS);
+              }
+            }
+
+            if (data?.results) {
                 for (const place of data.results) {
                   if (place.place_id && !seenPlaceIds.has(place.place_id)) {
                     seenPlaceIds.add(place.place_id);
@@ -184,7 +211,6 @@ export async function POST(request: NextRequest) {
                   }
                 }
               }
-            }
           } catch (error) {
             console.error(`[Restaurants API] Search failed for ${searchTerm}:`, error);
           }

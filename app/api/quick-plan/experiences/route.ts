@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { placesCache, CACHE_TTL, createCacheKey } from '@/lib/api-cache';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 
@@ -125,24 +126,40 @@ export async function POST(request: NextRequest) {
       const allExperiences: any[] = [];
       const seenPlaceIds = new Set<string>();
 
-      // Search near each hotel location
+      // Search near each hotel location (with caching)
       for (const hotel of hotelCoords) {
         for (const searchTerm of searchTerms.slice(0, 2)) {
           try {
-            const params = new URLSearchParams({
-              query: `${searchTerm} ${hotel.areaName} ${destination}`,
-              key: apiKey,
-              location: `${hotel.lat},${hotel.lng}`,
-              radius: String(MAX_DISTANCE_METERS),
+            const searchQuery = `${searchTerm} ${hotel.areaName} ${destination}`;
+            const cacheKey = createCacheKey('places-experiences', {
+              query: searchQuery,
+              lat: hotel.lat.toFixed(2),
+              lng: hotel.lng.toFixed(2),
             });
 
-            const response = await fetch(
-              `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
-            );
+            // Check cache first
+            let data = placesCache.get<any>(cacheKey);
 
-            if (response.ok) {
-              const data = await response.json();
-              if (data.results) {
+            if (!data) {
+              const params = new URLSearchParams({
+                query: searchQuery,
+                key: apiKey,
+                location: `${hotel.lat},${hotel.lng}`,
+                radius: String(MAX_DISTANCE_METERS),
+              });
+
+              const response = await fetch(
+                `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
+              );
+
+              if (response.ok) {
+                data = await response.json();
+                // Cache the response
+                placesCache.set(cacheKey, data, CACHE_TTL.EXPERIENCES);
+              }
+            }
+
+            if (data?.results) {
                 for (const place of data.results) {
                   if (place.place_id && !seenPlaceIds.has(place.place_id)) {
                     seenPlaceIds.add(place.place_id);
@@ -185,7 +202,6 @@ export async function POST(request: NextRequest) {
                   }
                 }
               }
-            }
           } catch (error) {
             console.error(`[Experiences API] Search failed for ${searchTerm}:`, error);
           }
