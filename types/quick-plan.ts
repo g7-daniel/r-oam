@@ -81,7 +81,7 @@ export interface DestinationContext {
 
 export type PaceLevel = 'chill' | 'balanced' | 'packed';
 export type DiningMode = 'none' | 'list' | 'schedule' | 'plan';
-export type PriceConfidence = 'real' | 'estimated' | 'unknown';
+export type PriceConfidence = 'real' | 'estimated' | 'rough' | 'unknown';
 
 export interface TripPreferences {
   // Destination
@@ -117,6 +117,14 @@ export interface TripPreferences {
   adultsOnlyPreferred: boolean;
   allInclusivePreferred: boolean;
   hotelVibePreferences: string[]; // 'quiet', 'party', 'beach', 'city', etc.
+  hotelPreferences?: string[]; // Selected amenities like 'pool', 'spa', 'gym', etc.
+
+  // Subreddit preferences
+  selectedSubreddits?: string[];
+  subredditsComplete?: boolean;
+
+  // Budget extras
+  budgetUnlimited?: boolean; // True if user selected max budget (no upper limit)
 
   // Dining preferences
   diningMode: DiningMode;
@@ -124,6 +132,9 @@ export interface TripPreferences {
   diningVibes: string[]; // 'quiet', 'lively', 'romantic', etc.
   budgetPerMeal: { min: number; max: number };
   dietaryRestrictions: string[];
+  cuisinePreferences?: string[]; // Selected cuisine types like 'italian', 'sushi', etc.
+  selectedRestaurants?: Record<string, RestaurantCandidate[]>; // By cuisine type
+  selectedExperiences?: Record<string, VerifiedActivity[]>; // By activity type
 
   // Tradeoffs
   detectedTradeoffs: Tradeoff[];
@@ -335,7 +346,11 @@ export interface HotelCandidate {
   totalPrice: number | null;
   currency: string;
   priceConfidence: PriceConfidence;
-  priceSource: 'booking.com' | 'amadeus' | 'estimate';
+  priceSource: 'booking.com' | 'amadeus' | 'estimate' | 'makcorps' | 'google';
+  priceComparison?: {
+    cheapest: { vendor: string; price: number };
+    alternatives: Array<{ vendor: string; price: number }>;
+  };
 
   // Attributes
   isAdultsOnly: boolean;

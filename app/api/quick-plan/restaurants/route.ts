@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { RestaurantCandidate } from '@/types/quick-plan';
+import { searchRestaurantRecommendations } from '@/lib/reddit';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 
@@ -62,6 +63,24 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('[Restaurants API] Hotel coordinates:', hotelCoords);
+
+    // Fetch Reddit restaurant recommendations for enrichment
+    let redditRestaurants = new Map<string, { mentions: number; quote?: string; sentiment?: number }>();
+    try {
+      // Pass destination and first area name for more targeted Reddit search
+      const firstArea = areas?.[0]?.name;
+      const redditRecs = await searchRestaurantRecommendations(destination, firstArea);
+      for (const rec of redditRecs) {
+        redditRestaurants.set(rec.restaurantName.toLowerCase(), {
+          mentions: rec.mentionCount,
+          quote: rec.quotes[0],
+          sentiment: rec.sentimentScore,
+        });
+      }
+      console.log(`[Restaurants API] Found ${redditRestaurants.size} Reddit restaurant mentions`);
+    } catch (e) {
+      console.error('[Restaurants API] Reddit search failed:', e);
+    }
 
     if (hotelCoords.length === 0) {
       console.warn('[Restaurants API] No hotel/area coordinates available');
@@ -125,6 +144,9 @@ export async function POST(request: NextRequest) {
 
                     // Only include if within max distance
                     if (distance <= MAX_DISTANCE_METERS) {
+                      // Get Reddit data for this restaurant
+                      const redditData = redditRestaurants.get(place.name.toLowerCase());
+
                       allRestaurants.push({
                         id: place.place_id,
                         placeId: place.place_id,
@@ -136,12 +158,20 @@ export async function POST(request: NextRequest) {
                         reviewCount: place.user_ratings_total || 0,
                         imageUrl: place.photos?.[0]?.photo_reference
                           ? `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
-                          : null,
+                          : '/images/restaurant-placeholder.svg',
                         lat: placeLat || 0,
                         lng: placeLng || 0,
-                        redditScore: 0,
-                        evidence: [],
-                        reasons: generateReasons(place, distance, hotel.areaName),
+                        redditScore: redditData?.mentions || 0,
+                        evidence: redditData?.quote ? [{
+                          type: 'reddit_thread' as const,
+                          snippet: redditData.quote,
+                          subreddit: 'food',
+                          score: redditData.mentions,
+                        }] : [],
+                        reasons: [
+                          ...generateReasons(place, distance, hotel.areaName),
+                          ...(redditData && redditData.mentions > 0 ? [`Mentioned ${redditData.mentions}x on Reddit`] : []),
+                        ],
                         bestFor: ['dinner'] as ('lunch' | 'dinner' | 'brunch')[],
                         requiresReservation: (place.price_level || 2) >= 3,
                         userStatus: 'default' as const,
@@ -160,12 +190,17 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Sort by rating and distance, take top results
+      // Sort by Reddit score, rating, and distance
       allRestaurants.sort((a, b) => {
-        // First by rating
+        // First by Reddit score (popular on Reddit gets priority)
+        const redditDiff = (b.redditScore || 0) - (a.redditScore || 0);
+        if (Math.abs(redditDiff) > 2) return redditDiff;
+
+        // Then by rating
         const ratingDiff = (b.googleRating || 0) - (a.googleRating || 0);
         if (Math.abs(ratingDiff) > 0.3) return ratingDiff;
-        // Then by distance (closer is better)
+
+        // Finally by distance (closer is better)
         return ((a as any).distanceFromHotel || 999) - ((b as any).distanceFromHotel || 999);
       });
 

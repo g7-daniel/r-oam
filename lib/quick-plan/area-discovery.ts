@@ -504,11 +504,44 @@ export async function discoverAreas(
   // Sort by overall score
   scoredAreas.sort((a, b) => b.overallScore - a.overallScore);
 
-  // Return top areas (limit based on trip length)
-  const maxAreas = Math.min(8, Math.max(5, Math.ceil(preferences.tripLength / 2)));
-  const topAreas = scoredAreas.slice(0, maxAreas);
+  // Return top areas - ensure minimum of 5 areas for user choice
+  const MIN_AREAS = 5;
+  const maxAreas = Math.min(10, Math.max(MIN_AREAS, Math.ceil(preferences.tripLength / 2) + 2));
+  let topAreas = scoredAreas.slice(0, maxAreas);
 
-  console.log(`Area discovery: Returning top ${topAreas.length} areas`);
+  // If we have fewer than MIN_AREAS, pad with additional areas from the database
+  if (topAreas.length < MIN_AREAS && destKey && DESTINATION_AREAS[destKey]) {
+    const existingIds = new Set(topAreas.map(a => a.id));
+    const remainingAreas = DESTINATION_AREAS[destKey]
+      .filter(area => !existingIds.has(slugify(area.name)))
+      .slice(0, MIN_AREAS - topAreas.length);
+
+    for (const area of remainingAreas) {
+      const candidate: AreaCandidate = {
+        id: slugify(area.name),
+        name: area.name,
+        type: area.type,
+        description: area.description,
+        centerLat: 0,
+        centerLng: 0,
+        activityFitScore: 0.3,
+        vibeFitScore: 0.3,
+        budgetFitScore: 0.5,
+        overallScore: 0.3,
+        bestFor: area.bestFor,
+        notIdealFor: area.notIdealFor || [],
+        whyItFits: area.bestFor.slice(0, 3).map(b => `Great for ${b}`),
+        caveats: [],
+        evidence: [],
+        confidenceScore: 0.3,
+        suggestedNights: 2,
+      };
+      topAreas.push(candidate);
+    }
+    console.log(`Area discovery: Padded with ${remainingAreas.length} additional areas from database`);
+  }
+
+  console.log(`Area discovery: Returning ${topAreas.length} areas (min: ${MIN_AREAS})`);
   console.log(`  Top picks: ${topAreas.slice(0, 3).map(a => `${a.name} (${Math.round(a.overallScore * 100)}%)`).join(', ')}`);
 
   return topAreas;

@@ -81,6 +81,37 @@ function createItinerarySplit(
     };
   });
 
+  // Generate contextual reasoning
+  const generateReasoning = (): string => {
+    if (stops.length === 1) {
+      const area = fullStops[0].area;
+      if (area?.bestFor?.length) {
+        return `Focus on ${area.name} - great for ${area.bestFor.slice(0, 2).join(' and ')}`;
+      }
+      return `All nights in ${stops[0].areaName} - no travel days needed!`;
+    }
+
+    // Find if nights are unequal
+    const nightsList = stops.map(s => s.nights);
+    const maxNights = Math.max(...nightsList);
+    const minNights = Math.min(...nightsList);
+
+    if (maxNights === minNights) {
+      return `Equal time in each area for a well-rounded experience`;
+    }
+
+    // Find the area with most nights
+    const longestStopIdx = nightsList.indexOf(maxNights);
+    const longestStop = fullStops[longestStopIdx];
+    const longestArea = longestStop.area;
+
+    if (longestArea?.bestFor?.length) {
+      return `More time in ${longestArea.name} for ${longestArea.bestFor[0]}`;
+    }
+
+    return `${maxNights} nights in ${stops[longestStopIdx].areaName} to fully explore`;
+  };
+
   return {
     id,
     name,
@@ -88,7 +119,7 @@ function createItinerarySplit(
     fitScore,
     frictionScore: stops.length > 1 ? 0.3 * (stops.length - 1) : 0, // More stops = more friction
     feasibilityScore: 0.9,
-    whyThisWorks: `Balanced time across ${stops.length} area${stops.length > 1 ? 's' : ''}`,
+    whyThisWorks: generateReasoning(),
     tradeoffs: stops.length > 2 ? ['More time in transit between locations'] : [],
   };
 }
@@ -236,17 +267,21 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
   },
   subreddits: {
     field: 'subreddits',
-    snooMessage: "Which Reddit communities should I search for real traveler tips? I'll cross-check my recommendations with what people are saying.",
+    snooMessage: "Which Reddit communities should I search? I've picked some based on your budget and trip style.",
     inputType: 'chips-multi',
     getInputConfig: (state) => {
-      // Suggest subreddits based on budget and destination
+      // Suggest subreddits based on budget, destination, and party composition
       const budget = state.preferences.budgetPerNight?.max || 200;
       const destination = (state.preferences.destinationContext?.canonicalName || state.preferences.destinationContext?.rawInput || '').toLowerCase();
+      const hasChildren = (state.preferences.children || 0) > 0;
+      const isSolo = state.preferences.adults === 1 && !hasChildren;
+
+      console.log('[subreddits getInputConfig] Budget:', budget, 'HasChildren:', hasChildren, 'IsSolo:', isSolo);
 
       // Start with recommended options based on context
-      const options = [];
+      const options: { id: string; label: string; icon: string; description: string }[] = [];
 
-      // Add destination-specific subreddits first (most relevant)
+      // 1. Add destination-specific subreddits first (highest priority)
       if (destination.includes('dominican') || destination.includes('caribbean')) {
         options.push({ id: 'caribbean', label: 'r/caribbean', icon: '🏝️', description: 'Caribbean travelers' });
         options.push({ id: 'dominicanrepublic', label: 'r/DominicanRepublic', icon: '🇩🇴', description: 'DR specific advice' });
@@ -258,9 +293,22 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       if (destination.includes('costa rica')) {
         options.push({ id: 'costarica', label: 'r/costarica', icon: '🦜', description: 'Costa Rica specific' });
       }
+      if (destination.includes('thailand')) {
+        options.push({ id: 'thailand', label: 'r/thailand', icon: '🇹🇭', description: 'Thailand specific' });
+        options.push({ id: 'thailandtourism', label: 'r/ThailandTourism', icon: '🏝️', description: 'Thailand travel tips' });
+      }
 
-      // Add budget-specific options
-      if (budget >= 400) {
+      // 2. Add party composition subreddits
+      if (hasChildren) {
+        options.push({ id: 'familytravel', label: 'r/familytravel', icon: '👨‍👩‍👧', description: 'Family trip tips' });
+        options.push({ id: 'travelwithkids', label: 'r/travelwithkids', icon: '🧒', description: 'Traveling with children' });
+      }
+      if (isSolo) {
+        options.push({ id: 'solotravel', label: 'r/solotravel', icon: '🎒', description: 'Solo traveler tips' });
+      }
+
+      // 3. Add budget-specific options (only if NOT family to avoid clutter)
+      if (budget >= 400 && !hasChildren) {
         options.push({ id: 'luxurytravel', label: 'r/luxurytravel', icon: '💎', description: 'High-end experiences' });
         options.push({ id: 'fattravel', label: 'r/fattravel', icon: '🥂', description: 'No budget limits' });
       } else if (budget <= 150) {
@@ -268,14 +316,15 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         options.push({ id: 'shoestring', label: 'r/shoestring', icon: '🎫', description: 'Ultra-budget travel' });
       }
 
-      // Add general travel options
-      options.push({ id: 'travel', label: 'r/travel', icon: '✈️', description: 'General travel advice' });
-      options.push({ id: 'solotravel', label: 'r/solotravel', icon: '🎒', description: 'Solo traveler tips' });
+      // 4. Always include general travel
+      if (!options.some(o => o.id === 'travel')) {
+        options.push({ id: 'travel', label: 'r/travel', icon: '✈️', description: 'General travel advice' });
+      }
       options.push({ id: 'TravelHacks', label: 'r/TravelHacks', icon: '💡', description: 'Travel tips & tricks' });
 
-      return { options };
+      return { options: options.slice(0, 8) }; // Limit to 8 options
     },
-    required: true, // Ask the user which subreddits to search
+    required: true,
     canInfer: false,
   },
   pace: {
@@ -296,26 +345,56 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     field: 'activities',
     snooMessage: "What kind of activities are you excited about? Pick all that sound fun!",
     inputType: 'chips-multi',
-    getInputConfig: () => ({
-      options: [
-        { id: 'surf', label: 'Surfing', icon: '🏄' },
-        { id: 'snorkel', label: 'Snorkeling', icon: '🤿' },
-        { id: 'dive', label: 'Scuba Diving', icon: '🐠' },
+    getInputConfig: (state) => {
+      const hasChildren = (state.preferences.children || 0) > 0;
+      const childAges = state.preferences.childAges || [];
+      console.log('[activities getInputConfig] Children detected:', hasChildren, 'Ages:', childAges);
+
+      let options = [
+        { id: 'beach', label: 'Beach Days', icon: '🏖️' },
         { id: 'swimming', label: 'Swimming', icon: '🏊' },
+        { id: 'snorkel', label: 'Snorkeling', icon: '🤿' },
         { id: 'wildlife', label: 'Wildlife', icon: '🐋' },
         { id: 'hiking', label: 'Hiking', icon: '🥾' },
-        { id: 'adventure', label: 'Adventure', icon: '🧗' },
         { id: 'cultural', label: 'Cultural', icon: '🏛️' },
         { id: 'food_tour', label: 'Food Tours', icon: '🍽️' },
-        { id: 'nightlife', label: 'Nightlife', icon: '🎉' },
-        { id: 'beach', label: 'Beach Days', icon: '🏖️' },
+        { id: 'adventure', label: 'Adventure', icon: '🧗' },
         { id: 'spa_wellness', label: 'Spa & Wellness', icon: '💆' },
+        { id: 'surf', label: 'Surfing', icon: '🏄' },
+        { id: 'dive', label: 'Scuba Diving', icon: '🐠' },
         { id: 'golf', label: 'Golf', icon: '⛳' },
         { id: 'photography', label: 'Photography', icon: '📸' },
-      ],
-      allowCustomText: true,
-      customTextPlaceholder: 'Add another activity...',
-    }),
+      ];
+
+      // Add family-specific activities if kids present
+      if (hasChildren) {
+        const kidsOptions = [
+          { id: 'kids_activities', label: 'Kids Activities', icon: '🎠' },
+        ];
+
+        // For older kids (8+), add more adventurous options
+        if (childAges.some(age => age >= 8)) {
+          kidsOptions.push(
+            { id: 'water_park', label: 'Water Parks', icon: '🎢' }
+          );
+        }
+
+        // Put kids options first
+        options = [...kidsOptions, ...options];
+
+        // Remove nightlife for family trips
+        options = options.filter(o => o.id !== 'nightlife');
+      } else {
+        // Add nightlife for adult trips
+        options.push({ id: 'nightlife', label: 'Nightlife', icon: '🎉' });
+      }
+
+      return {
+        options,
+        allowCustomText: true,
+        customTextPlaceholder: 'Add another activity...',
+      };
+    },
     required: true,
     canInfer: false,
   },
@@ -474,22 +553,41 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     field: 'hotelPreferences',
     snooMessage: "What's important to you in a hotel? Pick all that apply.",
     inputType: 'chips-multi',
-    getInputConfig: () => ({
-      options: [
+    getInputConfig: (state) => {
+      const hasChildren = (state.preferences.children || 0) > 0;
+      console.log('[hotelPreferences getInputConfig] Children detected:', hasChildren);
+
+      const baseOptions = [
         { id: 'pool', label: 'Pool', icon: '🏊' },
         { id: 'beach_access', label: 'Beach Access', icon: '🏖️' },
         { id: 'spa', label: 'Spa', icon: '💆' },
         { id: 'gym', label: 'Gym', icon: '🏋️' },
         { id: 'restaurant', label: 'On-site Restaurant', icon: '🍽️' },
-        { id: 'adults_only', label: 'Adults Only', icon: '🍷' },
         { id: 'all_inclusive', label: 'All-Inclusive', icon: '🎫' },
         { id: 'boutique', label: 'Boutique/Unique', icon: '✨' },
-        { id: 'family', label: 'Family-Friendly', icon: '👨‍👩‍👧' },
         { id: 'quiet', label: 'Quiet/Peaceful', icon: '🧘' },
-      ],
-      allowCustomText: true,
-      customTextPlaceholder: 'Anything else important?',
-    }),
+      ];
+
+      // Add family-specific options if kids are present
+      if (hasChildren) {
+        baseOptions.push(
+          { id: 'family', label: 'Family-Friendly', icon: '👨‍👩‍👧' },
+          { id: 'kids_club', label: 'Kids Club', icon: '🎠' },
+          { id: 'kids_pool', label: 'Kids Pool', icon: '🏊‍♂️' },
+        );
+      } else {
+        // Only show adults-only option if NO children
+        baseOptions.push(
+          { id: 'adults_only', label: 'Adults Only', icon: '🍷' }
+        );
+      }
+
+      return {
+        options: baseOptions,
+        allowCustomText: true,
+        customTextPlaceholder: 'Anything else important?',
+      };
+    },
     required: true,
     canInfer: false,
   },
@@ -777,6 +875,13 @@ export class QuickPlanOrchestrator {
 
   getDebugLog(): DebugEntry[] {
     return this.debugLog;
+  }
+
+  // Reset the orchestrator to initial state (for "Start Over" functionality)
+  reset(): void {
+    this.state = this.createInitialState();
+    this.debugLog = [];
+    console.log('[Orchestrator] Reset to initial state');
   }
 
   // ============================================================================

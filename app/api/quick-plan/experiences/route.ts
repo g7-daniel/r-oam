@@ -10,6 +10,22 @@ const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 // Maximum distance from hotel to consider an experience (in meters)
 const MAX_DISTANCE_METERS = 25000; // 25km - reasonable for tours/experiences
 
+// Place types to ALWAYS exclude from experience/activity searches
+// These are Google Place types, not name strings
+// See: https://developers.google.com/maps/documentation/places/web-service/place-types
+const EXCLUDED_PLACE_TYPES = [
+  'lodging',              // Hotels, motels, resorts, B&Bs
+  'real_estate_agency',
+  'insurance_agency',
+  'accounting',
+  'lawyer',
+  'bank',
+  'atm',
+  'local_government_office',
+  'car_rental',           // Excludes ATV rentals from horseback searches
+  'car_dealer',
+];
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -70,25 +86,36 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Activity type to Google Places search terms
+    // Activity type to Google Places search terms - MORE SPECIFIC to avoid mismatches
     const activitySearchTerms: Record<string, string[]> = {
-      surf: ['surf lessons', 'surf school', 'surfing'],
-      snorkel: ['snorkeling tour', 'snorkel excursion', 'reef tour'],
-      dive: ['scuba diving', 'dive center', 'diving excursion'],
-      swimming: ['swimming', 'beach club', 'natural pool'],
-      wildlife: ['wildlife tour', 'whale watching', 'bird watching', 'nature tour'],
-      hiking: ['hiking tour', 'nature trail', 'mountain hike', 'eco tour'],
-      adventure: ['adventure tour', 'zip line', 'atv tour', 'extreme sports'],
-      cultural: ['cultural tour', 'historical tour', 'museum', 'heritage site'],
-      food_tour: ['food tour', 'culinary tour', 'cooking class', 'food tasting'],
-      nightlife: ['nightclub', 'bar crawl', 'night tour', 'entertainment'],
-      beach: ['beach club', 'beach resort', 'beach activities'],
-      spa_wellness: ['spa', 'wellness center', 'massage', 'yoga retreat'],
+      surf: ['surf lessons', 'surf school', 'learn to surf'],
+      snorkel: ['snorkeling tour', 'snorkel reef excursion', 'snorkeling trip'],
+      dive: ['scuba diving center', 'PADI diving', 'dive certification'],
+      swimming: ['swimming beach', 'natural swimming pool', 'beach club swimming'],
+      wildlife: [
+        'wildlife sanctuary',
+        'animal rescue center',
+        'sloth sanctuary',
+        'monkey sanctuary',
+        'turtle nesting tour',
+        'bird watching tour',
+        'national park wildlife',
+      ],
+      hiking: ['hiking trail guided', 'nature hike tour', 'rainforest hike', 'volcano hike'],
+      adventure: ['zip line canopy tour', 'atv tour adventure', 'white water rafting', 'bungee jumping'],
+      cultural: ['historical walking tour', 'museum tour', 'heritage site tour', 'archaeological site'],
+      food_tour: ['food walking tour', 'culinary tour local', 'cooking class cuisine', 'market food tour'],
+      nightlife: ['nightclub', 'bar crawl tour', 'night entertainment district'],
+      beach: ['beach club day pass', 'beach resort activities', 'beach rental'],
+      spa_wellness: ['spa resort', 'wellness retreat', 'hot springs', 'yoga retreat'],
       golf: ['golf course', 'golf club', 'golf resort'],
-      photography: ['photo tour', 'photography spot', 'scenic viewpoint'],
-      horseback: ['horseback riding', 'horse tour', 'equestrian'],
-      boat: ['boat tour', 'sailing', 'yacht charter', 'catamaran'],
-      fishing: ['fishing charter', 'deep sea fishing', 'fishing tour'],
+      photography: ['photo tour', 'photography safari', 'scenic viewpoint tour'],
+      horseback: ['horseback riding trail', 'horse riding tour beach'],
+      boat: ['boat tour', 'sailing cruise', 'catamaran tour', 'sunset cruise'],
+      fishing: ['fishing charter', 'sport fishing tour', 'deep sea fishing'],
+      // Family-friendly categories
+      kids_activities: ['family activities', 'kids tour', 'children activities', 'family adventure park'],
+      water_park: ['water park', 'aqua park', 'water slides'],
     };
 
     const results: Record<string, any[]> = {};
@@ -120,6 +147,14 @@ export async function POST(request: NextRequest) {
                   if (place.place_id && !seenPlaceIds.has(place.place_id)) {
                     seenPlaceIds.add(place.place_id);
 
+                    // Skip places with excluded types (like lodging/hotels, car rentals)
+                    const placeTypes: string[] = place.types || [];
+                    const excludedTypes = EXCLUDED_PLACE_TYPES.filter(t => placeTypes.includes(t));
+                    if (excludedTypes.length > 0) {
+                      console.log(`[Experiences API] Skipping "${place.name}" - has excluded type: ${excludedTypes.join(', ')}`);
+                      continue;
+                    }
+
                     const placeLat = place.geometry?.location?.lat;
                     const placeLng = place.geometry?.location?.lng;
                     const distance = placeLat && placeLng
@@ -138,7 +173,7 @@ export async function POST(request: NextRequest) {
                         priceLevel: place.price_level || 2,
                         imageUrl: place.photos?.[0]?.photo_reference
                           ? `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
-                          : null,
+                          : '/images/activity-placeholder.svg',
                         lat: placeLat || 0,
                         lng: placeLng || 0,
                         reasons: generateReasons(place, distance, hotel.areaName),
@@ -156,6 +191,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      console.log(`[Experiences API] Found ${allExperiences.length} ${activityType} experiences after type filtering`);
+
       // Sort by rating and distance, take top results
       allExperiences.sort((a, b) => {
         const ratingDiff = (b.googleRating || 0) - (a.googleRating || 0);
@@ -164,7 +201,7 @@ export async function POST(request: NextRequest) {
       });
 
       results[activityType] = allExperiences.slice(0, 8);
-      console.log(`[Experiences API] Found ${allExperiences.length} ${activityType} experiences, returning top ${results[activityType].length}`);
+      console.log(`[Experiences API] Returning top ${results[activityType].length} for ${activityType}`);
     }
 
     return NextResponse.json({
@@ -209,6 +246,8 @@ function formatActivityLabel(activity: string): string {
     horseback: 'Horseback Riding',
     boat: 'Boat Tours',
     fishing: 'Fishing',
+    kids_activities: 'Kids Activities',
+    water_park: 'Water Parks',
   };
   return labels[activity] || activity;
 }

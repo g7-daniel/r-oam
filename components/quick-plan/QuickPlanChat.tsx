@@ -21,6 +21,7 @@ import type {
   OrchestratorState,
 } from '@/types/quick-plan';
 import { finalizeQuickPlanTrip } from '@/lib/quick-plan/trip-transformer';
+import { RotateCcw } from 'lucide-react';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -90,6 +91,121 @@ export default function QuickPlanChat() {
   };
 
   // ============================================================================
+  // START OVER FUNCTIONALITY
+  // ============================================================================
+
+  const handleStartOver = useCallback(() => {
+    // Reset all state to initial values
+    orchestrator.reset();
+    setMessages([]);
+    setCurrentQuestion(null);
+    setSnooState('idle');
+    setPhase('gathering');
+    setDebugInfo({});
+    setDebugLog([]);
+    setEnrichmentStatus({
+      reddit: 'pending',
+      areas: 'pending',
+      hotels: 'pending',
+      activities: 'pending',
+      pricing: 'pending',
+      restaurants: 'pending',
+      experiences: 'pending',
+    });
+    setIsTyping(false);
+    setIsProcessing(false);
+
+    // Reset the initialization flag to allow restart
+    hasInitialized.current = false;
+
+    // Start fresh conversation
+    setTimeout(() => {
+      hasInitialized.current = true;
+      startConversation();
+    }, 100);
+  }, [orchestrator]);
+
+  // ============================================================================
+  // ACKNOWLEDGMENT MESSAGES - Make conversation feel more personal
+  // ============================================================================
+
+  const generateAcknowledgment = (field: string, value: unknown): string | null => {
+    const prefs = orchestrator.getState().preferences;
+
+    switch (field) {
+      case 'destination': {
+        const dest = value as { canonicalName?: string };
+        return dest.canonicalName
+          ? `${dest.canonicalName}! Great choice. Let me search for the best recommendations from Reddit travelers.`
+          : null;
+      }
+      case 'dates': {
+        const dates = value as { nights?: number };
+        if (dates.nights) {
+          if (dates.nights >= 10) {
+            return `${dates.nights} nights - that's a solid amount of time to really explore! Let's make the most of it.`;
+          } else if (dates.nights <= 4) {
+            return `A quick ${dates.nights}-night trip! I'll help you prioritize the must-sees.`;
+          }
+          return `${dates.nights} nights - perfect. I'll plan a great itinerary for that time.`;
+        }
+        return null;
+      }
+      case 'party': {
+        const party = value as { adults: number; children?: number };
+        if (party.children && party.children > 0) {
+          return `Got it - ${party.adults} adult${party.adults > 1 ? 's' : ''} and ${party.children} little one${party.children > 1 ? 's' : ''}! I'll focus on family-friendly options.`;
+        }
+        if (party.adults === 1) {
+          return `Solo adventure! I'll find great options for independent travelers.`;
+        }
+        if (party.adults === 2) {
+          return `Perfect for a couple's trip! Let me find some romantic spots.`;
+        }
+        return `${party.adults} travelers - got it! Let me find the best options for your group.`;
+      }
+      case 'budget': {
+        const budget = value as { value: number };
+        if (budget.value >= 400) {
+          return `With that budget, you'll have access to some amazing properties. Let me find the top-rated options.`;
+        } else if (budget.value <= 100) {
+          return `Budget-conscious travel - smart! I know some great hidden gems that won't break the bank.`;
+        }
+        return `Great, I'll find the best value options in that range.`;
+      }
+      case 'activities': {
+        const activities = value as { label: string }[];
+        if (activities.length >= 4) {
+          return `Wow, you want to do it all! I'll make sure we pack in lots of variety.`;
+        } else if (activities.length === 1) {
+          return `${activities[0].label} focused - I'll find the best spots for that!`;
+        }
+        return `Nice picks! I'll search for the best ${activities.map(a => a.label.toLowerCase()).join(' and ')} options.`;
+      }
+      case 'pace': {
+        const pace = value as { id: string };
+        if (pace.id === 'chill') {
+          return `Relaxation mode - love it. I'll keep the schedule spacious.`;
+        } else if (pace.id === 'packed') {
+          return `Adventure mode! Let's maximize every day.`;
+        }
+        return `Balanced pace - I'll mix in downtime with activities.`;
+      }
+      case 'areas': {
+        const areas = value as { name: string }[];
+        if (areas.length === 1) {
+          return `${areas[0].name} - great choice! Let me find the best hotels there.`;
+        } else if (areas.length === 2) {
+          return `${areas[0].name} and ${areas[1].name} - a great combo! Now let's find you places to stay.`;
+        }
+        return `${areas.length} areas selected - this will be an adventure! Let me search for hotels.`;
+      }
+      default:
+        return null;
+    }
+  };
+
+  // ============================================================================
   // HANDLE USER RESPONSE
   // ============================================================================
 
@@ -106,6 +222,15 @@ export default function QuickPlanChat() {
 
     // Store which field was just answered
     const answeredField = currentQuestion.field;
+
+    // Generate and show acknowledgment message for key steps
+    const acknowledgment = generateAcknowledgment(answeredField, value);
+    if (acknowledgment) {
+      orchestrator.addSnooMessage(acknowledgment, 'thinking');
+      setMessages([...orchestrator.getMessages()]);
+      // Small pause to let user see the acknowledgment
+      await new Promise(resolve => setTimeout(resolve, 600));
+    }
 
     // Process the response
     orchestrator.processUserResponse(currentQuestion.id, value);
@@ -400,9 +525,24 @@ export default function QuickPlanChat() {
           try {
             const tripId = finalizeQuickPlanTrip(orchestrator.getState());
             console.log('[QuickPlanChat] Satisfaction confirmed, navigating to trip:', tripId);
+
+            // BUG #6 FIX: Verify localStorage was written before navigating
+            const stored = localStorage.getItem('wandercraft-trip-v2');
+            if (!stored) {
+              throw new Error('Trip data not saved to localStorage');
+            }
+
             window.location.href = `/plan/${tripId}`;
           } catch (error) {
             console.error('[QuickPlanChat] Failed to finalize trip:', error);
+            // Show error to user instead of blank page
+            orchestrator.addSnooMessage(
+              "Oops! Something went wrong saving your trip. Please try clicking the button again.",
+              'idle'
+            );
+            setMessages([...orchestrator.getMessages()]);
+            setSnooState('idle');
+            setPhase('reviewing'); // Go back to reviewing so user can try again
           }
         }, 1500); // Give user time to see the celebration message
         return; // Don't continue processing - we're navigating away
@@ -547,6 +687,13 @@ export default function QuickPlanChat() {
       const firstArea = selectedAreas[0];
       console.log('[Hotels] Fetching hotels for areas:', areaIds, 'destination:', destination);
 
+      // Format dates for Makcorps pricing API
+      const formatDateForAPI = (date: Date | string | null | undefined): string | undefined => {
+        if (!date) return undefined;
+        const d = typeof date === 'string' ? new Date(date) : date;
+        return d.toISOString().split('T')[0];
+      };
+
       const response = await fetch('/api/quick-plan/hotels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -562,6 +709,10 @@ export default function QuickPlanChat() {
             lat: firstArea.centerLat || 0,
             lng: firstArea.centerLng || 0,
           } : undefined,
+          // Pass dates for Makcorps real-time pricing
+          checkIn: formatDateForAPI(state.preferences.startDate),
+          checkOut: formatDateForAPI(state.preferences.endDate),
+          adults: state.preferences.adults || 2,
         }),
       });
 
@@ -983,6 +1134,10 @@ export default function QuickPlanChat() {
 
     await new Promise(resolve => setTimeout(resolve, 500));
     setSnooState('idle');
+
+    // BUG #5 FIX: Transition to reviewing phase so itinerary is displayed
+    setPhase('reviewing');
+    console.log('[QuickPlanChat] Transitioned to reviewing phase');
   };
 
   // ============================================================================
@@ -995,12 +1150,24 @@ export default function QuickPlanChat() {
       <div className="w-full max-w-2xl h-[calc(100vh-120px)] max-h-[800px] bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
         {/* Chat header */}
         <div className="flex-shrink-0 px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-          <div className="flex items-center gap-3">
-            <SnooAgent state={snooState} size="sm" showLabel={false} />
-            <div>
-              <h2 className="font-semibold text-slate-900 dark:text-white text-sm">Snoo</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Your AI travel buddy</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <SnooAgent state={snooState} size="sm" showLabel={false} />
+              <div>
+                <h2 className="font-semibold text-slate-900 dark:text-white text-sm">Snoo</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Your AI travel buddy</p>
+              </div>
             </div>
+            {/* Start Over button */}
+            <button
+              onClick={handleStartOver}
+              disabled={isProcessing}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Start over from the beginning"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span className="hidden sm:inline">Start Over</span>
+            </button>
           </div>
         </div>
 

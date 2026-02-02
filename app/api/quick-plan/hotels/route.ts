@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { searchHotelsWithPagination, searchHotelsByGeocode, geocodeLocation, GooglePlaceResult } from '@/lib/google-maps';
 import { searchHotelRecommendations } from '@/lib/reddit';
+import { getBatchPricingByCity } from '@/lib/makcorps';
 import { HotelCandidate } from '@/types/quick-plan';
 
 // Track indexing to prevent duplicates
@@ -121,11 +122,12 @@ export async function GET(request: NextRequest) {
     const candidates: HotelCandidate[] = hotels.map((hotel) => {
       const redditData = redditHotels.get(hotel.name.toLowerCase());
 
-      // Estimate price from Google price_level (1-4 scale)
+      // Estimate price from Google price_level (1-4 scale) or star rating
       // Level 1: ~$75-125, Level 2: ~$125-200, Level 3: ~$200-350, Level 4: ~$350+
+      const starRating = getStarRating(hotel.name);
       const estimatedPrice = hotel.priceLevel
-        ? Math.round(hotel.priceLevel * 75 + 50 + (getStarRating(hotel.name) * 20))
-        : null;
+        ? Math.round(hotel.priceLevel * 75 + 50 + (starRating * 20))
+        : Math.round(starRating * 50 + 80); // Fallback: estimate from star rating
 
       return {
         id: hotel.id,
@@ -142,15 +144,15 @@ export async function GET(request: NextRequest) {
         pricePerNight: estimatedPrice,
         totalPrice: null,
         currency: 'USD',
-        priceConfidence: hotel.priceLevel ? 'estimated' as const : 'unknown' as const,
-        priceSource: 'estimate' as const,
+        priceConfidence: hotel.priceLevel ? 'estimated' as const : 'rough' as const,
+        priceSource: hotel.priceLevel ? 'google' as const : 'estimate' as const,
         isAdultsOnly: false,
         isAllInclusive: hotel.name.toLowerCase().includes('all inclusive') ||
                         hotel.name.toLowerCase().includes('all-inclusive'),
         amenities: generateAmenities(hotel.name),
         imageUrl: hotel.photoReference
           ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${hotel.photoReference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
-          : null,
+          : '/images/hotel-placeholder.svg',
         redditScore: redditData?.mentions || 0,
         overallScore: calculateOverallScore(hotel, redditData?.mentions || 0),
         evidence: redditData?.quote ? [{
@@ -185,10 +187,18 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Map budget to Google price_level (1-4 scale)
+function getBudgetPriceLevel(budgetMax: number): { min: number; max: number } | null {
+  if (budgetMax <= 150) return { min: 1, max: 2 };      // Budget
+  if (budgetMax <= 300) return { min: 2, max: 3 };      // Mid-range
+  if (budgetMax <= 600) return { min: 2, max: 4 };      // Upscale (include mid-range too)
+  return null;  // Luxury - don't filter, show all high-end
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { areaIds, destination, preferences, coordinates } = body as {
+    const { areaIds, destination, preferences, coordinates, checkIn, checkOut, adults } = body as {
       areaIds: string[];
       destination: string;
       preferences: {
@@ -198,16 +208,49 @@ export async function POST(request: NextRequest) {
         vibes?: string[];
       };
       coordinates?: { lat: number; lng: number };
+      checkIn?: string;  // YYYY-MM-DD
+      checkOut?: string; // YYYY-MM-DD
+      adults?: number;
     };
 
     const results: Record<string, HotelCandidate[]> = {};
     console.log('[Hotels API] Received request for areas:', areaIds, 'destination:', destination);
+    console.log('[Hotels API] Dates:', checkIn, '-', checkOut, 'Adults:', adults);
+
+    // Fetch Reddit hotel recommendations for enrichment
+    let redditHotels = new Map<string, { mentions: number; quote?: string; sentiment?: number }>();
+    try {
+      const redditRecs = await searchHotelRecommendations(
+        destination,
+        preferences.budgetMax || 200
+      );
+      for (const rec of redditRecs) {
+        redditHotels.set(rec.hotelName.toLowerCase(), {
+          mentions: rec.mentionCount,
+          quote: rec.quotes[0],
+        });
+      }
+      console.log(`[Hotels API] Found ${redditHotels.size} Reddit hotel mentions for ${destination}`);
+    } catch (e) {
+      console.error('[Hotels API] Reddit search failed:', e);
+    }
+
+    const priceLevelRange = preferences.budgetMax
+      ? getBudgetPriceLevel(preferences.budgetMax)
+      : null;
+
+    console.log(`[Hotels API] Budget filter: $${preferences.budgetMin}-$${preferences.budgetMax}, priceLevel: ${JSON.stringify(priceLevelRange)}`);
 
     for (const areaId of areaIds) {
       // Convert area ID back to name
       const areaName = areaId.replace(/-/g, ' ');
       const cacheKey = `${destination}:${areaName}`.toLowerCase();
       console.log(`[Hotels API] Processing area: ${areaName} (id: ${areaId})`);
+
+      // Build price level filter if budget is set
+      const priceLevelFilter = priceLevelRange
+        ? { priceLevel: { gte: priceLevelRange.min, lte: priceLevelRange.max } }
+        : {};
 
       // Query DB - FIRST try area-specific match, THEN fallback to country
       // This ensures each area gets different hotels
@@ -223,6 +266,8 @@ export async function POST(request: NextRequest) {
                 { city: { contains: areaName } },
               ],
             },
+            // Budget filter based on price level
+            priceLevelFilter,
           ],
           googleRating: { gte: preferences.minRating || 4.0 },
         },
@@ -234,30 +279,91 @@ export async function POST(request: NextRequest) {
       });
       console.log(`[Hotels API] Area-specific query for ${areaName}: found ${hotels.length} hotels`);
 
-      // If no area-specific results, fallback to country-wide search
-      // but mark these as less ideal matches
+      // If no area-specific results, use GEOCODE-BASED fallback
+      // This ensures we stay in the correct area, not country-wide
       if (hotels.length < 3) {
-        console.log(`[Hotels API] Few area-specific results for ${areaName}, trying country-wide fallback`);
-        const fallbackHotels = await prisma.hotel.findMany({
-          where: {
-            country: { contains: destination },
-            googleRating: { gte: preferences.minRating || 4.0 },
-          },
-          orderBy: [
-            { googleRating: 'desc' },
-            { reviewCount: 'desc' },
-          ],
-          take: 15,
-        });
+        console.log(`[Hotels API] Few area-specific results for ${areaName}, using geocode fallback`);
 
-        // Merge results, prioritizing area-specific matches
-        const seenIds = new Set(hotels.map(h => h.id));
-        for (const h of fallbackHotels) {
-          if (!seenIds.has(h.id) && hotels.length < 15) {
-            hotels.push(h);
+        // Get coordinates for the SPECIFIC AREA
+        const areaCoords = await geocodeLocation(`${areaName}, ${destination}`);
+
+        if (areaCoords) {
+          console.log(`[Hotels API] Geocoded ${areaName} to (${areaCoords.lat}, ${areaCoords.lng})`);
+
+          // Search within 50km radius of the area center
+          const nearbyHotels = await searchHotelsByGeocode(
+            areaCoords.lat,
+            areaCoords.lng,
+            50000,  // 50km radius
+            20
+          );
+
+          console.log(`[Hotels API] Found ${nearbyHotels.length} hotels via geocode for ${areaName}`);
+
+          // Index these for future queries
+          for (const hotel of nearbyHotels) {
+            if (hotel.place_id) {
+              try {
+                await prisma.hotel.upsert({
+                  where: { placeId: hotel.place_id },
+                  create: {
+                    placeId: hotel.place_id,
+                    name: hotel.name,
+                    address: hotel.formatted_address || hotel.vicinity || null,
+                    city: areaName,
+                    region: areaName,
+                    country: destination,
+                    countryCode: 'XX',
+                    lat: hotel.geometry.location.lat,
+                    lng: hotel.geometry.location.lng,
+                    googleRating: hotel.rating || null,
+                    reviewCount: hotel.user_ratings_total || null,
+                    priceLevel: hotel.price_level || null,
+                    photoReference: hotel.photos?.[0]?.photo_reference || null,
+                  },
+                  update: {
+                    googleRating: hotel.rating || null,
+                    reviewCount: hotel.user_ratings_total || null,
+                    indexedAt: new Date(),
+                  },
+                });
+              } catch (e) {
+                // Skip duplicates
+              }
+            }
           }
+
+          // Re-query with new data including lat/lng radius
+          hotels = await prisma.hotel.findMany({
+            where: {
+              AND: [
+                { country: { contains: destination } },
+                {
+                  OR: [
+                    { region: { contains: areaName } },
+                    { city: { contains: areaName } },
+                    {
+                      AND: [
+                        { lat: { gte: areaCoords.lat - 0.45 } },  // ~50km
+                        { lat: { lte: areaCoords.lat + 0.45 } },
+                        { lng: { gte: areaCoords.lng - 0.45 } },
+                        { lng: { lte: areaCoords.lng + 0.45 } },
+                      ]
+                    }
+                  ],
+                },
+              ],
+              googleRating: { gte: preferences.minRating || 4.0 },
+            },
+            orderBy: [
+              { googleRating: 'desc' },
+              { reviewCount: 'desc' },
+            ],
+            take: 15,
+          });
+
+          console.log(`[Hotels API] After geocode fallback for ${areaName}: ${hotels.length} hotels`);
         }
-        console.log(`[Hotels API] After fallback for ${areaName}: ${hotels.length} hotels`);
       }
 
       // Auto-index if needed
@@ -322,10 +428,14 @@ export async function POST(request: NextRequest) {
       }
 
       results[areaId] = hotels.map((hotel) => {
-        // Estimate price from Google price_level (1-4 scale)
+        // Estimate price from Google price_level (1-4 scale) or star rating
+        const starRating = getStarRating(hotel.name);
         const estimatedPrice = hotel.priceLevel
-          ? Math.round(hotel.priceLevel * 75 + 50 + (getStarRating(hotel.name) * 20))
-          : null;
+          ? Math.round(hotel.priceLevel * 75 + 50 + (starRating * 20))
+          : Math.round(starRating * 50 + 80); // Fallback: estimate from star rating
+
+        // Get Reddit data for this hotel
+        const redditData = redditHotels.get(hotel.name.toLowerCase());
 
         return {
           id: hotel.id,
@@ -342,21 +452,97 @@ export async function POST(request: NextRequest) {
           pricePerNight: estimatedPrice,
           totalPrice: null,
           currency: 'USD',
-          priceConfidence: hotel.priceLevel ? 'estimated' as const : 'unknown' as const,
-          priceSource: 'estimate' as const,
+          priceConfidence: hotel.priceLevel ? 'estimated' as const : 'rough' as const,
+          priceSource: hotel.priceLevel ? 'google' as const : 'estimate' as const,
           isAdultsOnly: false,
           isAllInclusive: hotel.name.toLowerCase().includes('all inclusive'),
           amenities: generateAmenities(hotel.name),
           imageUrl: hotel.photoReference
             ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${hotel.photoReference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
-            : null,
-          redditScore: 0,
-          overallScore: calculateOverallScore(hotel, 0),
-          evidence: [],
+            : '/images/hotel-placeholder.svg',
+          redditScore: redditData?.mentions || 0,
+          overallScore: calculateOverallScore(hotel, redditData?.mentions || 0),
+          evidence: redditData?.quote ? [{
+            type: 'reddit_thread' as const,
+            snippet: redditData.quote,
+            subreddit: 'travel',
+            score: redditData.mentions,
+          }] : [],
           reasons: generateWhyRecommended(hotel),
           userStatus: 'default' as const,
         };
       });
+    }
+
+    // Fetch real prices from Makcorps if dates are available
+    if (checkIn && checkOut) {
+      console.log('[Hotels API] Fetching real prices from Makcorps...');
+
+      // Group hotels by area for efficient city-based pricing
+      const hotelsByArea: Record<string, Array<{ name: string; index: number }>> = {};
+      for (const [areaId, hotels] of Object.entries(results)) {
+        hotelsByArea[areaId] = hotels.map((hotel, index) => ({
+          name: hotel.name,
+          index,
+        }));
+      }
+
+      try {
+        // Use city-based API for each area (much more efficient)
+        // This fetches ~60 hotels per city in just 2-3 API calls instead of 2 calls per hotel
+        for (const [areaId, hotels] of Object.entries(hotelsByArea)) {
+          const areaName = areaId.replace(/-/g, ' ');
+          const hotelNames = hotels.map(h => h.name);
+
+          console.log(`[Hotels API] Fetching Makcorps prices for ${areaName} (${hotelNames.length} hotels)`);
+
+          const priceMap = await getBatchPricingByCity(
+            areaName,
+            destination,
+            hotelNames,
+            checkIn,
+            checkOut,
+            adults || 2
+          );
+
+          // Update results with real prices
+          let matchedCount = 0;
+          for (const hotel of hotels) {
+            const priceKey = hotel.name.toLowerCase();
+            const priceData = priceMap.get(priceKey);
+
+            if (priceData && results[areaId]?.[hotel.index]) {
+              const hotelEntry = results[areaId][hotel.index];
+              hotelEntry.pricePerNight = priceData.price;
+              hotelEntry.priceConfidence = 'real';
+              hotelEntry.priceSource = 'makcorps';
+              (hotelEntry as any).priceComparison = {
+                cheapest: { vendor: priceData.vendor, price: priceData.price },
+                alternatives: priceData.allPrices.slice(1, 4).map(p => ({
+                  vendor: p.vendor,
+                  price: p.price,
+                })),
+              };
+              matchedCount++;
+            }
+          }
+
+          console.log(`[Hotels API] Matched ${matchedCount}/${hotels.length} hotels with Makcorps prices for ${areaName}`);
+        }
+
+        // Note: Individual hotel fallback disabled - Makcorps /mapping endpoint is currently broken
+        // The city-based approach above is more efficient anyway (60 hotels in 2-3 calls vs 2 calls per hotel)
+        const unpricedCount = Object.values(results).flat().filter(h => h.priceSource !== 'makcorps').length;
+        if (unpricedCount > 0) {
+          console.log(`[Hotels API] ${unpricedCount} hotels without Makcorps prices (will use estimates)`);
+        }
+
+        const totalPriced = Object.values(results).flat().filter(h => h.priceSource === 'makcorps').length;
+        const totalHotels = Object.values(results).flat().length;
+        console.log(`[Hotels API] Total: ${totalPriced}/${totalHotels} hotels with real prices`);
+      } catch (e) {
+        console.error('[Hotels API] Makcorps pricing failed:', e);
+      }
     }
 
     return NextResponse.json({
