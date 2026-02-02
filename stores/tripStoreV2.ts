@@ -1497,8 +1497,18 @@ export const useTripStoreV2 = create<TripStoreState>()(
         diningReservations: state.diningReservations,
         itineraryAssignments: state.itineraryAssignments,
       }),
-      onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error('Zustand hydration error:', error);
+        }
+        // Always set hydrated to true, even if there was an error
+        // This prevents the app from getting stuck on loading
+        if (state) {
+          state.setHasHydrated(true);
+        } else {
+          // Fallback: set directly on the store
+          useTripStoreV2.setState({ _hasHydrated: true });
+        }
       },
     }
   )

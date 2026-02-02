@@ -265,8 +265,8 @@ export interface HotelRecommendation {
   upvotes?: number;
 }
 
-// Minimum upvote threshold for quality filtering
-const MIN_UPVOTES = 20;
+// Minimum upvote threshold for quality filtering (lowered for better coverage)
+const MIN_UPVOTES = 5;
 
 // Generic hotel terms that aren't specific properties
 const GENERIC_HOTEL_TERMS = [
@@ -534,4 +534,393 @@ export async function checkHotelRedditStatus(
     sentimentScore: sentiment.score,
     topQuote: sentiment.topComments[0]?.text,
   };
+}
+
+// ============================================
+// Quick Plan Extensions - Area Discovery
+// ============================================
+
+export interface AreaRecommendation {
+  areaName: string;
+  mentionCount: number;
+  sentimentScore: number;
+  quotes: string[];
+  subreddits: string[];
+  upvotes: number;
+  characteristics: string[];
+  bestFor: string[];
+}
+
+// Common area characteristics keywords
+const AREA_CHARACTERISTICS: Record<string, string[]> = {
+  beach: ['beach', 'beaches', 'sandy', 'shore', 'waterfront', 'coastal'],
+  surf: ['surf', 'surfing', 'waves', 'surf break', 'surf spot'],
+  nightlife: ['nightlife', 'bars', 'clubs', 'party', 'lively', 'buzzing'],
+  calm_water: ['calm water', 'calm', 'peaceful', 'quiet', 'snorkeling', 'swimming'],
+  luxury: ['luxury', 'upscale', 'five star', '5 star', 'high-end', 'exclusive'],
+  budget: ['budget', 'cheap', 'affordable', 'backpacker', 'hostel'],
+  family: ['family', 'kids', 'children', 'family-friendly', 'kid-friendly'],
+  adventure: ['adventure', 'hiking', 'zip line', 'rafting', 'canyoning', 'excursion'],
+  culture: ['culture', 'historic', 'history', 'museum', 'colonial', 'old town'],
+  food: ['food', 'restaurants', 'dining', 'cuisine', 'foodie', 'culinary'],
+  remote: ['remote', 'secluded', 'off the beaten path', 'quiet', 'isolated'],
+  touristy: ['touristy', 'crowded', 'tourist trap', 'busy', 'packed'],
+  nature: ['nature', 'wildlife', 'national park', 'jungle', 'forest', 'mountains'],
+  resort: ['resort', 'all-inclusive', 'all inclusive', 'resort area'],
+  diving: ['diving', 'scuba', 'dive', 'reef', 'underwater'],
+};
+
+// Area extraction patterns - more strict to avoid matching sentences
+const AREA_PATTERNS = [
+  // "stayed in [Area Name]" - limit to 2-3 words max
+  /(?:stay(?:ed|ing)? (?:in|at)|visit(?:ed|ing)?|recommend|based in|explored)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?:\s+(?:Beach|Bay|Coast|Peninsula|Island))?)\b/g,
+  // Known DR/Caribbean area names (explicit list for better matching)
+  /\b(Punta\s+Cana|Puerto\s+Plata|Saman[aá]|Santo\s+Domingo|La\s+Romana|Cabarete|Sosua|Boca\s+Chica|Bayahibe|Las\s+Terrenas|Cap\s+Cana|Uvero\s+Alto|Bavaro|Juan\s+Dolio|Casa\s+de\s+Campo|Santiago|Jarabacoa|Constanza|Pedernales|Barahona)\b/gi,
+  // Known Costa Rica areas
+  /\b(Manuel\s+Antonio|Arenal|Tamarindo|Monteverde|La\s+Fortuna|Puerto\s+Viejo|Santa\s+Teresa|Nosara|Jaco|Guanacaste|Papagayo|Tortuguero|Drake\s+Bay|Corcovado|Osa\s+Peninsula)\b/gi,
+  // Known Mexico areas
+  /\b(Cancun|Playa\s+del\s+Carmen|Tulum|Puerto\s+Vallarta|Cabo\s+San\s+Lucas|Riviera\s+Maya|Cozumel|Isla\s+Mujeres|Holbox|Sayulita|San\s+Miguel\s+de\s+Allende|Oaxaca|Mexico\s+City|Merida|Bacalar)\b/gi,
+];
+
+// Generic terms that aren't specific areas
+const GENERIC_AREA_TERMS = [
+  'the area', 'this area', 'that area', 'any area', 'some area',
+  'the beach', 'this beach', 'a beach', 'the coast', 'the town',
+  'the city', 'the village', 'downtown', 'uptown', 'the resort',
+  'would it', 'to get', 'this island', 'that island', 'an island',
+  'worth it', 'worth a', 'be worth', 'night on', 'day trip',
+];
+
+function isValidAreaName(name: string): boolean {
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+
+  // Check against generic terms
+  if (GENERIC_AREA_TERMS.some(term => lower.includes(term))) return false;
+
+  // Too short or too long (max 25 chars for area names)
+  if (trimmed.length < 4 || trimmed.length > 25) return false;
+
+  // Starts with lowercase or number
+  if (!/^[A-Z]/.test(trimmed)) return false;
+
+  // Too many words (area names are usually 1-3 words)
+  const words = trimmed.split(/\s+/);
+  if (words.length > 4) return false;
+
+  // Contains sentence structures or common words that indicate a sentence
+  if (/\b(have|need|should|from|going|want|will|would|could|might|it|is|was|be|been|being|a|an|the|this|that|on|in|at|to|for|with|and|or|but|if|when|then|than|I|we|you|they|he|she|my|our|your|their)\b/i.test(trimmed)) {
+    return false;
+  }
+
+  // Must have at least one word that looks like a proper noun (capitalized)
+  if (!words.some(w => /^[A-Z][a-z]+$/.test(w))) return false;
+
+  return true;
+}
+
+function extractCharacteristics(text: string): string[] {
+  const found: string[] = [];
+  const lowerText = text.toLowerCase();
+
+  for (const [characteristic, keywords] of Object.entries(AREA_CHARACTERISTICS)) {
+    if (keywords.some(kw => lowerText.includes(kw))) {
+      found.push(characteristic);
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Search Reddit for area/region recommendations in a destination
+ */
+export async function searchAreaRecommendations(
+  destination: string,
+  activities: string[] = [],
+  customSubreddits?: string[]
+): Promise<AreaRecommendation[]> {
+  const subreddits = customSubreddits && customSubreddits.length > 0
+    ? customSubreddits
+    : ['travel', 'solotravel', 'TravelHacks', 'backpacking'];
+
+  // Search queries for areas
+  const searchQueries = [
+    `${destination} best areas`,
+    `${destination} where to stay region`,
+    `${destination} itinerary`,
+    `${destination} must visit`,
+  ];
+
+  // Add activity-specific searches
+  for (const activity of activities.slice(0, 2)) {
+    searchQueries.push(`${destination} ${activity}`);
+  }
+
+  const allPosts: RedditPost[] = [];
+
+  for (const query of searchQueries) {
+    const posts = await searchReddit(query, subreddits, 15);
+    allPosts.push(...posts);
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+
+  // Extract area mentions
+  const areaMentions = new Map<string, {
+    count: number;
+    quotes: string[];
+    subreddits: Set<string>;
+    totalScore: number;
+    totalUpvotes: number;
+    characteristics: Set<string>;
+  }>();
+
+  const destLower = destination.toLowerCase();
+
+  for (const post of allPosts) {
+    const fullText = `${post.title} ${post.selftext}`;
+    const lowerText = fullText.toLowerCase();
+
+    // Check relevance
+    if (!lowerText.includes(destLower)) continue;
+
+    for (const pattern of AREA_PATTERNS) {
+      pattern.lastIndex = 0;
+      let match;
+      while ((match = pattern.exec(fullText)) !== null) {
+        const areaName = match[1].trim();
+
+        if (!isValidAreaName(areaName)) continue;
+        if (areaName.toLowerCase() === destLower) continue; // Skip destination itself
+
+        const key = areaName.toLowerCase();
+        const existing = areaMentions.get(key) || {
+          count: 0,
+          quotes: [],
+          subreddits: new Set(),
+          totalScore: 0,
+          totalUpvotes: 0,
+          characteristics: new Set(),
+        };
+
+        existing.count++;
+        existing.subreddits.add(post.subreddit);
+        existing.totalScore += analyzeSentiment(fullText);
+        existing.totalUpvotes += post.score;
+
+        // Extract characteristics
+        const chars = extractCharacteristics(fullText);
+        chars.forEach(c => existing.characteristics.add(c));
+
+        // Extract quote
+        const mentionIndex = fullText.indexOf(areaName);
+        if (mentionIndex >= 0 && existing.quotes.length < 3) {
+          const start = Math.max(0, mentionIndex - 30);
+          const end = Math.min(fullText.length, mentionIndex + areaName.length + 100);
+          const quote = fullText.slice(start, end).trim();
+          if (quote.length > 20) {
+            existing.quotes.push(quote);
+          }
+        }
+
+        areaMentions.set(key, existing);
+      }
+    }
+  }
+
+  // Convert and sort
+  const recommendations: AreaRecommendation[] = Array.from(areaMentions.entries())
+    .map(([name, data]) => ({
+      areaName: name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+      mentionCount: data.count,
+      sentimentScore: data.count > 0 ? data.totalScore / data.count : 0,
+      quotes: data.quotes,
+      subreddits: Array.from(data.subreddits),
+      upvotes: data.totalUpvotes,
+      characteristics: Array.from(data.characteristics),
+      bestFor: Array.from(data.characteristics).slice(0, 3),
+    }))
+    .filter(rec => rec.mentionCount >= 1 && rec.sentimentScore >= 0)
+    .sort((a, b) => {
+      const scoreA = (a.mentionCount * 15) + (a.upvotes * 0.1) + (a.sentimentScore * 10);
+      const scoreB = (b.mentionCount * 15) + (b.upvotes * 0.1) + (b.sentimentScore * 10);
+      return scoreB - scoreA;
+    })
+    .slice(0, 15);
+
+  console.log(`Reddit areas: Found ${recommendations.length} area recommendations for ${destination}`);
+  return recommendations;
+}
+
+// ============================================
+// Quick Plan Extensions - Restaurant Discovery
+// ============================================
+
+export interface RestaurantRecommendation {
+  restaurantName: string;
+  mentionCount: number;
+  sentimentScore: number;
+  quotes: string[];
+  subreddits: string[];
+  upvotes: number;
+  cuisine: string[];
+  priceLevel?: number; // 1-4
+}
+
+// Restaurant patterns
+const RESTAURANT_PATTERNS = [
+  // "ate at [Restaurant Name]"
+  /(?:ate at|dined at|loved|recommend|try|tried|must visit|must try|favorite)\s+(?:the\s+)?([A-Z][A-Za-z\s&'-]{2,40}(?:\s+(?:restaurant|cafe|bistro|bar|grill|kitchen|eatery))?)/gi,
+  // "[Restaurant Name] has great..."
+  /([A-Z][A-Za-z\s&'-]{2,40})\s+(?:has|had|serves|is known for|makes)\s+(?:great|amazing|best|delicious|incredible)/gi,
+];
+
+const CUISINE_KEYWORDS: Record<string, string[]> = {
+  seafood: ['seafood', 'fish', 'lobster', 'shrimp', 'ceviche', 'ocean'],
+  local: ['local', 'traditional', 'authentic', 'native', 'regional'],
+  italian: ['italian', 'pasta', 'pizza', 'risotto'],
+  mexican: ['mexican', 'tacos', 'burritos', 'enchiladas'],
+  asian: ['asian', 'sushi', 'thai', 'chinese', 'vietnamese', 'japanese'],
+  american: ['american', 'burger', 'bbq', 'barbecue', 'steakhouse'],
+  fine_dining: ['fine dining', 'upscale', 'elegant', 'tasting menu', 'michelin'],
+  casual: ['casual', 'chill', 'laid back', 'relaxed'],
+  brunch: ['brunch', 'breakfast', 'eggs', 'pancakes'],
+};
+
+function extractCuisine(text: string): string[] {
+  const found: string[] = [];
+  const lowerText = text.toLowerCase();
+
+  for (const [cuisine, keywords] of Object.entries(CUISINE_KEYWORDS)) {
+    if (keywords.some(kw => lowerText.includes(kw))) {
+      found.push(cuisine);
+    }
+  }
+
+  return found;
+}
+
+function isValidRestaurantName(name: string): boolean {
+  const trimmed = name.trim();
+
+  if (trimmed.length < 4 || trimmed.length > 50) return false;
+  if (!/^[A-Z]/.test(trimmed)) return false;
+  if (/\b(I|we|you|they|have|need|want|will|would|should)\b/i.test(trimmed)) return false;
+
+  // Generic terms
+  const lower = trimmed.toLowerCase();
+  if (['the restaurant', 'this restaurant', 'that restaurant', 'a restaurant', 'the place'].includes(lower)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Search Reddit for restaurant recommendations in a destination
+ */
+export async function searchRestaurantRecommendations(
+  destination: string,
+  area?: string
+): Promise<RestaurantRecommendation[]> {
+  const subreddits = ['travel', 'solotravel', 'foodtravel', 'AskCulinary'];
+
+  const location = area ? `${area} ${destination}` : destination;
+  const searchQueries = [
+    `${location} best restaurants`,
+    `${location} where to eat`,
+    `${location} food recommendations`,
+    `${location} must try food`,
+  ];
+
+  const allPosts: RedditPost[] = [];
+
+  for (const query of searchQueries) {
+    const posts = await searchReddit(query, subreddits, 15);
+    allPosts.push(...posts);
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+
+  const restaurantMentions = new Map<string, {
+    count: number;
+    quotes: string[];
+    subreddits: Set<string>;
+    totalScore: number;
+    totalUpvotes: number;
+    cuisine: Set<string>;
+  }>();
+
+  const destLower = destination.toLowerCase();
+
+  for (const post of allPosts) {
+    const fullText = `${post.title} ${post.selftext}`;
+    const lowerText = fullText.toLowerCase();
+
+    if (!lowerText.includes(destLower) && (!area || !lowerText.includes(area.toLowerCase()))) {
+      continue;
+    }
+
+    for (const pattern of RESTAURANT_PATTERNS) {
+      pattern.lastIndex = 0;
+      let match;
+      while ((match = pattern.exec(fullText)) !== null) {
+        const restaurantName = match[1].trim();
+
+        if (!isValidRestaurantName(restaurantName)) continue;
+
+        const key = restaurantName.toLowerCase();
+        const existing = restaurantMentions.get(key) || {
+          count: 0,
+          quotes: [],
+          subreddits: new Set(),
+          totalScore: 0,
+          totalUpvotes: 0,
+          cuisine: new Set(),
+        };
+
+        existing.count++;
+        existing.subreddits.add(post.subreddit);
+        existing.totalScore += analyzeSentiment(fullText);
+        existing.totalUpvotes += post.score;
+
+        // Extract cuisine type
+        const cuisines = extractCuisine(fullText);
+        cuisines.forEach(c => existing.cuisine.add(c));
+
+        // Extract quote
+        const mentionIndex = fullText.indexOf(restaurantName);
+        if (mentionIndex >= 0 && existing.quotes.length < 2) {
+          const start = Math.max(0, mentionIndex - 30);
+          const end = Math.min(fullText.length, mentionIndex + restaurantName.length + 80);
+          const quote = fullText.slice(start, end).trim();
+          if (quote.length > 20) {
+            existing.quotes.push(quote);
+          }
+        }
+
+        restaurantMentions.set(key, existing);
+      }
+    }
+  }
+
+  const recommendations: RestaurantRecommendation[] = Array.from(restaurantMentions.entries())
+    .map(([name, data]) => ({
+      restaurantName: name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+      mentionCount: data.count,
+      sentimentScore: data.count > 0 ? data.totalScore / data.count : 0,
+      quotes: data.quotes,
+      subreddits: Array.from(data.subreddits),
+      upvotes: data.totalUpvotes,
+      cuisine: Array.from(data.cuisine),
+    }))
+    .filter(rec => rec.mentionCount >= 1 && rec.sentimentScore >= 0)
+    .sort((a, b) => {
+      const scoreA = (a.mentionCount * 10) + (a.upvotes * 0.1) + (a.sentimentScore * 15);
+      const scoreB = (b.mentionCount * 10) + (b.upvotes * 0.1) + (b.sentimentScore * 15);
+      return scoreB - scoreA;
+    })
+    .slice(0, 10);
+
+  console.log(`Reddit restaurants: Found ${recommendations.length} recommendations for ${location}`);
+  return recommendations;
 }

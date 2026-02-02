@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Hotel {
+  id              String   @id @default(cuid())
+  placeId         String   @unique  // Google's unique ID - PRIMARY KEY for dedup
+  name            String
+  address         String?
+  city            String
+  region          String   // e.g., "Punta Cana", "La Romana"
+  country         String   // e.g., "Dominican Republic"
+  countryCode     String   // e.g., "DO"
+  lat             Float
+  lng             Float
+  googleRating    Float?
+  reviewCount     Int?
+  priceLevel      Int?     // 1-4 from Google
+  photoReference  String?  // For Google Photos API
+  types           String?  // JSON array of Google types
+
+  // Indexing metadata
+  indexedAt       DateTime @default(now())
+  searchHub       String?  // Which hub search found this
+
+  // Amadeus mapping (cached)
+  amadeusHotelId  String?
+  amadeusMatched  Boolean  @default(false)
+
+  @@index([country, region])
+  @@index([lat, lng])
+  @@index([name])
+}
+
+model PriceCache {
+  id              String   @id @default(cuid())
+  placeId         String
+  checkIn         String   // ISO date
+  checkOut        String   // ISO date
+  adults          Int
+
+  // Cached pricing
+  amadeusHotelId  String?
+  pricePerNight   Float?
+  totalPrice      Float?
+  currency        String?
+  hasAvailability Boolean
+
+  cachedAt        DateTime @default(now())
+  expiresAt       DateTime // 30 min TTL
+
+  @@unique([placeId, checkIn, checkOut, adults])
+  @@index([expiresAt])
+}

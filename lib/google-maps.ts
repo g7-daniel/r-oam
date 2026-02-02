@@ -2,6 +2,156 @@ import type { Experience, ExperienceCategory, PlaceResult, DirectionsResult, Tra
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 
+// Google Places result type for hotel searches
+export interface GooglePlaceResult {
+  place_id: string;
+  name: string;
+  formatted_address?: string;
+  vicinity?: string;
+  geometry: {
+    location: {
+      lat: number;
+      lng: number;
+    };
+  };
+  rating?: number;
+  user_ratings_total?: number;
+  price_level?: number;
+  photos?: { photo_reference: string }[];
+  types?: string[];
+}
+
+// Search for hotels with pagination support (up to 60 results)
+export async function searchHotelsWithPagination(
+  query: string,
+  maxResults: number = 60
+): Promise<GooglePlaceResult[]> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    console.warn('Google Maps API key not configured');
+    return [];
+  }
+
+  const results: GooglePlaceResult[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      query,
+      type: 'lodging',
+      key: apiKey,
+    });
+
+    if (pageToken) {
+      params.set('pagetoken', pageToken);
+      // Google requires 2s delay between pagination requests
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    try {
+      const response = await fetch(
+        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
+      );
+      const data = await response.json();
+
+      if (data.results) {
+        results.push(...data.results);
+      }
+
+      pageToken = data.next_page_token;
+    } catch (error) {
+      console.error('Google Places pagination error:', error);
+      break;
+    }
+  } while (pageToken && results.length < maxResults);
+
+  return results;
+}
+
+// Geocode-based search with pagination
+export async function searchHotelsByGeocode(
+  lat: number,
+  lng: number,
+  radiusMeters: number = 50000,
+  maxResults: number = 60
+): Promise<GooglePlaceResult[]> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    console.warn('Google Maps API key not configured');
+    return [];
+  }
+
+  const results: GooglePlaceResult[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      location: `${lat},${lng}`,
+      radius: String(radiusMeters),
+      type: 'lodging',
+      key: apiKey,
+    });
+
+    if (pageToken) {
+      params.set('pagetoken', pageToken);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    try {
+      const response = await fetch(
+        `${GOOGLE_MAPS_BASE_URL}/place/nearbysearch/json?${params}`
+      );
+      const data = await response.json();
+
+      if (data.results) {
+        results.push(...data.results);
+      }
+
+      pageToken = data.next_page_token;
+    } catch (error) {
+      console.error('Google Places geocode pagination error:', error);
+      break;
+    }
+  } while (pageToken && results.length < maxResults);
+
+  return results;
+}
+
+// Geocode a location name to get coordinates
+export async function geocodeLocation(
+  locationName: string
+): Promise<{ lat: number; lng: number } | null> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    console.warn('Google Maps API key not configured');
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    address: locationName,
+    key: apiKey,
+  });
+
+  try {
+    const response = await fetch(
+      `${GOOGLE_MAPS_BASE_URL}/geocode/json?${params}`
+    );
+    const data = await response.json();
+
+    if (data.status === 'OK' && data.results && data.results.length > 0) {
+      const location = data.results[0].geometry.location;
+      console.log(`Geocoded "${locationName}" to (${location.lat}, ${location.lng})`);
+      return { lat: location.lat, lng: location.lng };
+    }
+
+    console.warn(`Geocoding failed for "${locationName}": ${data.status}`);
+    return null;
+  } catch (error) {
+    console.error('Geocoding error:', error);
+    return null;
+  }
+}
+
 export async function searchPlaces(
   query: string,
   location?: { lat: number; lng: number },
