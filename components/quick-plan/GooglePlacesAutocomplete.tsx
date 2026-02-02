@@ -80,6 +80,13 @@ export default function GooglePlacesAutocomplete({
     initOnMount: isScriptLoaded,
   });
 
+  // Debug logging for Places API status
+  useEffect(() => {
+    if (value && value.length >= 2) {
+      console.log('[GooglePlacesAutocomplete] Query:', value, 'Status:', status, 'Results:', data.length);
+    }
+  }, [value, status, data.length]);
+
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleSelect = async (description: string, placeId: string) => {
@@ -188,12 +195,25 @@ export default function GooglePlacesAutocomplete({
         </ul>
       )}
 
-      {/* Loading indicator - show when we have a value but no results yet */}
-      {value && status !== 'OK' && data.length === 0 && (
+      {/* Loading/status indicator */}
+      {value && value.length >= 2 && status !== 'OK' && data.length === 0 && (
         <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-lg p-3">
           <div className="flex items-center gap-2 text-slate-500">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span className="text-sm">Searching...</span>
+            {status === '' ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="text-sm">Searching...</span>
+              </>
+            ) : status === 'ZERO_RESULTS' ? (
+              <span className="text-sm">No destinations found. Try a different search.</span>
+            ) : status === 'REQUEST_DENIED' || status === 'OVER_QUERY_LIMIT' ? (
+              <span className="text-sm text-red-500">Search unavailable. Please try again later.</span>
+            ) : (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="text-sm">Searching...</span>
+              </>
+            )}
           </div>
         </div>
       )}

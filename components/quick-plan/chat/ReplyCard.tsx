@@ -727,7 +727,7 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
           onSelect={handleGooglePlaceSelect}
           placeholder="Where do you want to go?"
           disabled={disabled}
-          types={['(cities)', '(regions)']}
+          types={['(cities)']}
         />
       ) : (
         /* Fallback search input */
