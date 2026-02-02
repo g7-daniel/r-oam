@@ -120,6 +120,30 @@ const config: Config = {
         'gradient-sunset': 'linear-gradient(135deg, #FF4500 0%, #ff7a3d 50%, #ffc9aa 100%)',
         'gradient-ocean': 'linear-gradient(180deg, #0079D3 0%, #005299 100%)',
       },
+      animation: {
+        'shimmer': 'shimmer 2s infinite linear',
+        'fade-in': 'fadeIn 0.3s ease-in-out',
+        'slide-up': 'slideUp 0.3s ease-out',
+        'slide-down': 'slideDown 0.3s ease-out',
+      },
+      keyframes: {
+        shimmer: {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
+        fadeIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        slideUp: {
+          '0%': { transform: 'translateY(10px)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        slideDown: {
+          '0%': { transform: 'translateY(-10px)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+      },
     },
   },
   plugins: [],
