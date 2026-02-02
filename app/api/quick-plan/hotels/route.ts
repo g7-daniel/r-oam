@@ -40,8 +40,11 @@ export async function GET(request: NextRequest) {
 
   const cacheKey = `${destination}:${areaName}`.toLowerCase();
 
+  // Determine price level filter based on budget
+  const priceLevelRange = getBudgetPriceLevel(budgetMax);
+
   try {
-    // Step 1: Query hotels from database
+    // Step 1: Query hotels from database with budget-appropriate price level filtering
     let hotels = await prisma.hotel.findMany({
       where: {
         OR: [
@@ -50,6 +53,10 @@ export async function GET(request: NextRequest) {
           { country: { contains: destination || '',  } },
         ],
         googleRating: { gte: minRating },
+        // Apply price level filter if not luxury (luxury hotels often have missing priceLevel)
+        ...(priceLevelRange && !priceLevelRange.isLuxury ? {
+          priceLevel: { gte: priceLevelRange.min, lte: priceLevelRange.max },
+        } : {}),
       },
       orderBy: [
         { googleRating: 'desc' },
@@ -79,7 +86,7 @@ export async function GET(request: NextRequest) {
         );
         console.log(`Quick Plan Hotels: Indexed ${indexedCount} new hotels`);
 
-        // Re-query after indexing
+        // Re-query after indexing with same budget filter
         hotels = await prisma.hotel.findMany({
           where: {
             OR: [
@@ -88,6 +95,9 @@ export async function GET(request: NextRequest) {
               { country: { contains: destination || '',  } },
             ],
             googleRating: { gte: minRating },
+            ...(priceLevelRange && !priceLevelRange.isLuxury ? {
+              priceLevel: { gte: priceLevelRange.min, lte: priceLevelRange.max },
+            } : {}),
           },
           orderBy: [
             { googleRating: 'desc' },
@@ -188,18 +198,163 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Map budget to Google price_level (1-4 scale)
-function getBudgetPriceLevel(budgetMax: number): { min: number; max: number; isLuxury: boolean } | null {
-  if (budgetMax <= 150) return { min: 1, max: 2, isLuxury: false };      // Budget
-  if (budgetMax <= 300) return { min: 2, max: 3, isLuxury: false };      // Mid-range
-  if (budgetMax <= 600) return { min: 3, max: 4, isLuxury: false };      // Upscale
-  return { min: 4, max: 4, isLuxury: true };  // Luxury - only show high-end (price_level 4)
+// Large hotel chains that typically have good accessibility features
+const ACCESSIBLE_HOTEL_CHAINS = [
+  'marriott', 'hilton', 'hyatt', 'sheraton', 'westin', 'intercontinental',
+  'holiday inn', 'crowne plaza', 'doubletree', 'hampton inn', 'courtyard',
+  'fairfield', 'residence inn', 'embassy suites', 'radisson', 'wyndham',
+  'best western', 'la quinta', 'comfort inn', 'quality inn', 'clarion',
+  'four seasons', 'ritz-carlton', 'st. regis', 'w hotel', 'jw marriott',
+  'conrad', 'waldorf', 'park hyatt', 'grand hyatt', 'andaz',
+];
+
+// Hotel types that typically have accessibility issues
+const LESS_ACCESSIBLE_TYPES = [
+  'hostel', 'b&b', 'bed and breakfast', 'boutique', 'historic',
+  'heritage', 'lodge', 'cabin', 'treehouse', 'bungalow', 'cottage',
+];
+
+/**
+ * Estimate accessibility features based on hotel name/type
+ * Returns an object with accessibility likelihood scores
+ */
+function estimateAccessibility(hotelName: string): {
+  likelyAccessible: boolean;
+  accessibilityScore: number; // 0-100
+  features: string[];
+  warnings: string[];
+} {
+  const nameLower = hotelName.toLowerCase();
+  let score = 50; // Default middle score
+  const features: string[] = [];
+  const warnings: string[] = [];
+
+  // Check if it's a major chain (usually accessible)
+  const isChainHotel = ACCESSIBLE_HOTEL_CHAINS.some(chain => nameLower.includes(chain));
+  if (isChainHotel) {
+    score += 30;
+    features.push('Major hotel chain (typically ADA compliant)');
+  }
+
+  // Check for potentially less accessible types
+  const isLessAccessibleType = LESS_ACCESSIBLE_TYPES.some(type => nameLower.includes(type));
+  if (isLessAccessibleType) {
+    score -= 30;
+    warnings.push('Historic/boutique property - confirm accessibility');
+  }
+
+  // "Resort" typically has good accessibility
+  if (nameLower.includes('resort')) {
+    score += 15;
+    features.push('Resort (usually has accessible facilities)');
+  }
+
+  // "Inn" might be smaller/older
+  if (nameLower.includes('inn') && !isChainHotel) {
+    score -= 10;
+    warnings.push('Smaller property - verify accessibility');
+  }
+
+  // Luxury hotels typically have excellent accessibility
+  const isLuxury = nameLower.includes('palace') ||
+    nameLower.includes('grand') ||
+    nameLower.includes('royal') ||
+    ACCESSIBLE_HOTEL_CHAINS.slice(-8).some(chain => nameLower.includes(chain)); // Last 8 are luxury chains
+  if (isLuxury) {
+    score += 20;
+    features.push('Luxury property (typically excellent accessibility)');
+  }
+
+  // Clamp score
+  score = Math.max(0, Math.min(100, score));
+
+  return {
+    likelyAccessible: score >= 60,
+    accessibilityScore: score,
+    features,
+    warnings,
+  };
 }
+
+/**
+ * Check if a hotel should be filtered out based on accessibility needs
+ */
+function shouldFilterForAccessibility(
+  hotel: any,
+  accessibilityNeeds?: {
+    wheelchairAccessible?: boolean;
+    groundFloorRequired?: boolean;
+    elevatorRequired?: boolean;
+    noStairs?: boolean;
+  }
+): boolean {
+  if (!accessibilityNeeds) return false;
+
+  const hasStrictNeeds = accessibilityNeeds.wheelchairAccessible ||
+    accessibilityNeeds.elevatorRequired ||
+    accessibilityNeeds.noStairs;
+
+  if (!hasStrictNeeds) return false;
+
+  // Estimate accessibility
+  const accessibility = estimateAccessibility(hotel.name);
+
+  // For strict needs, filter out hotels with low accessibility scores
+  if (hasStrictNeeds && accessibility.accessibilityScore < 40) {
+    return true; // Filter out
+  }
+
+  return false;
+}
+
+// Map budget to Google price_level (1-4 scale)
+// Aligned with BudgetStep.tsx presets:
+//   Budget-friendly: $100-200, Mid-range: $200-400, Upscale: $400-700, Luxury: $700+
+// Note: Google price_level is often missing or inaccurate for luxury hotels
+// So for high budgets, we use broader filtering and rely on luxury brand detection
+function getBudgetPriceLevel(budgetMax: number): { min: number; max: number; isLuxury: boolean } | null {
+  if (budgetMax <= 200) return { min: 1, max: 2, isLuxury: false };      // Budget-friendly
+  if (budgetMax <= 400) return { min: 2, max: 3, isLuxury: false };      // Mid-range
+  if (budgetMax <= 700) return { min: 3, max: 4, isLuxury: false };      // Upscale - prioritize higher-end
+  // Luxury ($700+): don't filter by price_level since many luxury hotels have null/missing price_level
+  // Instead, we'll use searchLuxuryHotels which searches by brand names and ratings
+  return { min: 3, max: 4, isLuxury: true };  // Luxury - use broad filter, luxury search handles quality
+}
+
+// Pet-friendly hotel indicators
+const PET_FRIENDLY_CHAINS = [
+  'kimpton', 'la quinta', 'motel 6', 'red roof', 'best western',
+  'drury', 'home2 suites', 'extended stay', 'candlewood', 'staybridge',
+  'element', 'aloft', 'residence inn', 'homewood suites', 'hyatt place',
+];
+
+const HOSTEL_KEYWORDS = [
+  'hostel', 'backpackers', 'dorm', 'youth hostel', 'pod', 'capsule',
+];
+
+const ECO_KEYWORDS = [
+  'eco', 'sustainable', 'green', 'organic', 'ecolodge', 'eco-lodge',
+  'nature lodge', 'wildlife lodge', 'conservation', 'solar',
+];
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { areaIds, destination, preferences, coordinates, checkIn, checkOut, adults } = body as {
+    const {
+      areaIds,
+      destination,
+      preferences,
+      coordinates,
+      checkIn,
+      checkOut,
+      adults,
+      children,
+      estimatedRooms,
+      accessibilityNeeds,
+      accommodationType,
+      travelingWithPets,
+      sustainabilityPreference,
+    } = body as {
       areaIds: string[];
       destination: string;
       preferences: {
@@ -212,11 +367,37 @@ export async function POST(request: NextRequest) {
       checkIn?: string;  // YYYY-MM-DD
       checkOut?: string; // YYYY-MM-DD
       adults?: number;
+      children?: number;
+      estimatedRooms?: number;
+      accessibilityNeeds?: {
+        wheelchairAccessible?: boolean;
+        groundFloorRequired?: boolean;
+        elevatorRequired?: boolean;
+        noStairs?: boolean;
+      };
+      accommodationType?: 'hotel' | 'hostel' | 'vacation_rental' | 'resort' | 'eco_lodge' | 'boutique' | 'villa';
+      travelingWithPets?: {
+        hasPet: boolean;
+        petType?: 'dog' | 'cat' | 'other';
+        petSize?: 'small' | 'medium' | 'large';
+      };
+      sustainabilityPreference?: 'standard' | 'eco_conscious' | 'eco_focused';
     };
 
     const results: Record<string, HotelCandidate[]> = {};
+
+    // Calculate party size and room needs
+    const partySize = (adults || 2) + (children || 0);
+    const isLargeGroup = partySize > 4;
+    const roomsNeeded = estimatedRooms || (isLargeGroup ? Math.ceil(partySize / 2) : 1);
+
     console.log('[Hotels API] Received request for areas:', areaIds, 'destination:', destination);
-    console.log('[Hotels API] Dates:', checkIn, '-', checkOut, 'Adults:', adults);
+    console.log('[Hotels API] Dates:', checkIn, '-', checkOut, 'Adults:', adults, 'Children:', children);
+    console.log('[Hotels API] Party size:', partySize, isLargeGroup ? `(large group, ~${roomsNeeded} rooms needed)` : '');
+    console.log('[Hotels API] Accessibility needs:', accessibilityNeeds || 'none');
+    console.log('[Hotels API] Accommodation type:', accommodationType || 'any');
+    console.log('[Hotels API] Traveling with pets:', travelingWithPets || 'no');
+    console.log('[Hotels API] Sustainability preference:', sustainabilityPreference || 'standard');
 
     // Fetch Reddit hotel recommendations for enrichment
     let redditHotels = new Map<string, { mentions: number; quote?: string; sentiment?: number }>();
@@ -285,9 +466,16 @@ export async function POST(request: NextRequest) {
         dbAvailable = false;
       }
 
-      // If no DB results or DB unavailable, use GEOCODE-BASED search
-      if (hotels.length < 3) {
-        console.log(`[Hotels API] ${dbAvailable ? 'Few DB results' : 'DB unavailable'} for ${areaName}, using Google geocode search`);
+      // Determine if we need luxury search
+      const isLuxuryBudget = priceLevelRange?.isLuxury || false;
+
+      // For LUXURY budgets, ALWAYS do fresh Google search to find premium properties
+      // Don't rely on database which may have mid-range hotels from previous searches
+      // For non-luxury, use geocode search if few DB results
+      const needsGoogleSearch = isLuxuryBudget || hotels.length < 3;
+
+      if (needsGoogleSearch) {
+        console.log(`[Hotels API] ${isLuxuryBudget ? 'LUXURY budget - searching for premium hotels' : 'Few DB results'} for ${areaName}`);
 
         // Get coordinates for the SPECIFIC AREA
         const areaCoords = await geocodeLocation(`${areaName}, ${destination}`);
@@ -295,8 +483,6 @@ export async function POST(request: NextRequest) {
         if (areaCoords) {
           console.log(`[Hotels API] Geocoded ${areaName} to (${areaCoords.lat}, ${areaCoords.lng})`);
 
-          // Use luxury search for high budgets, regular search otherwise
-          const isLuxuryBudget = priceLevelRange?.isLuxury || false;
           let nearbyHotels: GooglePlaceResult[];
 
           if (isLuxuryBudget) {
@@ -376,34 +562,41 @@ export async function POST(request: NextRequest) {
                 }
               }
 
-              // Re-query with new data including lat/lng radius
-              hotels = await prisma.hotel.findMany({
-                where: {
-                  AND: [
-                    { country: { contains: destination } },
-                    {
-                      OR: [
-                        { region: { contains: areaName } },
-                        { city: { contains: areaName } },
-                        {
-                          AND: [
-                            { lat: { gte: areaCoords.lat - 0.45 } },
-                            { lat: { lte: areaCoords.lat + 0.45 } },
-                            { lng: { gte: areaCoords.lng - 0.45 } },
-                            { lng: { lte: areaCoords.lng + 0.45 } },
-                          ]
-                        }
-                      ],
-                    },
+              // For LUXURY budgets, use Google results directly (they're specifically luxury hotels)
+              // For non-luxury, re-query DB which may have more results
+              if (isLuxuryBudget && googleHotels.length > 0) {
+                console.log(`[Hotels API] Using ${googleHotels.length} LUXURY hotels directly from Google search`);
+                hotels = googleHotels;
+              } else {
+                // Re-query with new data including lat/lng radius
+                hotels = await prisma.hotel.findMany({
+                  where: {
+                    AND: [
+                      { country: { contains: destination } },
+                      {
+                        OR: [
+                          { region: { contains: areaName } },
+                          { city: { contains: areaName } },
+                          {
+                            AND: [
+                              { lat: { gte: areaCoords.lat - 0.45 } },
+                              { lat: { lte: areaCoords.lat + 0.45 } },
+                              { lng: { gte: areaCoords.lng - 0.45 } },
+                              { lng: { lte: areaCoords.lng + 0.45 } },
+                            ]
+                          }
+                        ],
+                      },
+                    ],
+                    googleRating: { gte: preferences.minRating || 4.0 },
+                  },
+                  orderBy: [
+                    { googleRating: 'desc' },
+                    { reviewCount: 'desc' },
                   ],
-                  googleRating: { gte: preferences.minRating || 4.0 },
-                },
-                orderBy: [
-                  { googleRating: 'desc' },
-                  { reviewCount: 'desc' },
-                ],
-                take: 15,
-              });
+                  take: 15,
+                });
+              }
             } else {
               // Use Google results directly
               hotels = googleHotels;
@@ -475,7 +668,98 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      results[areaId] = hotels.map((hotel) => {
+      // Filter hotels based on various preferences
+      let filteredHotels = hotels;
+
+      // Accommodation type filter
+      if (accommodationType && accommodationType !== 'hotel') {
+        const beforeCount = filteredHotels.length;
+        filteredHotels = filteredHotels.filter(hotel => {
+          const nameLower = hotel.name.toLowerCase();
+
+          switch (accommodationType) {
+            case 'hostel':
+              return HOSTEL_KEYWORDS.some(kw => nameLower.includes(kw));
+            case 'resort':
+              return nameLower.includes('resort') || nameLower.includes('all inclusive') || nameLower.includes('spa');
+            case 'eco_lodge':
+              return ECO_KEYWORDS.some(kw => nameLower.includes(kw));
+            case 'boutique':
+              return nameLower.includes('boutique') || nameLower.includes('design') || nameLower.includes('collection');
+            case 'villa':
+              return nameLower.includes('villa') || nameLower.includes('estate') || nameLower.includes('manor');
+            case 'vacation_rental':
+              // Usually not in hotel databases - show results anyway but note
+              return true;
+            default:
+              return true;
+          }
+        });
+
+        // If we filtered too aggressively, add back some hotels with notes
+        if (filteredHotels.length < 3 && beforeCount > 3) {
+          console.log(`[Hotels API] Accommodation type ${accommodationType} too restrictive, adding back options`);
+          const additionalHotels = hotels
+            .filter(h => !filteredHotels.includes(h))
+            .slice(0, Math.max(5 - filteredHotels.length, 3));
+          filteredHotels = [...filteredHotels, ...additionalHotels];
+        }
+
+        console.log(`[Hotels API] Accommodation type filter for ${areaName}: ${beforeCount} -> ${filteredHotels.length}`);
+      }
+
+      // Pet-friendly filter - prioritize but don't exclude
+      if (travelingWithPets?.hasPet) {
+        const beforeCount = filteredHotels.length;
+        const petFriendlyHotels = filteredHotels.filter(hotel => {
+          const nameLower = hotel.name.toLowerCase();
+          return PET_FRIENDLY_CHAINS.some(chain => nameLower.includes(chain)) ||
+                 nameLower.includes('pet') ||
+                 nameLower.includes('dog');
+        });
+
+        // Put pet-friendly hotels first, then others (with warning)
+        const otherHotels = filteredHotels.filter(h => !petFriendlyHotels.includes(h));
+        filteredHotels = [...petFriendlyHotels, ...otherHotels];
+        console.log(`[Hotels API] Pet-friendly prioritization for ${areaName}: ${petFriendlyHotels.length} pet-friendly, ${otherHotels.length} others`);
+      }
+
+      // Sustainability preference filter - prioritize eco-friendly options
+      if (sustainabilityPreference && sustainabilityPreference !== 'standard') {
+        const ecoHotels = filteredHotels.filter(hotel => {
+          const nameLower = hotel.name.toLowerCase();
+          return ECO_KEYWORDS.some(kw => nameLower.includes(kw));
+        });
+
+        if (sustainabilityPreference === 'eco_focused' && ecoHotels.length > 0) {
+          // Put eco hotels first
+          const otherHotels = filteredHotels.filter(h => !ecoHotels.includes(h));
+          filteredHotels = [...ecoHotels, ...otherHotels];
+          console.log(`[Hotels API] Eco-focused prioritization: ${ecoHotels.length} eco hotels first`);
+        } else if (sustainabilityPreference === 'eco_conscious' && ecoHotels.length > 0) {
+          // Mix eco hotels into results
+          const otherHotels = filteredHotels.filter(h => !ecoHotels.includes(h));
+          filteredHotels = [...ecoHotels, ...otherHotels];
+        }
+      }
+
+      // Accessibility filter (existing logic)
+      if (accessibilityNeeds && (accessibilityNeeds.wheelchairAccessible || accessibilityNeeds.elevatorRequired || accessibilityNeeds.noStairs)) {
+        const beforeCount = filteredHotels.length;
+        filteredHotels = filteredHotels.filter(hotel => !shouldFilterForAccessibility(hotel, accessibilityNeeds));
+        console.log(`[Hotels API] Accessibility filtering for ${areaName}: ${beforeCount} -> ${filteredHotels.length} hotels`);
+
+        // If we filtered out too many, add some back with warnings
+        if (filteredHotels.length < 3 && beforeCount > filteredHotels.length) {
+          const additionalHotels = hotels
+            .filter(h => !filteredHotels.includes(h))
+            .slice(0, 5 - filteredHotels.length);
+          filteredHotels = [...filteredHotels, ...additionalHotels];
+          console.log(`[Hotels API] Added ${additionalHotels.length} hotels back with warnings`);
+        }
+      }
+
+      results[areaId] = filteredHotels.map((hotel) => {
         // Estimate price from Google price_level (1-4 scale) or star rating
         const starRating = getStarRating(hotel.name);
         const estimatedPrice = hotel.priceLevel
@@ -484,6 +768,9 @@ export async function POST(request: NextRequest) {
 
         // Get Reddit data for this hotel
         const redditData = redditHotels.get(hotel.name.toLowerCase());
+
+        // Get accessibility info
+        const accessibility = estimateAccessibility(hotel.name);
 
         return {
           id: hotel.id,
@@ -519,6 +806,27 @@ export async function POST(request: NextRequest) {
           }] : [],
           reasons: generateWhyRecommended(hotel),
           userStatus: 'default' as const,
+          // Accessibility info
+          accessibilityScore: accessibility.accessibilityScore,
+          likelyAccessible: accessibility.likelyAccessible,
+          accessibilityNotes: [
+            ...accessibility.features,
+            ...accessibility.warnings.map(w => `⚠️ ${w}`),
+          ],
+          // Pet-friendly info
+          isPetFriendly: PET_FRIENDLY_CHAINS.some(chain => hotel.name.toLowerCase().includes(chain)) ||
+                         hotel.name.toLowerCase().includes('pet') ||
+                         hotel.name.toLowerCase().includes('dog'),
+          petNote: travelingWithPets?.hasPet ?
+            (PET_FRIENDLY_CHAINS.some(chain => hotel.name.toLowerCase().includes(chain))
+              ? '🐕 Known pet-friendly chain'
+              : '⚠️ Call to confirm pet policy')
+            : undefined,
+          // Eco-friendly info
+          isEcoFriendly: ECO_KEYWORDS.some(kw => hotel.name.toLowerCase().includes(kw)),
+          ecoNote: ECO_KEYWORDS.some(kw => hotel.name.toLowerCase().includes(kw))
+            ? '🌿 Eco-friendly property'
+            : undefined,
         };
       });
     }
@@ -594,9 +902,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // For large groups, add room calculations to each hotel
+    if (isLargeGroup) {
+      for (const areaId of Object.keys(results)) {
+        results[areaId] = results[areaId].map(hotel => ({
+          ...hotel,
+          estimatedRoomsNeeded: roomsNeeded,
+          estimatedTotalPrice: hotel.pricePerNight ? hotel.pricePerNight * roomsNeeded : undefined,
+          largeGroupNote: roomsNeeded >= 4
+            ? 'Consider a villa or vacation rental for better value with large groups'
+            : undefined,
+        }));
+      }
+    }
+
     return NextResponse.json({
       hotelsByArea: results,
       totalCount: Object.values(results).reduce((sum, arr) => sum + arr.length, 0),
+      partyInfo: isLargeGroup ? {
+        partySize,
+        estimatedRoomsNeeded: roomsNeeded,
+        isLargeGroup: true,
+        tip: partySize > 8
+          ? 'For groups of 8+, consider booking multiple adjacent rooms or a vacation rental/villa for more space and better value.'
+          : 'For your group size, you may want to book connecting rooms or a suite.',
+      } : undefined,
     });
   } catch (error) {
     console.error('Batch hotels fetch error:', error);
@@ -719,14 +1049,36 @@ async function indexHotelsForArea(
 function getStarRating(name: string): number {
   const nameLower = name.toLowerCase();
 
-  const fiveStars = ['aman', 'rosewood', 'four seasons', 'mandarin oriental', 'ritz', 'st regis', 'park hyatt'];
+  // Ultra-luxury brands (5 stars)
+  const fiveStars = [
+    'aman', 'rosewood', 'four seasons', 'mandarin oriental', 'ritz', 'ritz-carlton',
+    'st regis', 'st. regis', 'park hyatt', 'peninsula', 'waldorf', 'edition',
+    'one&only', 'six senses', 'belmond', 'raffles', 'bulgari', 'armani',
+    'capella', 'faena', 'soho house', 'excellence', 'secrets', 'zoetry',
+    'eden roc', 'cap cana', 'puntacana resort', 'tortuga bay', 'casa de campo'
+  ];
   if (fiveStars.some(brand => nameLower.includes(brand))) return 5;
 
-  const fourStars = ['marriott', 'hilton', 'hyatt', 'sheraton', 'westin', 'conrad', 'intercontinental'];
-  if (fourStars.some(brand => nameLower.includes(brand))) return 4;
+  // Premium brands (4+ stars)
+  const fourPlusStars = [
+    'marriott', 'jw marriott', 'w hotel', 'le meridien', 'autograph collection',
+    'hilton', 'waldorf', 'conrad', 'curio', 'lxr',
+    'hyatt', 'hyatt regency', 'grand hyatt', 'andaz',
+    'sheraton', 'westin', 'intercontinental', 'kimpton', 'fairmont', 'sofitel',
+    'langham', 'shangri-la', 'banyan tree', 'anantara', 'oberoi',
+    'loews', 'omni', 'the luxury collection'
+  ];
+  if (fourPlusStars.some(brand => nameLower.includes(brand))) return 4;
 
-  if (nameLower.includes('resort')) return 4;
+  // Resort/boutique indicators
+  if (nameLower.includes('resort') || nameLower.includes('spa')) return 4;
   if (nameLower.includes('boutique')) return 4;
+  if (nameLower.includes('luxury')) return 4;
+  if (nameLower.includes('5 star') || nameLower.includes('five star')) return 5;
+
+  // Standard/mid-range
+  const threeStars = ['holiday inn', 'hampton', 'courtyard', 'fairfield', 'best western', 'comfort inn'];
+  if (threeStars.some(brand => nameLower.includes(brand))) return 3;
 
   return 3;
 }

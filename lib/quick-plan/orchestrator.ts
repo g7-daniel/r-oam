@@ -7,6 +7,7 @@
  */
 
 import { detectTradeoffs } from './tradeoff-engine';
+import { getSeasonalWarnings, formatSeasonalWarnings, hasSignificantWarnings, type SeasonalWarning } from './seasonal-data';
 
 // LLM calls go through API to avoid browser issues
 async function callLLM(messages: { role: string; content: string }[], temperature = 0.7): Promise<string> {
@@ -147,6 +148,28 @@ function createMinimalArea(areaId: string, areaName: string): AreaCandidate {
 }
 
 // ============================================================================
+// ACTIVITY MINIMUM AGES (for child-age filtering)
+// ============================================================================
+
+const ACTIVITY_MIN_AGES: Record<string, number> = {
+  dive: 10,           // Scuba diving - 10+ (PADI Junior Open Water)
+  surf: 6,            // Surfing - 6+ (but lessons available younger)
+  snorkel: 5,         // Snorkeling - 5+ (with life jacket)
+  adventure: 8,       // Zip-lining, rappelling - 8+
+  hiking: 4,          // Hiking - depends on difficulty, but 4+ for easy trails
+  nightlife: 18,      // Nightlife - 18/21+ depending on country
+  golf: 8,            // Golf - 8+ (most courses)
+  wildlife: 3,        // Wildlife watching - 3+ (whale watching, safaris)
+  cultural: 0,        // Museums, temples - all ages
+  food_tour: 4,       // Food tours - 4+ (most tours)
+  beach: 0,           // Beach days - all ages
+  swimming: 0,        // Swimming - all ages (with supervision)
+  spa_wellness: 16,   // Spa - 16+ for most treatments
+  photography: 0,     // Photography - all ages
+  water_sports: 6,    // Jet ski, parasailing - 6+
+};
+
+// ============================================================================
 // SNOO PERSONALITY TEMPLATES
 // ============================================================================
 
@@ -244,6 +267,117 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       return null;
     },
   },
+  tripOccasion: {
+    field: 'tripOccasion',
+    snooMessage: "What's the occasion for this trip? This helps me tailor my recommendations!",
+    inputType: 'chips',
+    getInputConfig: (state) => {
+      const adults = state.preferences.adults || 2;
+      const children = state.preferences.children || 0;
+      const isSolo = adults === 1 && children === 0;
+      const isCouple = adults === 2 && children === 0;
+      const hasKids = children > 0;
+      const isGroup = adults >= 4;
+
+      // Contextual options based on party composition
+      const options: { id: string; label: string; icon: string; description?: string }[] = [
+        { id: 'vacation', label: 'Regular Vacation', icon: '🏖️', description: 'Just getting away!' },
+      ];
+
+      if (isCouple) {
+        options.push(
+          { id: 'honeymoon', label: 'Honeymoon', icon: '💕', description: 'Romantic getaway for newlyweds' },
+          { id: 'anniversary', label: 'Anniversary', icon: '🎉', description: 'Celebrating your relationship' }
+        );
+      }
+
+      if (isSolo) {
+        options.push(
+          { id: 'solo_adventure', label: 'Solo Adventure', icon: '🎒', description: 'Exploring on your own' }
+        );
+      }
+
+      if (isGroup && !hasKids) {
+        options.push(
+          { id: 'bachelor', label: 'Bachelor/Bachelorette', icon: '🎊', description: 'Pre-wedding celebration' },
+          { id: 'girls_trip', label: "Girls' Trip", icon: '👯‍♀️', description: 'Fun with the ladies' },
+          { id: 'guys_trip', label: "Guys' Trip", icon: '🍻', description: 'Fun with the boys' }
+        );
+      }
+
+      if (hasKids || isGroup) {
+        options.push(
+          { id: 'family_reunion', label: 'Family Reunion', icon: '👨‍👩‍👧‍👦', description: 'Getting the family together' }
+        );
+      }
+
+      options.push(
+        { id: 'wedding', label: 'Attending Wedding', icon: '💒', description: 'Guest at a destination wedding' },
+        { id: 'workation', label: 'Work + Travel', icon: '💻', description: 'Remote work while traveling' },
+        { id: 'wellness', label: 'Wellness Retreat', icon: '🧘', description: 'Focus on health and relaxation' }
+      );
+
+      return {
+        options: options.slice(0, 8), // Limit to 8 options
+        allowCustomText: true,
+        customTextPlaceholder: 'Other occasion...',
+      };
+    },
+    required: false, // Optional but highly valuable for personalization
+    canInfer: true,
+    inferFrom: (state) => {
+      const messages = state.messages;
+      for (const msg of messages) {
+        if (msg.type === 'user') {
+          const lower = msg.content.toLowerCase();
+          if (lower.includes('honeymoon')) return { id: 'honeymoon' };
+          if (lower.includes('bachelor') || lower.includes('bachelorette')) return { id: 'bachelor' };
+          if (lower.includes('anniversary')) return { id: 'anniversary' };
+          if (lower.includes('wedding')) return { id: 'wedding' };
+          if (lower.includes('work') && lower.includes('travel')) return { id: 'workation' };
+        }
+      }
+      return null;
+    },
+  },
+  travelingWithPets: {
+    field: 'travelingWithPets',
+    snooMessage: "Will you be bringing any furry friends along? 🐕",
+    inputType: 'chips',
+    getInputConfig: () => ({
+      options: [
+        { id: 'no_pets', label: 'No pets', icon: '✓', description: 'Traveling without pets' },
+        { id: 'small_dog', label: 'Small dog', icon: '🐕', description: 'Under 25 lbs' },
+        { id: 'medium_dog', label: 'Medium dog', icon: '🐕', description: '25-50 lbs' },
+        { id: 'large_dog', label: 'Large dog', icon: '🐕', description: 'Over 50 lbs' },
+        { id: 'cat', label: 'Cat', icon: '🐱', description: 'Traveling with a cat' },
+        { id: 'other_pet', label: 'Other pet', icon: '🐾', description: 'Other animal companion' },
+      ],
+    }),
+    required: false,
+    canInfer: false,
+  },
+  accessibility: {
+    field: 'accessibility',
+    snooMessage: "Do you have any accessibility needs I should consider for accommodations?",
+    inputType: 'chips-multi',
+    getInputConfig: () => ({
+      options: [
+        { id: 'none', label: 'No accessibility needs', icon: '✓' },
+        { id: 'wheelchair', label: 'Wheelchair accessible', icon: '♿' },
+        { id: 'ground_floor', label: 'Ground floor room', icon: '1️⃣' },
+        { id: 'elevator', label: 'Elevator required', icon: '🛗' },
+        { id: 'no_stairs', label: 'No stairs', icon: '🚫' },
+        { id: 'grab_bars', label: 'Grab bars in bathroom', icon: '🚿' },
+        { id: 'roll_in_shower', label: 'Roll-in shower', icon: '🚿' },
+        { id: 'wide_doorways', label: 'Wide doorways', icon: '🚪' },
+      ],
+      allowCustomText: true,
+      customTextPlaceholder: 'Other accessibility needs...',
+    }),
+    required: false, // Optional question
+    canInfer: false,
+  },
   budget: {
     field: 'budget',
     snooMessage: "What's your budget per night for accommodation? This helps me find the right hotels.",
@@ -264,6 +398,88 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     }),
     required: true,
     canInfer: false,
+  },
+  accommodationType: {
+    field: 'accommodationType',
+    snooMessage: "What type of accommodation are you looking for?",
+    inputType: 'chips',
+    getInputConfig: (state) => {
+      const budget = state.preferences.budgetPerNight?.max || 200;
+      const tripOccasion = (state.preferences as any).tripOccasion;
+      const isGroup = (state.preferences.adults || 2) >= 4;
+      const hasKids = (state.preferences.children || 0) > 0;
+
+      // Build contextual options based on budget and occasion
+      const options: { id: string; label: string; icon: string; description?: string }[] = [];
+
+      // Budget travelers see hostel option first
+      if (budget <= 100) {
+        options.push({ id: 'hostel', label: 'Hostel', icon: '🛏️', description: 'Social, budget-friendly' });
+      }
+
+      // Standard hotel always available
+      options.push({ id: 'hotel', label: 'Hotel', icon: '🏨', description: 'Standard hotel stay' });
+
+      // Vacation rental for groups or families
+      if (isGroup || hasKids) {
+        options.push({ id: 'vacation_rental', label: 'Vacation Rental', icon: '🏠', description: 'Airbnb, VRBO, whole homes' });
+      }
+
+      // Villa for larger groups
+      if (isGroup && budget >= 200) {
+        options.push({ id: 'villa', label: 'Private Villa', icon: '🏡', description: 'Private villa for the group' });
+      }
+
+      // Resort for vacation/honeymoon/anniversary
+      if (tripOccasion === 'honeymoon' || tripOccasion === 'anniversary' || tripOccasion === 'wellness' || budget >= 300) {
+        options.push({ id: 'resort', label: 'Resort', icon: '🌴', description: 'Full-service resort experience' });
+      }
+
+      // Boutique for couples/special occasions
+      if (tripOccasion === 'honeymoon' || tripOccasion === 'anniversary' || budget >= 200) {
+        options.push({ id: 'boutique', label: 'Boutique Hotel', icon: '✨', description: 'Unique, design-focused' });
+      }
+
+      // Eco-lodge always as option
+      options.push({ id: 'eco_lodge', label: 'Eco Lodge', icon: '🌿', description: 'Sustainable, nature-focused' });
+
+      return {
+        options: options.slice(0, 6), // Limit to 6 options
+      };
+    },
+    required: false, // Optional but helps filter results
+    canInfer: true,
+    inferFrom: (state) => {
+      const budget = state.preferences.budgetPerNight?.max || 200;
+      const tripOccasion = (state.preferences as any).tripOccasion;
+
+      // Infer hostel for very budget travelers
+      if (budget <= 70) return { id: 'hostel' };
+      // Infer resort for honeymoons with high budget
+      if (tripOccasion === 'honeymoon' && budget >= 400) return { id: 'resort' };
+
+      return null;
+    },
+  },
+  sustainabilityPreference: {
+    field: 'sustainabilityPreference',
+    snooMessage: "How important is eco-friendly/sustainable travel to you?",
+    inputType: 'chips',
+    getInputConfig: () => ({
+      options: [
+        { id: 'standard', label: "Not a priority", icon: '✓', description: "I'll take the best option" },
+        { id: 'eco_conscious', label: 'Eco-conscious', icon: '🌱', description: 'Prefer eco-friendly when available' },
+        { id: 'eco_focused', label: 'Eco-focused', icon: '🌍', description: 'Sustainability is a top priority' },
+      ],
+    }),
+    required: false,
+    canInfer: true,
+    inferFrom: (state) => {
+      // If user chose eco_lodge accommodation, infer eco-focused
+      const accommodationType = (state.preferences as any).accommodationType;
+      if (accommodationType === 'eco_lodge') return { id: 'eco_focused' };
+      return null;
+    },
   },
   subreddits: {
     field: 'subreddits',
@@ -348,13 +564,17 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     getInputConfig: (state) => {
       const hasChildren = (state.preferences.children || 0) > 0;
       const childAges = state.preferences.childAges || [];
-      console.log('[activities getInputConfig] Children detected:', hasChildren, 'Ages:', childAges);
+      const youngestChildAge = childAges.length > 0 ? Math.min(...childAges) : 0;
+      console.log('[activities getInputConfig] Children detected:', hasChildren, 'Ages:', childAges, 'Youngest:', youngestChildAge);
 
-      let options = [
+      // Base activity options with age recommendations
+      // Note: We don't filter out adult activities - parents may do things separately!
+      let options: { id: string; label: string; icon: string; description?: string }[] = [
         { id: 'beach', label: 'Beach Days', icon: '🏖️' },
         { id: 'swimming', label: 'Swimming', icon: '🏊' },
         { id: 'snorkel', label: 'Snorkeling', icon: '🤿' },
         { id: 'wildlife', label: 'Wildlife', icon: '🐋' },
+        { id: 'nature', label: 'Nature', icon: '🌿' },
         { id: 'hiking', label: 'Hiking', icon: '🥾' },
         { id: 'cultural', label: 'Cultural', icon: '🏛️' },
         { id: 'food_tour', label: 'Food Tours', icon: '🍽️' },
@@ -366,24 +586,49 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         { id: 'photography', label: 'Photography', icon: '📸' },
       ];
 
+      // For families with young children, add descriptions noting age requirements
+      // but DON'T filter out - parents may do these while kids have other activities
+      if (hasChildren && youngestChildAge > 0 && youngestChildAge < 12) {
+        options = options.map(opt => {
+          const minAge = ACTIVITY_MIN_AGES[opt.id] ?? 0;
+          if (youngestChildAge < minAge) {
+            // Add note that this may be adults-only time
+            return {
+              ...opt,
+              description: `Usually ${minAge}+ (great for parent time!)`,
+            };
+          }
+          return opt;
+        });
+      }
+
       // Add family-specific activities if kids present
       if (hasChildren) {
-        const kidsOptions = [
-          { id: 'kids_activities', label: 'Kids Activities', icon: '🎠' },
+        const kidsOptions: { id: string; label: string; icon: string; description?: string }[] = [
+          { id: 'kids_activities', label: 'Kids Activities', icon: '🎠', description: 'Kid-friendly attractions' },
         ];
 
         // For older kids (8+), add more adventurous options
         if (childAges.some(age => age >= 8)) {
           kidsOptions.push(
-            { id: 'water_park', label: 'Water Parks', icon: '🎢' }
+            { id: 'water_park', label: 'Water Parks', icon: '🎢', description: 'Fun for the whole family' }
           );
         }
 
-        // Put kids options first
+        // Put kids options first, then all other options
         options = [...kidsOptions, ...options];
 
-        // Remove nightlife for family trips
-        options = options.filter(o => o.id !== 'nightlife');
+        // For family trips, move nightlife to end with a note (not removed)
+        // Parents might want a night out while kids have a babysitter/kids club
+        const nightlifeIdx = options.findIndex(o => o.id === 'nightlife');
+        if (nightlifeIdx === -1) {
+          options.push({
+            id: 'nightlife',
+            label: 'Nightlife',
+            icon: '🎉',
+            description: 'Date night while kids at club',
+          });
+        }
       } else {
         // Add nightlife for adult trips
         options.push({ id: 'nightlife', label: 'Nightlife', icon: '🎉' });
@@ -406,6 +651,35 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       customTextPlaceholder: 'e.g., "Must see a waterfall" or "No early mornings"',
       allowCustomText: true,
     }),
+    required: false,
+    canInfer: false,
+  },
+  activitySkillLevel: {
+    field: 'activitySkillLevel',
+    snooMessage: "For some of your chosen activities, it helps to know your experience level so I can find the right options.",
+    inputType: 'chips',
+    getInputConfig: (state) => {
+      // Check which skill-based activities were selected
+      const SKILL_ACTIVITIES_LIST = ['surf', 'dive', 'snorkel', 'hiking', 'adventure', 'golf'];
+      const activities = state.preferences.selectedActivities || [];
+      const skillActivities = activities.filter(a => SKILL_ACTIVITIES_LIST.includes(a.type));
+
+      if (skillActivities.length === 0) {
+        return { options: [] };
+      }
+
+      // Get the activity names for the message
+      const activityNames = skillActivities.map(a => a.type).join(', ');
+
+      return {
+        options: [
+          { id: 'beginner', label: `Beginner`, icon: '🌱', description: 'First time or just learning' },
+          { id: 'intermediate', label: `Intermediate`, icon: '🌿', description: 'Comfortable with the basics' },
+          { id: 'advanced', label: `Advanced`, icon: '🌲', description: 'Looking for a challenge' },
+        ],
+        activityNames, // For customizing the message
+      };
+    },
     required: false,
     canInfer: false,
   },
@@ -647,6 +921,28 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       return null;
     },
   },
+  dietaryRestrictions: {
+    field: 'dietaryRestrictions',
+    snooMessage: "Any dietary restrictions I should know about when finding restaurants?",
+    inputType: 'chips-multi',
+    getInputConfig: () => ({
+      options: [
+        { id: 'none', label: 'No restrictions', icon: '✓' },
+        { id: 'vegetarian', label: 'Vegetarian', icon: '🥬' },
+        { id: 'vegan', label: 'Vegan', icon: '🌱' },
+        { id: 'halal', label: 'Halal', icon: '☪️' },
+        { id: 'kosher', label: 'Kosher', icon: '✡️' },
+        { id: 'gluten_free', label: 'Gluten-free', icon: '🌾' },
+        { id: 'nut_allergy', label: 'Nut allergy', icon: '🥜' },
+        { id: 'seafood_allergy', label: 'Seafood allergy', icon: '🦐' },
+        { id: 'dairy_free', label: 'Dairy-free', icon: '🥛' },
+      ],
+      allowCustomText: true,
+      customTextPlaceholder: 'Other dietary needs...',
+    }),
+    required: false, // Only asked if dining mode is 'plan'
+    canInfer: false,
+  },
   cuisinePreferences: {
     field: 'cuisinePreferences',
     snooMessage: "What kind of food are you in the mood for? Pick all that sound good!",
@@ -751,6 +1047,7 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
             dive: 'Scuba Diving',
             swimming: 'Swimming',
             wildlife: 'Wildlife',
+            nature: 'Nature',
             hiking: 'Hiking',
             adventure: 'Adventure',
             cultural: 'Cultural',
@@ -816,6 +1113,7 @@ export class QuickPlanOrchestrator {
         destination: 'unknown',
         dates: 'unknown',
         party: 'unknown',
+        accessibility: 'unknown',
         budget: 'unknown',
         vibe: 'unknown',
         activities: 'unknown',
@@ -938,8 +1236,55 @@ export class QuickPlanOrchestrator {
     if (this.state.confidence.destination === 'unknown') missing.push('destination');
     if (this.state.confidence.dates === 'unknown') missing.push('dates');
     if (this.state.confidence.party === 'unknown') missing.push('party');
+
+    // Trip occasion asked after party (optional but highly valuable for personalization)
+    if (this.state.confidence.party !== 'unknown' &&
+        !(this.state.preferences as any).tripOccasion) {
+      missing.push('tripOccasion');
+    }
+
+    // Pet question asked after trip occasion (optional)
+    if (this.state.confidence.party !== 'unknown' &&
+        (this.state.preferences as any).tripOccasion &&
+        !(this.state.preferences as any).travelingWithPets) {
+      missing.push('travelingWithPets');
+    }
+
+    // Accessibility is asked after pet question (optional but asked once)
+    if (this.state.confidence.party !== 'unknown' &&
+        (this.state.preferences as any).travelingWithPets &&
+        this.state.confidence.accessibility === 'unknown') {
+      missing.push('accessibility');
+    }
+
     if (this.state.confidence.budget === 'unknown') missing.push('budget');
+
+    // Accommodation type asked after budget (helps with filtering)
+    if (this.state.confidence.budget !== 'unknown' &&
+        !(this.state.preferences as any).accommodationType) {
+      missing.push('accommodationType');
+    }
+
+    // Sustainability preference asked after accommodation type (optional)
+    // Skip if they already chose eco_lodge (we can infer eco_focused)
+    const accommodationType = (this.state.preferences as any).accommodationType;
+    if (this.state.confidence.budget !== 'unknown' &&
+        accommodationType &&
+        accommodationType !== 'eco_lodge' &&
+        !(this.state.preferences as any).sustainabilityPreference) {
+      missing.push('sustainabilityPreference');
+    }
     if (this.state.confidence.activities === 'unknown') missing.push('activities');
+
+    // Ask skill level after activities if user selected skill-based activities
+    const SKILL_ACTIVITY_TYPES = ['surf', 'dive', 'snorkel', 'hiking', 'adventure', 'golf'];
+    const userActivities = this.state.preferences.selectedActivities || [];
+    const hasSkillActivities = userActivities.some(a => SKILL_ACTIVITY_TYPES.includes(a.type));
+    if (this.state.confidence.activities !== 'unknown' &&
+        hasSkillActivities &&
+        !this.state.preferences.activitySkillLevel) {
+      missing.push('activitySkillLevel');
+    }
 
     // Ask which subreddits to search after activities
     if (this.state.confidence.activities !== 'unknown' &&
@@ -1037,17 +1382,28 @@ export class QuickPlanOrchestrator {
       missing.push('dining');
     }
 
-    // Cuisine preferences required when diningMode is 'plan'
+    // Dietary restrictions and cuisine preferences required when diningMode is 'plan'
     const wantsDiningHelp = this.state.preferences.diningMode === 'plan';
     console.log('[getMissingRequiredFields] Dining check:', {
       diningMode: this.state.preferences.diningMode,
       diningConfidence: this.state.confidence.dining,
       wantsDiningHelp,
+      hasDietaryRestrictions: !!(this.state.preferences as any).dietaryRestrictions,
       hasCuisinePreferences: !!(this.state.preferences as any).cuisinePreferences,
     });
 
+    // Dietary restrictions asked first (before cuisine preferences)
     if (wantsDiningHelp &&
         this.state.confidence.dining === 'complete' &&
+        !(this.state.preferences as any).dietaryRestrictions) {
+      console.log('[getMissingRequiredFields] >>> ADDING dietaryRestrictions TO MISSING <<<');
+      missing.push('dietaryRestrictions');
+    }
+
+    // Cuisine preferences asked after dietary restrictions
+    if (wantsDiningHelp &&
+        this.state.confidence.dining === 'complete' &&
+        (this.state.preferences as any).dietaryRestrictions &&
         !(this.state.preferences as any).cuisinePreferences) {
       console.log('[getMissingRequiredFields] >>> ADDING cuisinePreferences TO MISSING <<<');
       missing.push('cuisinePreferences');
@@ -1304,8 +1660,32 @@ export class QuickPlanOrchestrator {
     console.log('[decideNextField] Candidates:', candidates, 'count:', candidates.length);
 
     // ALWAYS use priority list to ensure proper flow order
-    // This is critical - split MUST be asked before hotelPreferences
-    const priority = ['destination', 'dates', 'party', 'budget', 'pace', 'activities', 'subreddits', 'vibe', 'areas', 'split', 'hotelPreferences', 'hotels', 'dining', 'cuisinePreferences', 'restaurants', 'experiences'];
+    // This is critical - questions must be asked in the correct order
+    const priority = [
+      'destination',
+      'dates',
+      'party',
+      'tripOccasion',           // NEW: After party - helps personalize everything
+      'travelingWithPets',      // NEW: After occasion - affects hotel filtering
+      'accessibility',          // After pets - affects hotel filtering
+      'budget',
+      'accommodationType',      // NEW: After budget - hostel/hotel/resort/villa
+      'sustainabilityPreference', // NEW: After accommodation - eco preferences
+      'pace',
+      'activities',
+      'activitySkillLevel',
+      'subreddits',
+      'vibe',
+      'areas',
+      'split',
+      'hotelPreferences',
+      'hotels',
+      'dining',
+      'dietaryRestrictions',
+      'cuisinePreferences',
+      'restaurants',
+      'experiences'
+    ];
 
     for (const field of priority) {
       if (candidates.includes(field)) {
@@ -1480,14 +1860,85 @@ Respond with just the field name.`;
         this.state.preferences.tripLength = dates.nights;
         this.state.preferences.isFlexibleDates = dates.isFlexible;
         this.setConfidence('dates', 'complete');
+
+        // Check for seasonal warnings if destination is already set
+        const destName = this.state.preferences.destinationContext?.canonicalName ||
+                        this.state.preferences.destinationContext?.rawInput;
+        if (destName && dates.startDate) {
+          const warnings = getSeasonalWarnings(destName, dates.startDate);
+          if (warnings.length > 0) {
+            this.state.seasonalWarnings = warnings;
+            console.log(`[Orchestrator] Found ${warnings.length} seasonal warnings for ${destName}`);
+          }
+        }
         break;
 
       case 'party':
-        const party = response as { adults: number; children: number; childAges: number[] };
+        const party = response as { adults: number; children: number; childAges: number[]; estimatedRooms?: number };
         this.state.preferences.adults = party.adults;
         this.state.preferences.children = party.children;
         this.state.preferences.childAges = party.childAges;
+        if (party.estimatedRooms) {
+          this.state.preferences.estimatedRoomsNeeded = party.estimatedRooms;
+        }
         this.setConfidence('party', 'confirmed');
+
+        // For very large groups (8+), auto-suggest vacation rental as better value
+        const totalTravelers = party.adults + party.children;
+        if (totalTravelers >= 8 && !(this.state.preferences as any).accommodationType) {
+          (this.state.preferences as any).accommodationType = 'vacation_rental';
+          console.log(`[Orchestrator] Large group (${totalTravelers} travelers) - auto-suggesting vacation rental`);
+        }
+        break;
+
+      case 'tripOccasion':
+        const occasion = response as { id: string; label: string };
+        (this.state.preferences as any).tripOccasion = occasion.id;
+        console.log('[Orchestrator] Trip occasion set:', occasion.id);
+        break;
+
+      case 'travelingWithPets':
+        const petResponse = response as { id: string; label: string };
+        if (petResponse.id === 'no_pets') {
+          (this.state.preferences as any).travelingWithPets = { hasPet: false };
+        } else {
+          const petSize = petResponse.id.includes('small') ? 'small' :
+                          petResponse.id.includes('medium') ? 'medium' :
+                          petResponse.id.includes('large') ? 'large' : undefined;
+          const petType = petResponse.id.includes('dog') ? 'dog' :
+                          petResponse.id.includes('cat') ? 'cat' : 'other';
+          (this.state.preferences as any).travelingWithPets = {
+            hasPet: true,
+            petType,
+            petSize,
+          };
+        }
+        console.log('[Orchestrator] Pet info set:', (this.state.preferences as any).travelingWithPets);
+        break;
+
+      case 'accessibility':
+        const accessibilityPrefs = response as { id: string; label: string }[];
+        // Filter out 'none' if selected with other options, or keep 'none' if it's the only selection
+        const accessibilityIds = accessibilityPrefs.map(a => a.id);
+        const hasNone = accessibilityIds.includes('none');
+        const otherNeeds = accessibilityIds.filter(id => id !== 'none');
+
+        if (otherNeeds.length > 0) {
+          // User has specific needs - store them
+          this.state.preferences.accessibilityNeeds = {
+            wheelchairAccessible: otherNeeds.includes('wheelchair'),
+            groundFloorRequired: otherNeeds.includes('ground_floor'),
+            elevatorRequired: otherNeeds.includes('elevator'),
+            noStairs: otherNeeds.includes('no_stairs'),
+            // Store any custom needs
+          };
+          console.log('[Orchestrator] Accessibility needs set:', this.state.preferences.accessibilityNeeds);
+        } else {
+          // User selected 'none' or no specific needs
+          this.state.preferences.accessibilityNeeds = undefined;
+          console.log('[Orchestrator] No accessibility needs');
+        }
+        this.setConfidence('accessibility', 'complete');
         break;
 
       case 'budget':
@@ -1500,6 +1951,18 @@ Respond with just the field name.`;
         };
         (this.state.preferences as any).budgetUnlimited = isUnlimited;
         this.setConfidence('budget', 'complete');
+        break;
+
+      case 'accommodationType':
+        const accomType = response as { id: string; label: string };
+        (this.state.preferences as any).accommodationType = accomType.id;
+        console.log('[Orchestrator] Accommodation type set:', accomType.id);
+        break;
+
+      case 'sustainabilityPreference':
+        const sustainabilityPref = response as { id: string; label: string };
+        (this.state.preferences as any).sustainabilityPreference = sustainabilityPref.id;
+        console.log('[Orchestrator] Sustainability preference set:', sustainabilityPref.id);
         break;
 
       case 'subreddits':
@@ -1542,6 +2005,12 @@ Respond with just the field name.`;
           }
         }
         this.setConfidence('vibe', 'complete');
+        break;
+
+      case 'activitySkillLevel':
+        const skillLevel = response as { id: string; label: string };
+        this.state.preferences.activitySkillLevel = skillLevel.id as 'beginner' | 'intermediate' | 'advanced';
+        console.log('[Orchestrator] Activity skill level set:', skillLevel.id);
         break;
 
       case 'areas':
@@ -1625,6 +2094,14 @@ Respond with just the field name.`;
         this.state.preferences.diningMode = dining.id as 'none' | 'list' | 'plan';
         this.setConfidence('dining', 'complete');
         console.log('[Orchestrator] Dining mode set to:', dining.id);
+        break;
+
+      case 'dietaryRestrictions':
+        const dietaryPrefs = response as { id: string; label: string }[];
+        // Filter out 'none' if selected with other options
+        const restrictions = dietaryPrefs.map(d => d.id).filter(id => id !== 'none');
+        (this.state.preferences as any).dietaryRestrictions = restrictions.length > 0 ? restrictions : ['none'];
+        console.log('[Orchestrator] Dietary restrictions set:', (this.state.preferences as any).dietaryRestrictions);
         break;
 
       case 'cuisinePreferences':

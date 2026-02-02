@@ -22,7 +22,7 @@ import type {
 } from '@/types/quick-plan';
 import { finalizeQuickPlanTrip } from '@/lib/quick-plan/trip-transformer';
 import { useToast } from '@/components/ui/Toast';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, Send, MessageCircle } from 'lucide-react';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -55,6 +55,10 @@ export default function QuickPlanChat() {
   const [isProcessing, setIsProcessing] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
+
+  // Free text input state
+  const [freeTextInput, setFreeTextInput] = useState('');
+  const [showFreeTextInput, setShowFreeTextInput] = useState(false);
 
   // ============================================================================
   // INITIALIZATION
@@ -125,6 +129,66 @@ export default function QuickPlanChat() {
       startConversation();
     }, 100);
   }, [orchestrator]);
+
+  // ============================================================================
+  // FREE TEXT INPUT - Allow users to ask questions or provide context
+  // ============================================================================
+
+  const handleFreeTextSubmit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!freeTextInput.trim() || isProcessing) return;
+
+    const userMessage = freeTextInput.trim();
+    setFreeTextInput('');
+    setShowFreeTextInput(false);
+    setIsProcessing(true);
+    setSnooState('thinking');
+
+    // Add user message to transcript
+    orchestrator.addUserMessage(userMessage);
+    setMessages([...orchestrator.getMessages()]);
+
+    try {
+      // Send to chat API for intelligent response
+      const response = await fetch('/api/quick-plan/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: 'system',
+              content: `You are Snoo, a friendly AI travel planning assistant. The user is planning a trip and has asked a question or provided additional context.
+
+Current trip context:
+${JSON.stringify(orchestrator.getState().preferences, null, 2)}
+
+Respond helpfully and concisely (2-3 sentences max). If they're asking about something specific to their trip, incorporate that into your response. If they're providing preferences or context, acknowledge it and explain how you'll use that information. Stay friendly and encouraging!`
+            },
+            { role: 'user', content: userMessage }
+          ],
+          temperature: 0.7,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const snooResponse = data.content || "Got it! I'll keep that in mind as we plan your trip.";
+        orchestrator.addSnooMessage(snooResponse, 'idle');
+        setMessages([...orchestrator.getMessages()]);
+      } else {
+        orchestrator.addSnooMessage("Thanks for sharing! I'll factor that into your trip planning.", 'idle');
+        setMessages([...orchestrator.getMessages()]);
+      }
+    } catch (error) {
+      console.error('[FreeText] Error processing message:', error);
+      orchestrator.addSnooMessage("Thanks for the input! Let's continue planning your trip.", 'idle');
+      setMessages([...orchestrator.getMessages()]);
+    }
+
+    setIsProcessing(false);
+    setSnooState('idle');
+    setDebugLog([...orchestrator.getDebugLog()]);
+  }, [freeTextInput, isProcessing, orchestrator]);
 
   // ============================================================================
   // ACKNOWLEDGMENT MESSAGES - Make conversation feel more personal
@@ -236,6 +300,119 @@ export default function QuickPlanChat() {
     // Process the response
     orchestrator.processUserResponse(currentQuestion.id, value);
     setCurrentQuestion(null);
+
+    // CRITICAL: Handle satisfaction response (dissatisfaction needs special handling)
+    if (answeredField === 'satisfaction') {
+      const satisfactionResponse = value as { satisfied: boolean; reasons?: string[]; customFeedback?: string };
+      console.log('[QuickPlanChat] Satisfaction answered:', satisfactionResponse);
+
+      if (satisfactionResponse.satisfied) {
+        // User is happy - this is handled by the phase transition to 'satisfied' below
+        // Let the normal flow continue
+      } else {
+        // User is dissatisfied - orchestrator.processUserResponse already called handleDissatisfaction
+        // which reset confidence levels and set the appropriate phase
+        const currentPhase = orchestrator.getPhase();
+        console.log('[Dissatisfaction] Phase after handling:', currentPhase);
+
+        // Add acknowledgment message
+        const reasonLabels = satisfactionResponse.reasons?.map(r => {
+          const labels: Record<string, string> = {
+            'wrong_areas': 'areas',
+            'wrong_vibe': 'overall vibe',
+            'too_packed': 'pace (too busy)',
+            'too_chill': 'pace (not enough)',
+            'hotel_wrong': 'hotels',
+            'dining_wrong': 'restaurants',
+            'too_touristy': 'touristy spots',
+            'missing_activity': 'missing activities',
+            'budget_exceeded': 'budget',
+            'other': 'other concerns',
+          };
+          return labels[r] || r;
+        }) || [];
+
+        const feedbackSummary = reasonLabels.length > 0
+          ? `I hear you - let's fix the ${reasonLabels.join(' and ')}.`
+          : "Got it, let me make some adjustments.";
+
+        orchestrator.addSnooMessage(feedbackSummary, 'thinking');
+        setMessages([...orchestrator.getMessages()]);
+
+        // Small delay for the thinking message to show
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        if (currentPhase === 'generating') {
+          // Need to regenerate itinerary with new preferences
+          setPhase('generating');
+          await handleGenerationPhase();
+          // After regeneration, show the itinerary again
+          setPhase('reviewing');
+          const satisfactionQuestion = await orchestrator.selectNextQuestion();
+          if (satisfactionQuestion) {
+            orchestrator.addSnooMessage(satisfactionQuestion.snooMessage, 'idle');
+            setMessages([...orchestrator.getMessages()]);
+            setCurrentQuestion(satisfactionQuestion);
+            orchestrator.state.currentQuestion = satisfactionQuestion;
+          }
+        } else if (currentPhase === 'gathering' || currentPhase === 'enriching') {
+          // Need to go back and re-ask questions
+          setPhase(currentPhase);
+          const nextQuestion = await orchestrator.selectNextQuestion();
+          if (nextQuestion) {
+            orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
+            setMessages([...orchestrator.getMessages()]);
+            setCurrentQuestion(nextQuestion);
+            orchestrator.state.currentQuestion = nextQuestion;
+          }
+        }
+
+        setIsTyping(false);
+        setIsProcessing(false);
+        setSnooState('idle');
+        setDebugLog([...orchestrator.getDebugLog()]);
+        return; // Exit early - we've handled the dissatisfaction
+      }
+    }
+
+    // Check for seasonal warnings after dates are answered
+    if (answeredField === 'dates') {
+      const state = orchestrator.getState();
+      const warnings = state.seasonalWarnings;
+      if (warnings && warnings.length > 0) {
+        // Build a friendly warning message
+        const severityIcon = (severity: string) => {
+          switch (severity) {
+            case 'caution': return '🚨';
+            case 'warning': return '⚠️';
+            default: return 'ℹ️';
+          }
+        };
+        const priceNote = (impact?: string) => {
+          switch (impact) {
+            case 'much_higher': return ' Prices are significantly higher.';
+            case 'higher': return ' Prices tend to be higher.';
+            case 'lower': return ' Good deals are often available!';
+            case 'much_lower': return ' Great deals available!';
+            default: return '';
+          }
+        };
+
+        const warningLines = warnings.map(w =>
+          `${severityIcon(w.severity)} **${w.title}**: ${w.description}${priceNote(w.priceImpact)}`
+        );
+
+        const hasSevereWarnings = warnings.some(w => w.severity === 'caution' || w.severity === 'warning');
+
+        const warningMessage = hasSevereWarnings
+          ? `Heads up about your travel dates:\n\n${warningLines.join('\n\n')}\n\nThis is good to know as we plan! Let's continue.`
+          : `Quick note about your dates:\n\n${warningLines.join('\n\n')}\n\nLet's keep planning!`;
+
+        orchestrator.addSnooMessage(warningMessage, 'idle');
+        setMessages([...orchestrator.getMessages()]);
+        await new Promise(resolve => setTimeout(resolve, 800)); // Let user read the warning
+      }
+    }
 
     // If dining was just answered and user selected "Help me find restaurants", ask about cuisines first
     if (answeredField === 'dining') {
@@ -512,6 +689,36 @@ export default function QuickPlanChat() {
         return;
       } else if (currentPhase === 'generating') {
         await handleGenerationPhase();
+        // After regeneration, show the itinerary again
+        setPhase('reviewing');
+        // Get the satisfaction question to show again
+        const satisfactionQuestion = await orchestrator.selectNextQuestion();
+        if (satisfactionQuestion) {
+          orchestrator.addSnooMessage(satisfactionQuestion.snooMessage, 'idle');
+          setMessages([...orchestrator.getMessages()]);
+          setCurrentQuestion(satisfactionQuestion);
+          orchestrator.state.currentQuestion = satisfactionQuestion;
+        }
+        setIsTyping(false);
+        setIsProcessing(false);
+        setSnooState('idle');
+        setDebugLog([...orchestrator.getDebugLog()]);
+        return;
+      } else if (currentPhase === 'gathering') {
+        // Phase changed back to gathering (e.g., from dissatisfaction with hotels/dining)
+        // Continue with the next question in the flow
+        const gatherQuestion = await orchestrator.selectNextQuestion();
+        if (gatherQuestion) {
+          orchestrator.addSnooMessage(gatherQuestion.snooMessage, 'idle');
+          setMessages([...orchestrator.getMessages()]);
+          setCurrentQuestion(gatherQuestion);
+          orchestrator.state.currentQuestion = gatherQuestion;
+        }
+        setIsTyping(false);
+        setIsProcessing(false);
+        setSnooState('idle');
+        setDebugLog([...orchestrator.getDebugLog()]);
+        return;
       } else if (currentPhase === 'satisfied') {
         // Conversation complete - show celebration and navigate to itinerary
         const celebrationMsg = await orchestrator.generateSnooMessage({ type: 'celebration' });
@@ -695,6 +902,12 @@ export default function QuickPlanChat() {
         return d.toISOString().split('T')[0];
       };
 
+      // Get preferences from state
+      const accessibilityNeeds = state.preferences.accessibilityNeeds;
+      const accommodationType = (state.preferences as any).accommodationType;
+      const travelingWithPets = (state.preferences as any).travelingWithPets;
+      const sustainabilityPreference = (state.preferences as any).sustainabilityPreference;
+
       const response = await fetch('/api/quick-plan/hotels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -702,8 +915,8 @@ export default function QuickPlanChat() {
           areaIds,
           destination,
           preferences: {
-            budgetMin: budget?.min || 0,
-            budgetMax: budget?.max || 1000,
+            budgetMin: budget?.min || 150,  // Default to store's initial budget
+            budgetMax: budget?.max || 350,  // Default to store's initial budget
             minRating: 4.0,
           },
           coordinates: firstArea ? {
@@ -714,6 +927,13 @@ export default function QuickPlanChat() {
           checkIn: formatDateForAPI(state.preferences.startDate),
           checkOut: formatDateForAPI(state.preferences.endDate),
           adults: state.preferences.adults || 2,
+          children: state.preferences.children || 0,
+          estimatedRooms: state.preferences.estimatedRoomsNeeded,
+          // Pass all filtering preferences
+          accessibilityNeeds,
+          accommodationType,
+          travelingWithPets,
+          sustainabilityPreference,
         }),
       });
 
@@ -825,7 +1045,9 @@ export default function QuickPlanChat() {
         }
       }
 
-      console.log('[Restaurants] Fetching restaurants for cuisines:', cuisineTypes, 'with hotels:', hotelsData);
+      // Get dietary restrictions from state
+      const dietaryRestrictions = (state.preferences as any).dietaryRestrictions || [];
+      console.log('[Restaurants] Fetching restaurants for cuisines:', cuisineTypes, 'with hotels:', hotelsData, 'dietary:', dietaryRestrictions);
 
       const response = await fetch('/api/quick-plan/restaurants', {
         method: 'POST',
@@ -840,6 +1062,7 @@ export default function QuickPlanChat() {
             centerLat: a.centerLat,
             centerLng: a.centerLng,
           })),
+          dietaryRestrictions, // Pass dietary restrictions to API
         }),
       });
 
@@ -1220,6 +1443,49 @@ export default function QuickPlanChat() {
           {isProcessing && (
             <div className="flex items-center justify-center gap-3 py-4">
               <SnooAgent state={snooState} size="sm" showLabel={true} />
+            </div>
+          )}
+
+          {/* Free text input toggle and form */}
+          {!isProcessing && (
+            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+              {showFreeTextInput ? (
+                <form onSubmit={handleFreeTextSubmit} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={freeTextInput}
+                    onChange={(e) => setFreeTextInput(e.target.value)}
+                    placeholder="Ask Snoo anything or add context..."
+                    autoFocus
+                    className="flex-1 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!freeTextInput.trim()}
+                    className="px-4 py-2 bg-orange-500 text-white rounded-xl font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFreeTextInput(false);
+                      setFreeTextInput('');
+                    }}
+                    className="px-3 py-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <button
+                  onClick={() => setShowFreeTextInput(true)}
+                  className="w-full flex items-center justify-center gap-2 py-2 text-sm text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>Ask Snoo a question or add context</span>
+                </button>
+              )}
             </div>
           )}
         </div>

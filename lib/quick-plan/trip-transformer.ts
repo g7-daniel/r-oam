@@ -130,6 +130,8 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
   // Build destinations from selected areas with their nights from the split
   const destinations: Destination[] = [];
   const splitStops = selectedSplit?.stops || [];
+  // Map destinationId -> area.id for hotel lookups
+  const destinationToAreaMap = new Map<string, string>();
 
   for (const area of selectedAreas) {
     // Find nights for this area from split
@@ -141,6 +143,8 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
 
     const destination = createDestination(area, nights, hotel, prefs);
     destinations.push(destination);
+    // Track the mapping for later hotel lookups
+    destinationToAreaMap.set(destination.destinationId, area.id);
   }
 
   // Build day mapping from destinations
@@ -181,8 +185,11 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
     pace
   );
 
+  // Create check-in/check-out items for hotels
+  const hotelCheckItems = createHotelCheckItems(dayMapping, destinations, selectedHotels, destinationToAreaMap);
+
   // Combine all scheduled items
-  const scheduledItems: CollectionItem[] = [...scheduledRestaurants, ...scheduledExperiences];
+  const scheduledItems: CollectionItem[] = [...hotelCheckItems, ...scheduledRestaurants, ...scheduledExperiences];
 
   // Also add items from the generated itinerary if they exist
   if (data.itinerary?.days) {
@@ -496,6 +503,116 @@ function findDestinationForExperience(
 
   // Fallback to first destination
   return destinations[0]?.destinationId;
+}
+
+/**
+ * Create check-in and check-out items for each hotel
+ * These are special scheduled items that mark hotel transitions
+ */
+function createHotelCheckItems(
+  dayMapping: DayMapping[],
+  destinations: Destination[],
+  selectedHotels: Record<string, HotelCandidate>,
+  destinationToAreaMap: Map<string, string>
+): CollectionItem[] {
+  const items: CollectionItem[] = [];
+
+  // Helper to find hotel for a destination using the area mapping
+  const findHotelForDestination = (destId: string): HotelCandidate | null => {
+    const areaId = destinationToAreaMap.get(destId);
+    if (areaId && selectedHotels[areaId]) {
+      return selectedHotels[areaId];
+    }
+    return null;
+  };
+
+  // Group consecutive days by destination to find first and last days at each hotel
+  let currentDestId: string | null = null;
+  let checkInDayIndex: number | null = null;
+  let lastDayAtDest: number | null = null;
+
+  for (let i = 0; i < dayMapping.length; i++) {
+    const day = dayMapping[i];
+    const finalHotel = findHotelForDestination(day.destinationId);
+
+    if (day.destinationId !== currentDestId) {
+      // We're at a new destination - create check-out for previous if exists
+      if (currentDestId && lastDayAtDest !== null) {
+        const prevHotel = findHotelForDestination(currentDestId);
+
+        if (prevHotel) {
+          items.push({
+            id: `checkout_${currentDestId}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            name: `Check-out: ${prevHotel.name}`,
+            category: 'hotel_checkout',
+            description: prevHotel.address || '',
+            destinationId: currentDestId,
+            scheduledDayIndex: lastDayAtDest,
+            order: -1, // Before everything else
+            durationMinutes: 30,
+            lat: prevHotel.lat,
+            lng: prevHotel.lng,
+            imageUrl: prevHotel.imageUrl || undefined,
+            hotelId: prevHotel.id || prevHotel.placeId,
+            hotelName: prevHotel.name,
+            source: { type: 'system' as const },
+          });
+        }
+      }
+
+      // Start tracking new destination
+      currentDestId = day.destinationId;
+      checkInDayIndex = day.dayIndex;
+
+      // Create check-in for this destination
+      if (finalHotel) {
+        items.push({
+          id: `checkin_${day.destinationId}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+          name: `Check-in: ${finalHotel.name}`,
+          category: 'hotel_checkin',
+          description: finalHotel.address || '',
+          destinationId: day.destinationId,
+          scheduledDayIndex: day.dayIndex,
+          order: -2, // First thing
+          durationMinutes: 30,
+          lat: finalHotel.lat,
+          lng: finalHotel.lng,
+          imageUrl: finalHotel.imageUrl || undefined,
+          hotelId: finalHotel.id || finalHotel.placeId,
+          hotelName: finalHotel.name,
+          source: { type: 'system' as const },
+        });
+      }
+    }
+
+    lastDayAtDest = day.dayIndex;
+  }
+
+  // Create final check-out for the last destination
+  if (currentDestId && lastDayAtDest !== null) {
+    const lastHotel = findHotelForDestination(currentDestId);
+
+    if (lastHotel) {
+      items.push({
+        id: `checkout_${currentDestId}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        name: `Check-out: ${lastHotel.name}`,
+        category: 'hotel_checkout',
+        description: lastHotel.address || '',
+        destinationId: currentDestId,
+        scheduledDayIndex: lastDayAtDest,
+        order: -1,
+        durationMinutes: 30,
+        lat: lastHotel.lat,
+        lng: lastHotel.lng,
+        imageUrl: lastHotel.imageUrl || undefined,
+        hotelId: lastHotel.id || lastHotel.placeId,
+        hotelName: lastHotel.name,
+        source: { type: 'system' as const },
+      });
+    }
+  }
+
+  return items;
 }
 
 // ============================================================================

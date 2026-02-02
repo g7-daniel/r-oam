@@ -83,6 +83,41 @@ export type PaceLevel = 'chill' | 'balanced' | 'packed';
 export type DiningMode = 'none' | 'list' | 'schedule' | 'plan';
 export type PriceConfidence = 'real' | 'estimated' | 'rough' | 'unknown';
 
+// Trip occasion/purpose for personalization
+export type TripOccasion =
+  | 'vacation'      // Regular vacation
+  | 'honeymoon'     // Honeymoon - prioritize romantic, adults-only
+  | 'anniversary'   // Anniversary - special occasions, splurge experiences
+  | 'bachelor'      // Bachelor/Bachelorette - party-friendly, group activities
+  | 'wedding'       // Attending a wedding - proximity to venue, group coordination
+  | 'family_reunion'// Family reunion - multi-room, all-ages activities
+  | 'workation'     // Work + Travel - WiFi, co-working, quiet workspace
+  | 'wellness'      // Wellness retreat - spa, yoga, meditation focus
+  | 'solo_adventure'// Solo adventure - social hostels, safety tips
+  | 'girls_trip'    // Girls trip - group friendly, spa, brunch spots
+  | 'guys_trip';    // Guys trip - sports bars, adventure activities
+
+// Accommodation type preference
+export type AccommodationType =
+  | 'hotel'         // Standard hotels
+  | 'hostel'        // Hostels/budget accommodation
+  | 'vacation_rental' // Airbnb, VRBO, vacation homes
+  | 'resort'        // All-inclusive or resort-style
+  | 'eco_lodge'     // Eco-friendly/sustainable lodges
+  | 'boutique'      // Boutique/unique hotels
+  | 'villa';        // Private villas for groups
+
+// Pet travel information
+export interface PetInfo {
+  hasPet: boolean;
+  petType?: 'dog' | 'cat' | 'other';
+  petSize?: 'small' | 'medium' | 'large'; // Under 25lb, 25-50lb, 50lb+
+  petName?: string;
+}
+
+// Sustainability preference level
+export type SustainabilityPreference = 'standard' | 'eco_conscious' | 'eco_focused';
+
 export interface TripPreferences {
   // Destination
   destinationContext: DestinationContext | null;
@@ -98,11 +133,22 @@ export interface TripPreferences {
   adults: number;
   children: number;
   childAges: number[];
+  estimatedRoomsNeeded?: number; // For groups > 4 people
+
+  // Trip occasion/purpose
+  tripOccasion?: TripOccasion;
+
+  // Pets
+  travelingWithPets?: PetInfo;
 
   // Budget
   budgetPerNight: { min: number; max: number };
   flexNights: number; // nights where higher budget is OK
   totalBudget?: number;
+
+  // Accommodation preferences
+  accommodationType?: AccommodationType;
+  sustainabilityPreference?: SustainabilityPreference;
 
   // Vibe
   pace: PaceLevel;
@@ -111,6 +157,7 @@ export interface TripPreferences {
 
   // Activities
   selectedActivities: ActivityIntent[];
+  activitySkillLevel?: 'beginner' | 'intermediate' | 'advanced';
 
   // Hotel preferences
   adultsOnlyRequired: boolean;
@@ -118,6 +165,17 @@ export interface TripPreferences {
   allInclusivePreferred: boolean;
   hotelVibePreferences: string[]; // 'quiet', 'party', 'beach', 'city', etc.
   hotelPreferences?: string[]; // Selected amenities like 'pool', 'spa', 'gym', etc.
+
+  // Accessibility preferences
+  accessibilityNeeds?: {
+    wheelchairAccessible?: boolean;
+    groundFloorRequired?: boolean;
+    elevatorRequired?: boolean;
+    mobilityAids?: boolean;
+    visualAssistance?: boolean;
+    hearingAssistance?: boolean;
+    noStairs?: boolean;
+  };
 
   // Subreddit preferences
   selectedSubreddits?: string[];
@@ -290,6 +348,11 @@ export interface AreaCandidate {
   suggestedNights: number;
   travelTimeFromAirport?: string;
   travelTimeToOtherAreas?: Record<string, string>;
+
+  // Hotel availability (added by validation)
+  hotelCount?: number; // Number of hotels found in this area
+  lowHotelInventory?: boolean; // True if hotel count is below threshold
+  needsHotelIndexing?: boolean; // True if hotels should be indexed for this area
 }
 
 export interface ItinerarySplit {
@@ -369,6 +432,16 @@ export interface HotelCandidate {
 
   // User status
   userStatus: 'default' | 'selected' | 'must' | 'never';
+
+  // Accessibility (estimated)
+  accessibilityScore?: number; // 0-100 likelihood score
+  likelyAccessible?: boolean; // true if score >= 60
+  accessibilityNotes?: string[]; // Features and warnings
+
+  // Large group support
+  estimatedRoomsNeeded?: number; // For groups > 4 people
+  estimatedTotalPrice?: number; // pricePerNight * roomsNeeded
+  largeGroupNote?: string; // Tip for large groups (e.g., "Consider a villa")
 }
 
 export interface HotelShortlist {
@@ -834,6 +907,7 @@ export interface OrchestratorState {
     destination: ConfidenceLevel;
     dates: ConfidenceLevel;
     party: ConfidenceLevel;
+    accessibility: ConfidenceLevel;
     budget: ConfidenceLevel;
     vibe: ConfidenceLevel;
     activities: ConfidenceLevel;
@@ -845,6 +919,17 @@ export interface OrchestratorState {
   // Tradeoffs
   activeTradeoffs: Tradeoff[];
   resolvedTradeoffs: TradeoffResolution[];
+
+  // Seasonal/weather warnings
+  seasonalWarnings?: Array<{
+    region: string;
+    months: number[];
+    type: 'peak' | 'monsoon' | 'holiday' | 'extreme_weather' | 'off_season';
+    title: string;
+    description: string;
+    severity: 'info' | 'warning' | 'caution';
+    priceImpact?: 'higher' | 'lower' | 'much_higher' | 'much_lower';
+  }>;
 
   // Enrichment pipeline status
   enrichmentStatus: Record<EnrichmentType, EnrichmentStatus>;
