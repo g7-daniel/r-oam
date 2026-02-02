@@ -8,6 +8,8 @@
 
 import { detectTradeoffs } from './tradeoff-engine';
 import { getSeasonalWarnings, formatSeasonalWarnings, hasSignificantWarnings, type SeasonalWarning } from './seasonal-data';
+import { detectThemeParkDestination, getThemeParkGuidance, generateThemeParkItinerary } from './theme-park-data';
+import { detectSurfDestination, getSurfRecommendations } from './surf-data';
 
 // LLM calls go through API to avoid browser issues
 async function callLLM(messages: { role: string; content: string }[], temperature = 0.7): Promise<string> {
@@ -144,6 +146,146 @@ function createMinimalArea(areaId: string, areaName: string): AreaCandidate {
     evidence: [],
     confidenceScore: 0.5,
     suggestedNights: 1,
+  };
+}
+
+// ============================================================================
+// SPLIT ADVICE - Help users understand how to split their trip
+// ============================================================================
+
+interface SplitAdvice {
+  minBases: number;
+  maxBases: number;
+  advice: string;
+  tip?: string;
+}
+
+function getSplitAdvice(nights: number): SplitAdvice {
+  if (nights <= 4) {
+    return {
+      minBases: 1,
+      maxBases: 1,
+      advice: "For a short trip, one base is best to avoid wasting time moving.",
+      tip: "Pick a central location with good access to attractions."
+    };
+  }
+  if (nights <= 7) {
+    return {
+      minBases: 1,
+      maxBases: 2,
+      advice: "A week is perfect for 1-2 bases. More than 2 would feel rushed.",
+      tip: "Consider splitting if you want to experience two distinct areas."
+    };
+  }
+  if (nights <= 10) {
+    return {
+      minBases: 2,
+      maxBases: 3,
+      advice: "10 days gives you time for 2-3 different areas without rushing.",
+      tip: "3-4 nights per area lets you really get to know each place."
+    };
+  }
+  if (nights <= 14) {
+    return {
+      minBases: 2,
+      maxBases: 3,
+      advice: "Two weeks is ideal for 2-3 bases with enough time to really explore each.",
+      tip: "Consider one main base with day trips, or explore multiple regions."
+    };
+  }
+  return {
+    minBases: 3,
+    maxBases: 4,
+    advice: "With this much time, you could do 3-4 areas, or go deeper in fewer places.",
+    tip: "Balance variety with immersion - sometimes less is more!"
+  };
+}
+
+// ============================================================================
+// MULTI-COUNTRY DETECTION - Help users with logistics for multi-country trips
+// ============================================================================
+
+interface MultiCountryInfo {
+  countries: string[];
+  isMultiCountry: boolean;
+  logisticsTips: string[];
+}
+
+function detectMultiCountry(destination: string): MultiCountryInfo {
+  const lower = destination.toLowerCase();
+
+  // Common multi-country patterns
+  const multiCountryPatterns = [
+    /(\w+)\s*(?:and|&|\+|,)\s*(\w+)/i,
+    /(\w+)\s*to\s*(\w+)/i,
+    /(\w+)\s*then\s*(\w+)/i,
+  ];
+
+  // Known multi-country combos
+  const knownCombos: Record<string, { countries: string[]; tips: string[] }> = {
+    'portugal spain': {
+      countries: ['Portugal', 'Spain'],
+      tips: ['Both in Schengen zone - no visa issues', 'Train from Lisbon to Madrid ~10hrs, or quick flight', 'Consider Renfe train tickets in advance for best prices'],
+    },
+    'thailand vietnam': {
+      countries: ['Thailand', 'Vietnam'],
+      tips: ['Check visa requirements for Vietnam', 'Budget airlines like AirAsia connect major cities', 'Consider overnight buses for budget travel'],
+    },
+    'italy france': {
+      countries: ['Italy', 'France'],
+      tips: ['Both in Schengen zone', 'High-speed trains connect major cities', 'Consider open-jaw flights to save backtracking'],
+    },
+    'japan korea': {
+      countries: ['Japan', 'South Korea'],
+      tips: ['Check visa requirements', 'Quick flights between Tokyo/Seoul (~2hrs)', 'Consider JR Pass for Japan portion'],
+    },
+    'croatia montenegro': {
+      countries: ['Croatia', 'Montenegro'],
+      tips: ['Montenegro not in EU - check visa', 'Easy day trips between countries', 'Stunning coastal drive along Adriatic'],
+    },
+    'maldives dubai': {
+      countries: ['Maldives', 'UAE'],
+      tips: ['Dubai is common stopover', 'Good flight connections', 'Very different vibes - beach vs city'],
+    },
+  };
+
+  // Check for known combos
+  for (const [combo, info] of Object.entries(knownCombos)) {
+    const words = combo.split(' ');
+    if (words.every(word => lower.includes(word))) {
+      return {
+        countries: info.countries,
+        isMultiCountry: true,
+        logisticsTips: info.tips,
+      };
+    }
+  }
+
+  // Try pattern matching
+  for (const pattern of multiCountryPatterns) {
+    const match = destination.match(pattern);
+    if (match) {
+      const countries = [match[1], match[2]].filter(Boolean).map(c =>
+        c.charAt(0).toUpperCase() + c.slice(1).toLowerCase()
+      );
+      if (countries.length === 2 && countries[0] !== countries[1]) {
+        return {
+          countries,
+          isMultiCountry: true,
+          logisticsTips: [
+            `Check visa requirements for both ${countries.join(' and ')}`,
+            'Consider flight vs train options between countries',
+            'Book transport in advance for best prices',
+          ],
+        };
+      }
+    }
+  }
+
+  return {
+    countries: [destination],
+    isMultiCountry: false,
+    logisticsTips: [],
   };
 }
 
@@ -638,6 +780,8 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         options,
         allowCustomText: true,
         customTextPlaceholder: 'Add another activity...',
+        field: 'activities',
+        allowNotes: true,
       };
     },
     required: true,
@@ -860,6 +1004,8 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         options: baseOptions,
         allowCustomText: true,
         customTextPlaceholder: 'Anything else important?',
+        field: 'hotels',
+        allowNotes: true,
       };
     },
     required: true,
@@ -939,6 +1085,8 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       ],
       allowCustomText: true,
       customTextPlaceholder: 'Other dietary needs...',
+      field: 'dining',
+      allowNotes: true,
     }),
     required: false, // Only asked if dining mode is 'plan'
     canInfer: false,
@@ -962,6 +1110,8 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       ],
       allowCustomText: true,
       customTextPlaceholder: 'Other cuisine type...',
+      field: 'dining',
+      allowNotes: true,
     }),
     required: false, // Only asked if dining mode is 'plan'
     canInfer: false,
@@ -1073,6 +1223,197 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     required: false, // Only if user selected activities
     canInfer: false,
   },
+  // ============================================================================
+  // SMART FOLLOW-UP QUESTIONS (Phase 1 Critical)
+  // ============================================================================
+
+  // Surfing details - triggered when surfing is selected
+  surfingDetails: {
+    field: 'surfingDetails',
+    snooMessage: "What's your surfing experience? This helps me find the right spots and schools.",
+    inputType: 'chips',
+    getInputConfig: (state) => {
+      const destId = detectSurfDestination(
+        state.preferences.destinationContext?.rawInput || ''
+      );
+      const travelMonth = state.preferences.startDate
+        ? new Date(state.preferences.startDate).getMonth() + 1
+        : new Date().getMonth() + 1;
+
+      let seasonNote = '';
+      if (destId) {
+        const recs = getSurfRecommendations(destId, 'beginner', travelMonth);
+        if (recs) {
+          seasonNote = recs.seasonAdvice;
+        }
+      }
+
+      return {
+        options: [
+          { id: 'never', label: "Never surfed - want lessons", icon: '🎓', description: "I'll find beginner-friendly spots and schools" },
+          { id: 'beginner', label: 'Beginner - can catch waves', icon: '🌊', description: "Comfortable on small waves, want to improve" },
+          { id: 'intermediate', label: 'Intermediate', icon: '🏄', description: "Can handle 4-6ft waves, looking for good breaks" },
+          { id: 'advanced', label: 'Advanced', icon: '🔥', description: "Experienced surfer, want challenging waves" },
+        ],
+        seasonNote,
+        allowCustomText: true,
+        customTextPlaceholder: "Tell me more (e.g., 'want uncrowded spots', 'need board rental')",
+      };
+    },
+    required: false,
+    canInfer: false,
+  },
+
+  // Child needs - triggered when there are young children
+  childNeeds: {
+    field: 'childNeeds',
+    snooMessage: "Traveling with little ones! Anything I should know to plan kid-friendly activities?",
+    inputType: 'chips-multi',
+    getInputConfig: (state) => {
+      const childAges = state.preferences.childAges || [];
+      const youngestAge = childAges.length > 0 ? Math.min(...childAges) : 5;
+
+      const options = [
+        { id: 'none', label: 'Nothing special!', icon: '✓', description: "They're easy travelers" },
+        { id: 'animal_lover', label: 'Loves animals!', icon: '🐾', description: "Would love to pet/see animals" },
+      ];
+
+      // Add age-appropriate options
+      if (youngestAge < 6) {
+        options.push({ id: 'needs_naps', label: 'Still needs naps', icon: '😴', description: "Need midday breaks" });
+        options.push({ id: 'picky_eater', label: 'Picky eater', icon: '🍽️', description: "Limited food preferences" });
+      }
+
+      if (youngestAge < 10) {
+        options.push({ id: 'scared_heights', label: 'Afraid of heights', icon: '😰', description: "Skip high platforms/views" });
+        options.push({ id: 'scared_water', label: 'Nervous in water', icon: '🌊', description: "Keep water activities gentle" });
+      }
+
+      // Theme park specific if destination is Orlando/Anaheim
+      const themeParkId = detectThemeParkDestination(
+        state.preferences.destinationContext?.rawInput || ''
+      );
+      if (themeParkId) {
+        options.push({ id: 'scared_dark_rides', label: 'Scared of dark rides', icon: '🌑', description: "Avoid indoor dark attractions" });
+        options.push({ id: 'scared_loud', label: 'Sensitive to loud noises', icon: '🔊', description: "Skip fireworks/loud shows" });
+      }
+
+      return {
+        options,
+        allowCustomText: true,
+        customTextPlaceholder: "Anything else? (e.g., 'loves dinosaurs', 'needs wheelchair-accessible stroller paths')",
+        field: 'party',
+        allowNotes: true,
+      };
+    },
+    required: false,
+    canInfer: false,
+  },
+
+  // Workation needs - triggered when tripOccasion is workation
+  workationNeeds: {
+    field: 'workationNeeds',
+    snooMessage: "Working while traveling! Let me find places with great connectivity.",
+    inputType: 'chips',
+    getInputConfig: () => ({
+      options: [
+        { id: 'basic', label: 'Basic WiFi', icon: '📶', description: 'Email and browsing (10+ mbps)' },
+        { id: 'fast', label: 'Fast WiFi', icon: '📡', description: 'Video calls and streaming (50+ mbps)' },
+        { id: 'excellent', label: 'Excellent WiFi', icon: '🚀', description: 'Dev work, large uploads (100+ mbps)' },
+      ],
+      allowCustomText: true,
+      customTextPlaceholder: "Other needs? (e.g., 'need co-working space', 'quiet workspace essential')",
+    }),
+    required: false,
+    canInfer: false,
+  },
+
+  // Multi-country logistics - triggered when destination spans multiple countries
+  multiCountryLogistics: {
+    field: 'multiCountryLogistics',
+    snooMessage: "I see you're visiting multiple countries! Here are some things to keep in mind:",
+    inputType: 'chips',
+    getInputConfig: (state) => {
+      const destInput = state.preferences.destinationContext?.rawInput || '';
+      const multiInfo = detectMultiCountry(destInput);
+
+      // Build info text with logistics tips
+      const tipsText = multiInfo.logisticsTips.length > 0
+        ? multiInfo.logisticsTips.map((tip, i) => `${i + 1}. ${tip}`).join('\n')
+        : '';
+
+      return {
+        options: [
+          { id: 'got_it', label: 'Got it, thanks!', icon: '✓', description: "I'll keep this in mind" },
+          { id: 'help_transport', label: 'Help with transport', icon: '✈️', description: 'Show me options between countries' },
+          { id: 'visa_check', label: 'Need visa info', icon: '🛂', description: "I'm not sure about visa requirements" },
+        ],
+        infoText: tipsText,
+        allowCustomText: true,
+        customTextPlaceholder: "Any questions about traveling between countries?",
+      };
+    },
+    required: false,
+    canInfer: false,
+  },
+
+  // Theme park preferences - triggered when destination includes Disney/Universal
+  themeParkPreferences: {
+    field: 'themeParkPreferences',
+    snooMessage: "Theme parks! I can help with ride recommendations and booking tips.",
+    inputType: 'chips-multi',
+    getInputConfig: (state) => {
+      const themeParkId = detectThemeParkDestination(
+        state.preferences.destinationContext?.rawInput || ''
+      );
+      const childAges = state.preferences.childAges || [];
+      const hasKids = childAges.length > 0;
+
+      const guidance = themeParkId
+        ? getThemeParkGuidance(themeParkId, childAges)
+        : null;
+
+      const options = [
+        { id: 'character_dining', label: 'Character dining', icon: '🍽️', description: 'Meet characters during meals' },
+        { id: 'thrill_seeker', label: 'Thrill rides focus', icon: '🎢', description: 'Prioritize roller coasters' },
+        { id: 'relaxed_pace', label: 'Relaxed pace', icon: '🐢', description: 'No rushing, enjoy the atmosphere' },
+      ];
+
+      if (hasKids) {
+        options.push({ id: 'meet_characters', label: 'Meet characters', icon: '🤝', description: 'Photos with favorite characters' });
+        options.push({ id: 'avoid_scary', label: 'Avoid scary rides', icon: '👻', description: 'Skip frightening attractions' });
+      }
+
+      // Add booking reminder info
+      let bookingInfo = '';
+      if (guidance) {
+        bookingInfo = guidance.bookingReminders.join('. ');
+      }
+
+      return {
+        options,
+        infoText: bookingInfo || undefined,
+        allowCustomText: true,
+        customTextPlaceholder: "Any specific must-dos? (e.g., 'must ride Space Mountain', 'kids want to meet Elsa')",
+      };
+    },
+    required: false,
+    canInfer: false,
+  },
+
+  // User notes - generic free-text for any additional context
+  userNotes: {
+    field: 'userNotes',
+    snooMessage: "Anything else I should know to make this trip perfect?",
+    inputType: 'text',
+    getInputConfig: () => ({
+      placeholder: "Any special requests, preferences, or context? (e.g., 'celebrating 50th birthday', 'need restaurants with high chairs', 'allergic to shellfish')",
+      multiline: true,
+    }),
+    required: false,
+    canInfer: false,
+  },
+
   satisfaction: {
     field: 'satisfaction',
     snooMessage: pickTemplate(SNOO_TEMPLATES.celebrating),
@@ -1210,6 +1551,23 @@ export class QuickPlanOrchestrator {
       type: 'user',
       content,
     });
+  }
+
+  /**
+   * Add a user note for a specific field
+   * Notes are stored separately from selections and used to refine recommendations
+   */
+  addUserNote(field: string, note: string): void {
+    if (!note || !note.trim()) return;
+
+    const existingNotes = (this.state.preferences as any).userNotes || [];
+    existingNotes.push({
+      field,
+      note: note.trim(),
+      timestamp: new Date(),
+    });
+    (this.state.preferences as any).userNotes = existingNotes;
+    this.log('orchestrator', `User note added for ${field}: ${note.trim().substring(0, 50)}...`);
   }
 
   // ============================================================================
@@ -1483,6 +1841,51 @@ export class QuickPlanOrchestrator {
       }
     }
 
+    // ============================================================================
+    // SMART FOLLOW-UP QUESTIONS (Phase 1 Critical)
+    // ============================================================================
+
+    // Surfing details - after activities are selected, if surfing was chosen
+    const hasSurfActivity = this.state.preferences.selectedActivities?.some(a => a.type === 'surf');
+    const hasSurfDetails = !!(this.state.preferences as any).surfingDetails;
+    if (this.state.confidence.activities === 'confirmed' && hasSurfActivity && !hasSurfDetails) {
+      console.log('[getMissingRequiredFields] >>> ADDING surfingDetails (surf activity selected) <<<');
+      missing.push('surfingDetails');
+    }
+
+    // Child needs - after party is confirmed, if there are young children (under 10)
+    const hasYoungChildren = (this.state.preferences.childAges || []).some(age => age < 10);
+    const hasChildNeeds = !!(this.state.preferences as any).childNeeds;
+    if (this.state.confidence.party === 'confirmed' && hasYoungChildren && !hasChildNeeds) {
+      console.log('[getMissingRequiredFields] >>> ADDING childNeeds (young children present) <<<');
+      missing.push('childNeeds');
+    }
+
+    // Workation needs - after tripOccasion is set to workation
+    const isWorkation = (this.state.preferences as any).tripOccasion === 'workation';
+    const hasWorkationNeeds = !!(this.state.preferences as any).workationNeeds;
+    if (isWorkation && !hasWorkationNeeds) {
+      console.log('[getMissingRequiredFields] >>> ADDING workationNeeds (workation trip) <<<');
+      missing.push('workationNeeds');
+    }
+
+    // Multi-country logistics - after destination confirmed, if multiple countries
+    const destInput = this.state.preferences.destinationContext?.rawInput || '';
+    const multiCountryInfo = detectMultiCountry(destInput);
+    const hasMultiCountryAck = !!(this.state.preferences as any).multiCountryLogistics;
+    if (this.state.confidence.destination === 'complete' && multiCountryInfo.isMultiCountry && !hasMultiCountryAck) {
+      console.log('[getMissingRequiredFields] >>> ADDING multiCountryLogistics (multi-country trip) <<<', multiCountryInfo.countries);
+      missing.push('multiCountryLogistics');
+    }
+
+    // Theme park preferences - if destination includes Disney/Universal
+    const themeParkId = detectThemeParkDestination(destInput);
+    const hasThemeParkPrefs = !!(this.state.preferences as any).themeParkPreferences;
+    if (this.state.confidence.destination === 'complete' && themeParkId && !hasThemeParkPrefs) {
+      console.log('[getMissingRequiredFields] >>> ADDING themeParkPreferences (theme park destination) <<<');
+      missing.push('themeParkPreferences');
+    }
+
     // ASSERTION: If split is missing, hotelPreferences should NOT be in the list
     if (missing.includes('split') && missing.includes('hotelPreferences')) {
       console.error('[getMissingRequiredFields] BUG: Both split and hotelPreferences in missing!');
@@ -1663,19 +2066,25 @@ export class QuickPlanOrchestrator {
     // This is critical - questions must be asked in the correct order
     const priority = [
       'destination',
+      'themeParkPreferences',    // SMART FOLLOW-UP: After destination if theme park
+      'multiCountryLogistics',   // SMART FOLLOW-UP: After destination if multi-country
       'dates',
       'party',
-      'tripOccasion',           // NEW: After party - helps personalize everything
-      'travelingWithPets',      // NEW: After occasion - affects hotel filtering
-      'accessibility',          // After pets - affects hotel filtering
+      'childNeeds',              // SMART FOLLOW-UP: After party if young children
+      'tripOccasion',            // After party - helps personalize everything
+      'workationNeeds',          // SMART FOLLOW-UP: After tripOccasion if workation
+      'travelingWithPets',       // After occasion - affects hotel filtering
+      'accessibility',           // After pets - affects hotel filtering
       'budget',
-      'accommodationType',      // NEW: After budget - hostel/hotel/resort/villa
-      'sustainabilityPreference', // NEW: After accommodation - eco preferences
+      'accommodationType',       // After budget - hostel/hotel/resort/villa
+      'sustainabilityPreference', // After accommodation - eco preferences
       'pace',
       'activities',
+      'surfingDetails',          // SMART FOLLOW-UP: After activities if surfing selected
       'activitySkillLevel',
       'subreddits',
       'vibe',
+      'userNotes',               // SMART FOLLOW-UP: Optional free-text before areas
       'areas',
       'split',
       'hotelPreferences',
@@ -1775,6 +2184,18 @@ Respond with just the field name.`;
         snooMessage = `Here are the best ${cuisineLabel} restaurants near your hotels (${selectedCount + 1} of ${totalCuisines} cuisine types). Pick your favorites!`;
       } else {
         snooMessage = `Here are the best ${cuisineLabel} restaurants near your hotels. Pick the ones you'd like to try!`;
+      }
+    }
+
+    // Handle dynamic snooMessage for areas (include split advice)
+    if (field === 'areas') {
+      const tripLength = this.state.preferences.tripLength || 7;
+      const splitAdvice = getSplitAdvice(tripLength);
+      const baseMessage = config.snooMessage;
+
+      // Only add split advice for trips longer than 4 nights
+      if (tripLength > 4) {
+        snooMessage = `${baseMessage}\n\n💡 **Trip tip**: ${splitAdvice.advice}`;
       }
     }
 
@@ -1963,6 +2384,98 @@ Respond with just the field name.`;
         const sustainabilityPref = response as { id: string; label: string };
         (this.state.preferences as any).sustainabilityPreference = sustainabilityPref.id;
         console.log('[Orchestrator] Sustainability preference set:', sustainabilityPref.id);
+        break;
+
+      // ============================================================================
+      // SMART FOLLOW-UP QUESTION HANDLERS (Phase 1 Critical)
+      // ============================================================================
+
+      case 'surfingDetails':
+        const surfResponse = response as { id: string; label: string; isCustom?: boolean };
+        (this.state.preferences as any).surfingDetails = {
+          level: surfResponse.id,
+          wantsLessons: surfResponse.id === 'never' || surfResponse.id === 'beginner',
+          customNotes: surfResponse.isCustom ? surfResponse.label : undefined,
+        };
+        console.log('[Orchestrator] Surfing details set:', (this.state.preferences as any).surfingDetails);
+        break;
+
+      case 'childNeeds':
+        const childNeedsResponse = response as { id: string; label: string; isCustom?: boolean }[];
+        const childNeedsIds = childNeedsResponse.map(r => r.id);
+        const customChildNotes = childNeedsResponse.find(r => r.isCustom)?.label;
+
+        if (!childNeedsIds.includes('none')) {
+          (this.state.preferences as any).childNeeds = {
+            scaredOfHeights: childNeedsIds.includes('scared_heights'),
+            scaredOfWater: childNeedsIds.includes('scared_water'),
+            scaredOfDark: childNeedsIds.includes('scared_dark_rides'),
+            scaredOfLoudNoises: childNeedsIds.includes('scared_loud'),
+            pickyEater: childNeedsIds.includes('picky_eater'),
+            needsNaps: childNeedsIds.includes('needs_naps'),
+            animalLover: childNeedsIds.includes('animal_lover'),
+            customNotes: customChildNotes,
+          };
+        } else {
+          (this.state.preferences as any).childNeeds = { none: true };
+        }
+        console.log('[Orchestrator] Child needs set:', (this.state.preferences as any).childNeeds);
+        break;
+
+      case 'workationNeeds':
+        const workationResponse = response as { id: string; label: string; isCustom?: boolean };
+        (this.state.preferences as any).workationNeeds = {
+          requiresWorkspace: true,
+          wifiSpeed: workationResponse.id as 'basic' | 'fast' | 'excellent',
+          customNotes: workationResponse.isCustom ? workationResponse.label : undefined,
+        };
+        console.log('[Orchestrator] Workation needs set:', (this.state.preferences as any).workationNeeds);
+        break;
+
+      case 'multiCountryLogistics':
+        const multiCountryResponse = response as { id: string; label: string; isCustom?: boolean };
+        const destInputForMulti = this.state.preferences.destinationContext?.rawInput || '';
+        const multiInfo = detectMultiCountry(destInputForMulti);
+        (this.state.preferences as any).multiCountryLogistics = {
+          acknowledged: true,
+          userChoice: multiCountryResponse.id,
+          countries: multiInfo.countries,
+          needsTransportHelp: multiCountryResponse.id === 'help_transport',
+          needsVisaInfo: multiCountryResponse.id === 'visa_check',
+          customNotes: multiCountryResponse.isCustom ? multiCountryResponse.label : undefined,
+        };
+        console.log('[Orchestrator] Multi-country logistics set:', (this.state.preferences as any).multiCountryLogistics);
+        break;
+
+      case 'themeParkPreferences':
+        const themeParkResponse = response as { id: string; label: string; isCustom?: boolean }[];
+        const themeParkIds = themeParkResponse.map(r => r.id);
+        const customThemeParkNotes = themeParkResponse.find(r => r.isCustom)?.label;
+
+        (this.state.preferences as any).themeParkPreferences = {
+          wantsCharacterDining: themeParkIds.includes('character_dining'),
+          thrillSeeker: themeParkIds.includes('thrill_seeker'),
+          relaxedPace: themeParkIds.includes('relaxed_pace'),
+          wantsMeetCharacters: themeParkIds.includes('meet_characters'),
+          avoidScary: themeParkIds.includes('avoid_scary'),
+          customNotes: customThemeParkNotes,
+        };
+        console.log('[Orchestrator] Theme park prefs set:', (this.state.preferences as any).themeParkPreferences);
+        break;
+
+      case 'userNotes':
+        const notesResponse = response as string;
+        if (notesResponse && notesResponse.trim()) {
+          // Add to user notes array
+          const existingNotes = (this.state.preferences as any).userNotes || [];
+          existingNotes.push({
+            field: 'general',
+            note: notesResponse.trim(),
+            timestamp: new Date(),
+          });
+          (this.state.preferences as any).userNotes = existingNotes;
+          console.log('[Orchestrator] User note added:', notesResponse.trim());
+        }
         break;
 
       case 'subreddits':

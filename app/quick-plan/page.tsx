@@ -1,19 +1,14 @@
 'use client';
 
-import QuickPlanWizard from '@/components/quick-plan/QuickPlanWizard';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Zap } from 'lucide-react';
 
-// Lazy load the new chat UI to keep bundle size down when using wizard
+// Lazy load the chat UI
 const QuickPlanChat = dynamic(
   () => import('@/components/quick-plan/QuickPlanChat'),
   { ssr: false, loading: () => <div className="flex items-center justify-center h-96"><div className="animate-pulse text-slate-400">Loading chat...</div></div> }
 );
-
-// Feature flag: use new chat UI or old wizard
-// Set NEXT_PUBLIC_QUICK_PLAN_WIZARD=true in .env.local to use old wizard UI
-const USE_NEW_CHAT_UI = process.env.NEXT_PUBLIC_QUICK_PLAN_WIZARD !== 'true';
 
 export default function QuickPlanPage() {
   return (
@@ -37,22 +32,15 @@ export default function QuickPlanPage() {
               <span className="font-semibold text-slate-900 dark:text-white">Quick Plan</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {USE_NEW_CHAT_UI && (
-              <span className="text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full font-medium">
-                CHAT
-              </span>
-            )}
-            <span className="text-xs px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 rounded-full font-medium">
-              BETA
-            </span>
-          </div>
+          <span className="text-xs px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 rounded-full font-medium">
+            BETA
+          </span>
         </div>
       </header>
 
-      {/* Main content - feature flagged */}
+      {/* Main content */}
       <main>
-        {USE_NEW_CHAT_UI ? <QuickPlanChat /> : <QuickPlanWizard />}
+        <QuickPlanChat />
       </main>
     </div>
   );

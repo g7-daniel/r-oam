@@ -6,9 +6,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RestaurantCandidate } from '@/types/quick-plan';
 import { searchRestaurantRecommendations } from '@/lib/reddit';
-import { redditCache, placesCache, CACHE_TTL, createCacheKey } from '@/lib/api-cache';
+import { redditCache, placesCache, CACHE_TTL, createCacheKey, fetchWithTimeout } from '@/lib/api-cache';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
+const GOOGLE_API_TIMEOUT = 15000; // 15 second timeout
 
 // Maximum distance from hotel to consider a restaurant (in meters)
 const MAX_DISTANCE_METERS = 15000; // 15km - reasonable driving distance
@@ -21,11 +22,13 @@ export async function POST(request: NextRequest) {
       destination,
       hotels, // { areaId: { lat, lng, name } }
       areas,  // [{ id, name, centerLat, centerLng }]
+      dietaryRestrictions = [], // ['vegan', 'halal', etc.]
     } = body as {
       cuisineTypes: string[];
       destination: string;
       hotels: Record<string, { lat: number; lng: number; name: string }>;
       areas: { id: string; name: string; centerLat?: number; centerLng?: number }[];
+      dietaryRestrictions?: string[];
     };
 
     console.log('[Restaurants API] Request:', {
@@ -33,7 +36,11 @@ export async function POST(request: NextRequest) {
       destination,
       hotelCount: Object.keys(hotels || {}).length,
       areasCount: areas?.length,
+      dietaryRestrictions,
     });
+
+    // Filter out 'none' from dietary restrictions
+    const activeDietaryRestrictions = dietaryRestrictions.filter(r => r !== 'none');
 
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
@@ -102,18 +109,40 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Dietary restriction prefixes for search queries
+    const dietaryPrefixes: Record<string, string> = {
+      vegetarian: 'vegetarian',
+      vegan: 'vegan',
+      halal: 'halal',
+      kosher: 'kosher',
+      gluten_free: 'gluten free',
+      dairy_free: 'dairy free',
+    };
+
+    // Build dietary prefix for search queries
+    // Only use the first dietary restriction to avoid overly specific searches
+    const dietaryPrefix = activeDietaryRestrictions.length > 0 && dietaryPrefixes[activeDietaryRestrictions[0]]
+      ? `${dietaryPrefixes[activeDietaryRestrictions[0]]} `
+      : '';
+
+    console.log('[Restaurants API] Using dietary prefix:', dietaryPrefix || '(none)');
+
     // Cuisine type to Google Places search terms
     const cuisineSearchTerms: Record<string, string[]> = {
-      italian: ['italian restaurant', 'pasta restaurant', 'pizza restaurant'],
-      steakhouse: ['steakhouse', 'steak restaurant', 'grill restaurant'],
-      sushi: ['sushi restaurant', 'japanese restaurant', 'sashimi'],
-      fine_dining: ['fine dining restaurant', 'upscale restaurant', 'gourmet restaurant'],
-      seafood: ['seafood restaurant', 'fish restaurant', 'lobster restaurant'],
-      local: ['local restaurant', 'traditional restaurant', `${destination} cuisine`],
-      mexican: ['mexican restaurant', 'tacos', 'taqueria'],
-      asian: ['asian restaurant', 'thai restaurant', 'chinese restaurant'],
-      mediterranean: ['mediterranean restaurant', 'greek restaurant', 'lebanese restaurant'],
-      casual: ['casual dining', 'pub food', 'burger restaurant'],
+      italian: [`${dietaryPrefix}italian restaurant`, `${dietaryPrefix}pasta restaurant`, 'pizza restaurant'],
+      steakhouse: dietaryPrefix.includes('vegan') || dietaryPrefix.includes('vegetarian')
+        ? [`${dietaryPrefix}grill restaurant`, `${dietaryPrefix}restaurant`] // Skip steakhouse for vegan/vegetarian
+        : ['steakhouse', 'steak restaurant', 'grill restaurant'],
+      sushi: [`${dietaryPrefix}sushi restaurant`, `${dietaryPrefix}japanese restaurant`],
+      fine_dining: [`${dietaryPrefix}fine dining restaurant`, `${dietaryPrefix}upscale restaurant`],
+      seafood: activeDietaryRestrictions.includes('seafood_allergy')
+        ? [`${dietaryPrefix}restaurant`] // Skip seafood-specific for allergy
+        : [`${dietaryPrefix}seafood restaurant`, 'fish restaurant'],
+      local: [`${dietaryPrefix}local restaurant`, `${dietaryPrefix}traditional restaurant`, `${dietaryPrefix}${destination} cuisine`],
+      mexican: [`${dietaryPrefix}mexican restaurant`, `${dietaryPrefix}tacos`],
+      asian: [`${dietaryPrefix}asian restaurant`, `${dietaryPrefix}thai restaurant`, `${dietaryPrefix}chinese restaurant`],
+      mediterranean: [`${dietaryPrefix}mediterranean restaurant`, `${dietaryPrefix}greek restaurant`],
+      casual: [`${dietaryPrefix}casual dining`, `${dietaryPrefix}restaurant`],
     };
 
     const results: Record<string, RestaurantCandidate[]> = {};
@@ -146,8 +175,10 @@ export async function POST(request: NextRequest) {
                 radius: String(MAX_DISTANCE_METERS),
               });
 
-              const response = await fetch(
-                `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
+              const response = await fetchWithTimeout(
+                `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+                {},
+                GOOGLE_API_TIMEOUT
               );
 
               if (response.ok) {
@@ -173,6 +204,9 @@ export async function POST(request: NextRequest) {
                     if (distance <= MAX_DISTANCE_METERS) {
                       // Get Reddit data for this restaurant
                       const redditData = redditRestaurants.get(place.name.toLowerCase());
+
+                      // Estimate booking difficulty
+                      const booking = estimateBookingDifficulty(place);
 
                       allRestaurants.push({
                         id: place.place_id,
@@ -202,6 +236,8 @@ export async function POST(request: NextRequest) {
                         ],
                         bestFor: ['dinner'] as ('lunch' | 'dinner' | 'brunch')[],
                         requiresReservation: (place.price_level || 2) >= 3,
+                        bookingDifficulty: booking.difficulty,
+                        bookingAdvice: booking.advice,
                         userStatus: 'default' as const,
                         // Custom fields for display
                         nearArea: hotel.areaName,
@@ -304,4 +340,36 @@ function generateReasons(place: any, distance: number, areaName?: string): strin
   }
 
   return reasons;
+}
+
+/**
+ * Estimate booking difficulty based on restaurant characteristics
+ * Helps users understand when to book reservations
+ */
+function estimateBookingDifficulty(place: any): { difficulty: 'easy' | 'moderate' | 'hard' | 'very_hard'; advice: string } {
+  const rating = place.rating || 0;
+  const reviews = place.user_ratings_total || 0;
+  const priceLevel = place.price_level || 2;
+
+  // Michelin-level indicators: high price, high rating, many reviews
+  if (priceLevel >= 4 && rating >= 4.7 && reviews > 500) {
+    return { difficulty: 'very_hard', advice: 'Book 60-90 days ahead' };
+  }
+
+  // Popular fine dining
+  if (priceLevel >= 3 && rating >= 4.5 && reviews > 200) {
+    return { difficulty: 'hard', advice: 'Book 2-4 weeks ahead' };
+  }
+
+  // Popular upscale casual
+  if (priceLevel >= 3 && rating >= 4.3 && reviews > 100) {
+    return { difficulty: 'moderate', advice: 'Book 1 week ahead for weekends' };
+  }
+
+  // Popular local spot
+  if (rating >= 4.3 && reviews > 150) {
+    return { difficulty: 'moderate', advice: 'Reservations recommended for dinner' };
+  }
+
+  return { difficulty: 'easy', advice: 'Walk-in usually OK' };
 }

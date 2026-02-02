@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import DateRangePicker from '@/components/ui/DateRangePicker';
 import DetailDrawer, { ExperienceItem } from '@/components/quick-plan/DetailDrawer';
@@ -13,12 +13,16 @@ import {
   Plus,
   Check,
   ChevronRight,
+  ChevronDown,
   Star,
   AlertCircle,
   Loader2,
   X,
   ExternalLink,
   Info,
+  SlidersHorizontal,
+  ArrowUpDown,
+  MessageCircle,
 } from 'lucide-react';
 import type {
   ReplyCardType,
@@ -32,6 +36,9 @@ import type {
   Tradeoff,
   DissatisfactionReason,
 } from '@/types/quick-plan';
+import { estimateInterAreaTransit, getInterAreaTransportIcon } from '@/lib/utils/travelTime';
+import AreasMapPreview from '@/components/quick-plan/AreasMapPreview';
+import GooglePlacesAutocomplete from '@/components/quick-plan/GooglePlacesAutocomplete';
 
 // ============================================================================
 // MAIN REPLY CARD COMPONENT
@@ -41,10 +48,11 @@ interface ReplyCardProps {
   type: ReplyCardType;
   config: ReplyCardConfig;
   onSubmit: (value: unknown) => void;
+  onAddNote?: (field: string, note: string) => void;
   disabled?: boolean;
 }
 
-export default function ReplyCard({ type, config, onSubmit, disabled = false }: ReplyCardProps) {
+export default function ReplyCard({ type, config, onSubmit, onAddNote, disabled = false }: ReplyCardProps) {
   const cardVariants = {
     chips: ChipsCard,
     'chips-multi': ChipsMultiCard,
@@ -78,7 +86,7 @@ export default function ReplyCard({ type, config, onSubmit, disabled = false }: 
       transition={{ duration: 0.2 }}
       className="w-full"
     >
-      <CardComponent config={config} onSubmit={onSubmit} disabled={disabled} />
+      <CardComponent config={config} onSubmit={onSubmit} onAddNote={onAddNote} disabled={disabled} />
     </motion.div>
   );
 }
@@ -90,8 +98,91 @@ export default function ReplyCard({ type, config, onSubmit, disabled = false }: 
 interface CardProps {
   config: ReplyCardConfig;
   onSubmit: (value: unknown) => void;
+  onAddNote?: (field: string, note: string) => void;
   disabled?: boolean;
 }
+
+// ============================================================================
+// OPTIONAL NOTES INPUT (Free-text input for nuanced preferences)
+// ============================================================================
+
+interface OptionalNotesInputProps {
+  field: string;
+  placeholder: string;
+  onSubmit: (note: string) => void;
+  disabled?: boolean;
+}
+
+function OptionalNotesInput({ field, placeholder, onSubmit, disabled }: OptionalNotesInputProps) {
+  const [note, setNote] = useState('');
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  if (!isExpanded) {
+    return (
+      <button
+        onClick={() => setIsExpanded(true)}
+        disabled={disabled}
+        className="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 mt-3 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+      >
+        <MessageCircle className="w-4 h-4" />
+        Anything specific Snoo should know?
+      </button>
+    );
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      className="mt-3 space-y-2"
+    >
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+        rows={2}
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={() => {
+            if (note.trim()) {
+              onSubmit(note.trim());
+            }
+            setIsExpanded(false);
+            setNote('');
+          }}
+          disabled={disabled}
+          className="text-sm px-3 py-1.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
+        >
+          {note.trim() ? 'Add note' : 'Skip'}
+        </button>
+        <button
+          onClick={() => {
+            setIsExpanded(false);
+            setNote('');
+          }}
+          disabled={disabled}
+          className="text-sm px-3 py-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
+        >
+          Cancel
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+// Field-specific placeholder text for notes
+const NOTE_PLACEHOLDERS: Record<string, string> = {
+  activities: "Any specific requirements? (e.g., 'surf lessons not rentals', 'kid-friendly only', 'want to pet animals')",
+  hotels: "Any must-haves? (e.g., 'needs a pool', 'ocean view', 'quiet location', 'close to beach')",
+  party: "Anything about your group? (e.g., 'one child is scared of heights', 'grandma uses walker')",
+  dining: "Dietary needs or preferences? (e.g., 'severe nut allergy', 'must try local seafood', 'vegetarian kids')",
+  areas: "Any specific neighborhoods or areas you want to be near?",
+  experiences: "Any specific experiences you're hoping for? (e.g., 'want to see dolphins', 'photography focused')",
+  default: "Any other details that would help plan your perfect trip?",
+};
 
 function ChipsCard({ config, onSubmit, disabled }: CardProps) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -178,10 +269,13 @@ function ChipsCard({ config, onSubmit, disabled }: CardProps) {
 // CHIPS MULTI CARD (Multi Select)
 // ============================================================================
 
-function ChipsMultiCard({ config, onSubmit, disabled }: CardProps) {
+function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [customText, setCustomText] = useState('');
   const [customItems, setCustomItems] = useState<string[]>([]);
+
+  const field = config.field || 'general';
+  const notePlaceholder = NOTE_PLACEHOLDERS[field] || NOTE_PLACEHOLDERS.default;
 
   const toggleOption = (optionId: string) => {
     if (disabled) return;
@@ -273,6 +367,16 @@ function ChipsMultiCard({ config, onSubmit, disabled }: CardProps) {
             <Plus className="w-4 h-4" />
           </button>
         </div>
+      )}
+
+      {/* Optional notes for additional context */}
+      {config.allowNotes !== false && onAddNote && hasSelection && (
+        <OptionalNotesInput
+          field={field}
+          placeholder={notePlaceholder}
+          onSubmit={(note) => onAddNote(field, note)}
+          disabled={disabled}
+        />
       )}
 
       {/* Submit button */}
@@ -481,21 +585,43 @@ interface DestinationResult {
 }
 
 function DestinationCard({ config, onSubmit, disabled }: CardProps) {
+  const [selected, setSelected] = useState<{ name: string; country?: string } | null>(null);
+  const [useGooglePlaces, setUseGooglePlaces] = useState(true);
+
+  // Fallback state for when Google Places isn't available
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<DestinationResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [selected, setSelected] = useState<DestinationResult | null>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Popular destinations for quick selection
   const popularDestinations = [
-    'Dominican Republic',
-    'Costa Rica',
-    'Mexico',
-    'Puerto Rico',
-    'Jamaica',
+    { name: 'Bali, Indonesia', country: 'Indonesia' },
+    { name: 'Tokyo, Japan', country: 'Japan' },
+    { name: 'Paris, France', country: 'France' },
+    { name: 'Barcelona, Spain', country: 'Spain' },
+    { name: 'Costa Rica', country: 'Costa Rica' },
+    { name: 'Thailand', country: 'Thailand' },
   ];
 
+  // Handle Google Places selection
+  const handleGooglePlaceSelect = (place: { placeId: string; name: string; fullName: string; country?: string; countryCode?: string; lat: number; lng: number; type: 'city' | 'country' | 'region' }) => {
+    setSelected({ name: place.name, country: place.country });
+    onSubmit({
+      rawInput: place.fullName,
+      canonicalName: place.name,
+      type: place.type,
+      countryCode: place.countryCode || '',
+      countryName: place.country || '',
+      centerLat: place.lat,
+      centerLng: place.lng,
+      timezone: '',
+      suggestedAreas: [],
+      googlePlaceId: place.placeId,
+    });
+  };
+
+  // Fallback search for when Google Places isn't available
   const searchDestinations = useCallback(async (searchQuery: string) => {
     if (searchQuery.length < 2) {
       setResults([]);
@@ -516,6 +642,8 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
   }, []);
 
   useEffect(() => {
+    if (useGooglePlaces) return; // Skip if using Google Places
+
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
     }
@@ -529,10 +657,10 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
         clearTimeout(debounceRef.current);
       }
     };
-  }, [query, searchDestinations]);
+  }, [query, searchDestinations, useGooglePlaces]);
 
-  const handleSelect = (destination: DestinationResult) => {
-    setSelected(destination);
+  const handleFallbackSelect = (destination: DestinationResult) => {
+    setSelected({ name: destination.name, country: destination.country });
     setQuery(destination.name);
     setResults([]);
     onSubmit({
@@ -549,35 +677,50 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
     });
   };
 
-  const handleQuickPick = (name: string) => {
-    setQuery(name);
+  const handleQuickPick = (dest: { name: string; country: string }) => {
+    if (useGooglePlaces) {
+      // For Google Places, just set the query to trigger autocomplete
+      setQuery(dest.name);
+    } else {
+      setQuery(dest.name);
+    }
   };
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
-      {/* Search input */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search for a destination..."
+      {/* Google Places Autocomplete (primary) */}
+      {useGooglePlaces ? (
+        <GooglePlacesAutocomplete
+          onSelect={handleGooglePlaceSelect}
+          placeholder="Where do you want to go?"
           disabled={disabled}
-          className="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+          types={['(cities)', '(regions)']}
         />
-        {isLoading && (
-          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 animate-spin" />
-        )}
-      </div>
+      ) : (
+        /* Fallback search input */
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search for a destination..."
+            disabled={disabled}
+            className="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+          />
+          {isLoading && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 animate-spin" />
+          )}
+        </div>
+      )}
 
-      {/* Search results */}
-      {results.length > 0 && (
+      {/* Fallback search results */}
+      {!useGooglePlaces && results.length > 0 && (
         <div className="border border-slate-200 dark:border-slate-600 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 overflow-hidden max-h-64 overflow-y-auto">
           {results.map((destination) => (
             <button
               key={destination.placeId}
-              onClick={() => handleSelect(destination)}
+              onClick={() => handleFallbackSelect(destination)}
               disabled={disabled}
               className="w-full p-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left transition-colors"
             >
@@ -585,6 +728,7 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
                 <img
                   src={destination.imageUrl}
                   alt={destination.name}
+                  loading="lazy"
                   className="w-12 h-12 rounded-lg object-cover"
                 />
               )}
@@ -603,20 +747,20 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
       )}
 
       {/* Popular destinations */}
-      {results.length === 0 && query.length === 0 && (
+      {!selected && (
         <div className="space-y-2">
           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">
             Popular destinations
           </p>
           <div className="flex flex-wrap gap-2">
-            {popularDestinations.map((name) => (
+            {popularDestinations.map((dest) => (
               <button
-                key={name}
-                onClick={() => handleQuickPick(name)}
+                key={dest.name}
+                onClick={() => handleQuickPick(dest)}
                 disabled={disabled}
                 className="px-4 py-2 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
               >
-                {name}
+                {dest.name}
               </button>
             ))}
           </div>
@@ -627,7 +771,12 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
       {selected && (
         <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
           <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
-          <span className="text-green-700 dark:text-green-400 font-medium">{selected.name}</span>
+          <div>
+            <span className="text-green-700 dark:text-green-400 font-medium">{selected.name}</span>
+            {selected.country && (
+              <span className="text-green-600 dark:text-green-500 text-sm ml-1">({selected.country})</span>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -638,13 +787,16 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
 // PARTY CARD (Adults & Children Counter)
 // ============================================================================
 
+const MAX_ADULTS = 20;
+const MAX_CHILDREN = 10;
+
 function PartyCard({ config, onSubmit, disabled }: CardProps) {
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
   const [childAges, setChildAges] = useState<number[]>([]);
 
   const addChild = () => {
-    if (children < 6) {
+    if (children < MAX_CHILDREN) {
       setChildren(children + 1);
       setChildAges([...childAges, 5]); // Default age
     }
@@ -663,11 +815,25 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
     setChildAges(newAges);
   };
 
+  // Calculate estimated rooms needed for large groups
+  const totalPeople = adults + children;
+  const estimatedRooms = useMemo(() => {
+    if (totalPeople <= 2) return 1;
+    if (totalPeople <= 4) return 1; // Family room or suite
+    // For larger groups: ~2 adults per room, kids can share with parents or need extra rooms
+    const adultRooms = Math.ceil(adults / 2);
+    const kidsNeedingOwnRoom = children > 2 ? Math.ceil((children - 2) / 2) : 0;
+    return adultRooms + kidsNeedingOwnRoom;
+  }, [adults, children, totalPeople]);
+
+  const isLargeGroup = totalPeople > 4;
+
   const handleSubmit = () => {
     onSubmit({
       adults,
       children,
       childAges: children > 0 ? childAges : [],
+      estimatedRooms: isLargeGroup ? estimatedRooms : undefined,
     });
   };
 
@@ -692,8 +858,8 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
           </button>
           <span className="w-8 text-center font-semibold text-slate-900 dark:text-white">{adults}</span>
           <button
-            onClick={() => adults < 10 && setAdults(adults + 1)}
-            disabled={disabled || adults >= 10}
+            onClick={() => adults < MAX_ADULTS && setAdults(adults + 1)}
+            disabled={disabled || adults >= MAX_ADULTS}
             className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
@@ -721,7 +887,7 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
           <span className="w-8 text-center font-semibold text-slate-900 dark:text-white">{children}</span>
           <button
             onClick={addChild}
-            disabled={disabled || children >= 6}
+            disabled={disabled || children >= MAX_CHILDREN}
             className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
@@ -755,6 +921,24 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
         </div>
       )}
 
+      {/* Room estimate for large groups */}
+      {isLargeGroup && (
+        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
+          <div className="flex items-start gap-2">
+            <span className="text-lg">🏨</span>
+            <div>
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                Large group ({totalPeople} travelers)
+              </p>
+              <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
+                You&apos;ll likely need {estimatedRooms} room{estimatedRooms > 1 ? 's' : ''}.
+                {totalPeople > 8 && ' Consider booking a villa or multiple apartments for better value.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <button
         onClick={handleSubmit}
         disabled={disabled}
@@ -771,10 +955,68 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
 // HOTELS CARD
 // ============================================================================
 
+type HotelSortOption = 'rating' | 'price-low' | 'price-high' | 'stars';
+type HotelAmenityFilter = 'pool' | 'gym' | 'wifi' | 'parking' | 'restaurant' | 'spa';
+
+const HOTEL_AMENITY_OPTIONS: { key: HotelAmenityFilter; label: string; icon: string }[] = [
+  { key: 'pool', label: 'Pool', icon: '🏊' },
+  { key: 'gym', label: 'Gym', icon: '💪' },
+  { key: 'wifi', label: 'WiFi', icon: '📶' },
+  { key: 'parking', label: 'Parking', icon: '🅿️' },
+  { key: 'restaurant', label: 'Restaurant', icon: '🍽️' },
+  { key: 'spa', label: 'Spa', icon: '💆' },
+];
+
 function HotelsCard({ config, onSubmit, disabled }: CardProps) {
   const hotels = (config.candidates || []) as HotelCandidate[];
+  const areaName = (config as any).areaName || '';
   const [selected, setSelected] = useState<string | null>(null);
   const [detailHotel, setDetailHotel] = useState<HotelCandidate | null>(null);
+  const [sortBy, setSortBy] = useState<HotelSortOption>('rating');
+  const [amenityFilters, setAmenityFilters] = useState<Set<HotelAmenityFilter>>(new Set());
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Sort and filter hotels
+  const sortedFilteredHotels = useMemo(() => {
+    let result = [...hotels];
+
+    // Apply amenity filters (if hotel has amenities array)
+    if (amenityFilters.size > 0) {
+      result = result.filter(hotel => {
+        const hotelAmenities = (hotel as any).amenities || [];
+        const amenityText = hotelAmenities.join(' ').toLowerCase();
+        return Array.from(amenityFilters).every(filter => {
+          switch (filter) {
+            case 'pool': return amenityText.includes('pool') || amenityText.includes('swimming');
+            case 'gym': return amenityText.includes('gym') || amenityText.includes('fitness');
+            case 'wifi': return amenityText.includes('wifi') || amenityText.includes('internet');
+            case 'parking': return amenityText.includes('parking') || amenityText.includes('valet');
+            case 'restaurant': return amenityText.includes('restaurant') || amenityText.includes('dining');
+            case 'spa': return amenityText.includes('spa') || amenityText.includes('massage');
+            default: return true;
+          }
+        });
+      });
+    }
+
+    // Sort
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case 'rating':
+          return (b.googleRating || 0) - (a.googleRating || 0);
+        case 'price-low':
+          return (a.pricePerNight || 999999) - (b.pricePerNight || 999999);
+        case 'price-high':
+          return (b.pricePerNight || 0) - (a.pricePerNight || 0);
+        case 'stars':
+          return (b.stars || 0) - (a.stars || 0);
+        default:
+          return 0;
+      }
+    });
+
+    return result;
+  }, [hotels, sortBy, amenityFilters]);
 
   const handleSelect = (hotelId: string) => {
     if (disabled) return;
@@ -786,6 +1028,18 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
   const openDetail = (hotel: HotelCandidate, e: React.MouseEvent) => {
     e.stopPropagation();
     setDetailHotel(hotel);
+  };
+
+  const toggleAmenityFilter = (amenity: HotelAmenityFilter) => {
+    setAmenityFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(amenity)) {
+        next.delete(amenity);
+      } else {
+        next.add(amenity);
+      }
+      return next;
+    });
   };
 
   if (hotels.length === 0) {
@@ -801,12 +1055,90 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
     <>
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
         <div className="p-3 bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-600">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-            Select a hotel
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                🏨 Select a hotel{areaName ? ` for ${areaName}` : ''}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {sortedFilteredHotels.length} of {hotels.length} options · Tap name for details
+              </p>
+            </div>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`p-2 rounded-lg transition-colors ${
+                showFilters || amenityFilters.size > 0
+                  ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
+                  : 'hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500'
+              }`}
+              title="Sort & Filter"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              {amenityFilters.size > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 text-white text-xs rounded-full flex items-center justify-center">
+                  {amenityFilters.size}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Sort & Filter Controls */}
+          {showFilters && (
+            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600 space-y-3">
+              {/* Sort dropdown */}
+              <div className="flex items-center gap-2">
+                <ArrowUpDown className="w-4 h-4 text-slate-400" />
+                <span className="text-xs text-slate-500 dark:text-slate-400">Sort:</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as HotelSortOption)}
+                  className="flex-1 text-sm bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-300"
+                >
+                  <option value="rating">Highest Rated</option>
+                  <option value="price-low">Price: Low to High</option>
+                  <option value="price-high">Price: High to Low</option>
+                  <option value="stars">Star Rating</option>
+                </select>
+              </div>
+
+              {/* Amenity filter chips */}
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Filter by amenities:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {HOTEL_AMENITY_OPTIONS.map(({ key, label, icon }) => (
+                    <button
+                      key={key}
+                      onClick={() => toggleAmenityFilter(key)}
+                      className={`text-xs px-2 py-1 rounded-full transition-colors ${
+                        amenityFilters.has(key)
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
+                      }`}
+                    >
+                      {icon} {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Clear filters */}
+              {amenityFilters.size > 0 && (
+                <button
+                  onClick={() => setAmenityFilters(new Set())}
+                  className="text-xs text-orange-600 dark:text-orange-400 hover:underline"
+                >
+                  Clear all filters
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-80 overflow-y-auto">
-          {hotels.slice(0, 5).map((hotel) => (
+          {sortedFilteredHotels.length === 0 ? (
+            <div className="p-4 text-center text-sm text-slate-500 dark:text-slate-400">
+              No hotels match your filters. Try removing some filters.
+            </div>
+          ) : sortedFilteredHotels.slice(0, 5).map((hotel) => (
             <div
               key={hotel.id}
               className={`w-full p-4 flex items-start gap-3 text-left transition-colors ${
@@ -820,6 +1152,7 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
                   <img
                     src={hotel.imageUrl}
                     alt={hotel.name}
+                    loading="lazy"
                     className="w-full h-full object-cover"
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = 'none';
@@ -847,37 +1180,86 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
                   </button>
                 </div>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  <span className="flex items-center gap-1">
-                    <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                    <span className="text-sm text-slate-600 dark:text-slate-400">
-                      {hotel.googleRating}
+                  {hotel.googleRating && hotel.googleRating > 0 && (
+                    <span className="flex items-center gap-1">
+                      <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
+                      <span className="text-sm text-slate-600 dark:text-slate-400">
+                        {hotel.googleRating}
+                      </span>
+                      {hotel.reviewCount && hotel.reviewCount > 0 && (
+                        <span className="text-xs text-slate-400">({hotel.reviewCount})</span>
+                      )}
                     </span>
-                  </span>
+                  )}
+                  {hotel.stars && hotel.stars > 0 && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {'★'.repeat(hotel.stars)}-star
+                    </span>
+                  )}
                   {hotel.redditScore && hotel.redditScore > 0 && (
                     <span className="text-xs px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 rounded">
                       🔥 {hotel.redditScore}x Reddit
                     </span>
                   )}
                 </div>
+                {hotel.address && (
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 truncate flex items-center gap-1">
+                    <MapPin className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate">{hotel.address}</span>
+                  </p>
+                )}
+                {(hotel.googleMapsUrl || hotel.placeId) && (
+                  <a
+                    href={hotel.googleMapsUrl || `https://www.google.com/maps/place/?q=place_id:${hotel.placeId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-0.5 inline-flex items-center gap-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    View on Maps
+                  </a>
+                )}
                 <div className="flex items-center justify-between mt-2">
                   <span className="text-xs text-slate-500">{hotel.city}</span>
                   {hotel.pricePerNight && (
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm font-semibold text-orange-600 dark:text-orange-400">
-                        ${hotel.pricePerNight}/night
-                      </span>
-                      {hotel.priceConfidence === 'real' ? (
-                        <span className="text-xs px-1 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded" title="Real price from booking sites">
-                          ✓
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-400" title="Estimated price">
-                          ~
+                    <div className="flex flex-col items-end gap-0.5">
+                      <div className="flex items-center gap-1">
+                        {hotel.priceConfidence === 'real' ? (
+                          <>
+                            <span className="text-sm font-semibold text-green-600 dark:text-green-400">
+                              ${hotel.pricePerNight}/night
+                            </span>
+                            <span className="text-xs px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded" title="Live price from booking sites">
+                              live
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">
+                              ~${hotel.pricePerNight}/night
+                            </span>
+                            <span className="text-xs px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded" title="Estimated price - actual may vary">
+                              est.
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {/* Large group room estimate */}
+                      {hotel.estimatedRoomsNeeded && hotel.estimatedRoomsNeeded > 1 && (
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          {hotel.estimatedRoomsNeeded} rooms = ~${hotel.estimatedTotalPrice || hotel.pricePerNight * hotel.estimatedRoomsNeeded}/night total
                         </span>
                       )}
                     </div>
                   )}
                 </div>
+                {/* Large group note */}
+                {hotel.largeGroupNote && (
+                  <p className="text-xs text-blue-600 dark:text-blue-400 mt-1 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                    💡 {hotel.largeGroupNote}
+                  </p>
+                )}
                 <button
                   onClick={() => handleSelect(hotel.id)}
                   disabled={disabled}
@@ -1030,6 +1412,26 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
                     >
                       {selected.has(restaurant.id) && <Check className="w-3 h-3 text-white" />}
                     </button>
+                    {/* Restaurant thumbnail image */}
+                    <div
+                      className="w-16 h-14 rounded-lg flex-shrink-0 overflow-hidden cursor-pointer bg-slate-100 dark:bg-slate-700"
+                      onClick={(e) => openDetail(restaurant, e)}
+                    >
+                      {restaurant.imageUrl && !restaurant.imageUrl.includes('placeholder') ? (
+                        <img
+                          src={restaurant.imageUrl}
+                          alt={restaurant.name}
+                          loading="lazy"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                            (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-xl">🍽️</div>';
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-xl">🍽️</div>
+                      )}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <h4
@@ -1048,9 +1450,22 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
                       </div>
                       {/* Address line */}
                       {restaurant.address && (
-                        <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">
-                          {restaurant.address}
+                        <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5 flex items-center gap-1">
+                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{restaurant.address}</span>
                         </p>
+                      )}
+                      {(restaurant.googleMapsUrl || restaurant.placeId) && (
+                        <a
+                          href={restaurant.googleMapsUrl || `https://www.google.com/maps/place/?q=place_id:${restaurant.placeId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-0.5 inline-flex items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          View on Maps
+                        </a>
                       )}
                       <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 flex-wrap">
                         <span className="flex items-center gap-0.5">
@@ -1071,6 +1486,19 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
                           </span>
                         )}
                       </div>
+                      {/* Booking difficulty indicator */}
+                      {restaurant.bookingDifficulty && restaurant.bookingDifficulty !== 'easy' && (
+                        <div className={`flex items-center gap-1 mt-1 text-xs ${
+                          restaurant.bookingDifficulty === 'very_hard'
+                            ? 'text-red-600 dark:text-red-400'
+                            : restaurant.bookingDifficulty === 'hard'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-yellow-600 dark:text-yellow-400'
+                        }`}>
+                          <Calendar className="w-3 h-3" />
+                          <span>{restaurant.bookingAdvice}</span>
+                        </div>
+                      )}
                       {/* Reasons/highlights */}
                       {restaurant.reasons && restaurant.reasons.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-1.5">
@@ -1165,6 +1593,7 @@ function ActivitiesCard({ config, onSubmit, disabled }: CardProps) {
     dive: '🐠',
     swimming: '🏊',
     wildlife: '🐋',
+    nature: '🌿',
     hiking: '🥾',
     adventure: '🧗',
     cultural: '🏛️',
@@ -1383,6 +1812,7 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
     dive: '🐠',
     swimming: '🏊',
     wildlife: '🐋',
+    nature: '🌿',
     hiking: '🥾',
     adventure: '🧗',
     cultural: '🏛️',
@@ -1459,6 +1889,26 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
                     >
                       {selected.has(experience.id) && <Check className="w-3 h-3 text-white" />}
                     </button>
+                    {/* Experience thumbnail image */}
+                    <div
+                      className="w-16 h-14 rounded-lg flex-shrink-0 overflow-hidden cursor-pointer bg-slate-100 dark:bg-slate-700"
+                      onClick={(e) => openDetail(experience, e)}
+                    >
+                      {experience.imageUrl && !experience.imageUrl.includes('placeholder') ? (
+                        <img
+                          src={experience.imageUrl}
+                          alt={experience.name}
+                          loading="lazy"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                            (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-xl">🎯</div>';
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-xl">🎯</div>
+                      )}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <h4
@@ -1490,6 +1940,24 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
                           </>
                         )}
                       </div>
+                      {experience.address && (
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 truncate flex items-center gap-1">
+                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{experience.address}</span>
+                        </p>
+                      )}
+                      {(experience.googleMapsUrl || experience.placeId) && (
+                        <a
+                          href={experience.googleMapsUrl || `https://www.google.com/maps/place/?q=place_id:${experience.placeId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 inline-flex items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          View on Maps
+                        </a>
+                      )}
                       {/* Reasons/highlights */}
                       {experience.reasons && experience.reasons.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-1.5">
@@ -1692,6 +2160,19 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
           Select up to 3 areas to visit
         </p>
       </div>
+
+      {/* Map preview of areas */}
+      <div className="p-3 border-b border-slate-200 dark:border-slate-600">
+        <AreasMapPreview
+          areas={areas}
+          selectedAreaIds={selected}
+          onAreaClick={toggleSelect}
+        />
+        <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
+          Click markers to select areas
+        </p>
+      </div>
+
       <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-80 overflow-y-auto">
         {areas.map((area) => (
           <button
@@ -1967,15 +2448,37 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
                   {Math.round(split.fitScore * 100)}% fit
                 </span>
               </div>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {(split.stops || []).map((stop: any, idx: number) => (
-                  <span
-                    key={idx}
-                    className="px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-sm text-slate-700 dark:text-slate-300"
-                  >
-                    {stop.areaName || stop.area?.name || 'Area'} ({stop.nights}n)
-                  </span>
-                ))}
+              <div className="flex flex-wrap items-center gap-1 mt-2">
+                {(split.stops || []).map((stop: any, idx: number, arr: any[]) => {
+                  const stopName = stop.areaName || stop.area?.name || 'Area';
+                  const stopLat = stop.area?.centerLat || stop.lat;
+                  const stopLng = stop.area?.centerLng || stop.lng;
+                  const nextStop = arr[idx + 1];
+                  const nextLat = nextStop?.area?.centerLat || nextStop?.lat;
+                  const nextLng = nextStop?.area?.centerLng || nextStop?.lng;
+
+                  // Calculate transit to next stop if coordinates available
+                  let transitInfo = null;
+                  if (nextStop && stopLat && stopLng && nextLat && nextLng) {
+                    transitInfo = estimateInterAreaTransit(stopLat, stopLng, nextLat, nextLng);
+                  }
+
+                  return (
+                    <div key={idx} className="flex items-center gap-1">
+                      <span className="px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-sm text-slate-700 dark:text-slate-300">
+                        {stopName} ({stop.nights}n)
+                      </span>
+                      {transitInfo && (
+                        <span
+                          className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-0.5"
+                          title={transitInfo.details}
+                        >
+                          → {getInterAreaTransportIcon(transitInfo.mode)} {transitInfo.timeText} →
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               {/* Reasoning explanation */}
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 italic">
@@ -2021,32 +2524,57 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
             <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
               Adjust nights for each area:
             </p>
-            {areas.map((area: any) => {
+            {areas.map((area: any, idx: number) => {
               const nightsForArea = customNights[area.id] ?? defaultNightsPerArea;
+              const nextArea = areas[idx + 1];
+
+              // Calculate transit to next area
+              let transitInfo = null;
+              const areaCoords = area as { centerLat?: number; centerLng?: number };
+              const nextCoords = nextArea as { centerLat?: number; centerLng?: number } | undefined;
+              if (nextCoords && areaCoords.centerLat && areaCoords.centerLng && nextCoords.centerLat && nextCoords.centerLng) {
+                transitInfo = estimateInterAreaTransit(
+                  areaCoords.centerLat,
+                  areaCoords.centerLng,
+                  nextCoords.centerLat,
+                  nextCoords.centerLng
+                );
+              }
+
               return (
-                <div key={area.id} className="flex items-center justify-between">
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
-                    {area.name}
-                  </span>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => adjustNights(area.id, -1)}
-                      disabled={disabled || nightsForArea <= 1}
-                      className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <Minus className="w-5 h-5" />
-                    </button>
-                    <span className="w-20 text-center font-bold text-lg text-slate-900 dark:text-white">
-                      {nightsForArea} nights
+                <div key={area.id}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-slate-700 dark:text-slate-300">
+                      {area.name}
                     </span>
-                    <button
-                      onClick={() => adjustNights(area.id, 1)}
-                      disabled={disabled || nightsRemaining <= 0}
-                      className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <Plus className="w-5 h-5" />
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => adjustNights(area.id, -1)}
+                        disabled={disabled || nightsForArea <= 1}
+                        className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <Minus className="w-5 h-5" />
+                      </button>
+                      <span className="w-20 text-center font-bold text-lg text-slate-900 dark:text-white">
+                        {nightsForArea} nights
+                      </span>
+                      <button
+                        onClick={() => adjustNights(area.id, 1)}
+                        disabled={disabled || nightsRemaining <= 0}
+                        className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <Plus className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
+                  {/* Transit indicator to next area */}
+                  {transitInfo && (
+                    <div className="flex items-center justify-center py-2 my-1">
+                      <span className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-full">
+                        ↓ {getInterAreaTransportIcon(transitInfo.mode)} {transitInfo.timeText}
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -2252,6 +2780,9 @@ function TextCard({ config, onSubmit, disabled }: CardProps) {
   const handleSubmit = () => {
     if (text.trim()) {
       onSubmit(text.trim());
+    } else {
+      // Allow skipping text input
+      onSubmit('');
     }
   };
 
@@ -2260,7 +2791,7 @@ function TextCard({ config, onSubmit, disabled }: CardProps) {
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={config.customTextPlaceholder || 'Type your answer...'}
+        placeholder={config.placeholder || config.customTextPlaceholder || 'Type your answer...'}
         disabled={disabled}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
@@ -2269,16 +2800,18 @@ function TextCard({ config, onSubmit, disabled }: CardProps) {
           }
         }}
         className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white resize-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-        rows={3}
+        rows={config.multiline ? 4 : 3}
       />
-      <button
-        onClick={handleSubmit}
-        disabled={disabled || !text.trim()}
-        className="w-full py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-      >
-        Continue
-        <ChevronRight className="w-4 h-4 inline ml-1" />
-      </button>
+      <div className="flex gap-2">
+        <button
+          onClick={handleSubmit}
+          disabled={disabled}
+          className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {text.trim() ? 'Continue' : 'Skip'}
+          <ChevronRight className="w-4 h-4 inline ml-1" />
+        </button>
+      </div>
     </div>
   );
 }

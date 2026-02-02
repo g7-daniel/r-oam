@@ -50,6 +50,49 @@ const VIBE_AREA_MAPPING: Record<string, string[]> = {
   authentic: ['local_town', 'off_beaten_path', 'traditional'],
 };
 
+// Budget indicators for areas
+const LUXURY_INDICATORS = ['luxury', 'exclusive', 'upscale', 'five_star', 'luxury_resort', 'high_end'];
+const BUDGET_INDICATORS = ['budget', 'affordable', 'hostel', 'hostel_area', 'backpacker', 'local_town'];
+const MID_RANGE_INDICATORS = ['resort', 'all_inclusive', 'boutique'];
+
+/**
+ * Calculate budget fit score based on area characteristics and user budget
+ */
+function calculateBudgetFit(
+  area: { characteristics: string[]; vibe: string[] },
+  budgetPerNight?: { min: number; max: number }
+): number {
+  if (!budgetPerNight) return 0.5; // Neutral if no budget specified
+
+  const budgetMid = (budgetPerNight.min + budgetPerNight.max) / 2;
+  const allTraits = [...(area.characteristics || []), ...(area.vibe || [])].map(t => t.toLowerCase());
+
+  // Count indicators
+  const luxuryCount = allTraits.filter(t => LUXURY_INDICATORS.some(l => t.includes(l))).length;
+  const budgetCount = allTraits.filter(t => BUDGET_INDICATORS.some(b => t.includes(b))).length;
+  const midCount = allTraits.filter(t => MID_RANGE_INDICATORS.some(m => t.includes(m))).length;
+
+  // Estimate area price tier
+  let estimatedTier: 'budget' | 'mid' | 'luxury' = 'mid';
+  if (luxuryCount > budgetCount && luxuryCount > midCount) {
+    estimatedTier = 'luxury';
+  } else if (budgetCount > luxuryCount && budgetCount >= midCount) {
+    estimatedTier = 'budget';
+  }
+
+  // Match tier to user budget
+  if (budgetMid >= 400) {
+    // High budget - luxury areas fit well
+    return estimatedTier === 'luxury' ? 1.0 : estimatedTier === 'mid' ? 0.7 : 0.5;
+  } else if (budgetMid >= 150) {
+    // Mid-range budget - mid areas fit well, luxury still OK
+    return estimatedTier === 'mid' ? 1.0 : estimatedTier === 'budget' ? 0.8 : 0.6;
+  } else {
+    // Budget traveler - budget areas fit well
+    return estimatedTier === 'budget' ? 1.0 : estimatedTier === 'mid' ? 0.6 : 0.3;
+  }
+}
+
 // Comprehensive area database with activity mappings
 // Based on expert knowledge of what areas are best for each activity type
 const DESTINATION_AREAS: Record<string, Array<{
@@ -487,7 +530,7 @@ export async function discoverAreas(
       centerLng: 0,
       activityFitScore,
       vibeFitScore: vibeMatch,
-      budgetFitScore: 0.7, // TODO: Add budget matching
+      budgetFitScore: calculateBudgetFit(area, preferences.budgetPerNight),
       overallScore,
       bestFor: bestForList, // Use modified bestFor with specific activity first
       notIdealFor: area.notIdealFor || [],
@@ -526,7 +569,7 @@ export async function discoverAreas(
         centerLng: 0,
         activityFitScore: 0.3,
         vibeFitScore: 0.3,
-        budgetFitScore: 0.5,
+        budgetFitScore: calculateBudgetFit(area, preferences.budgetPerNight),
         overallScore: 0.3,
         bestFor: area.bestFor,
         notIdealFor: area.notIdealFor || [],

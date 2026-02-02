@@ -191,6 +191,16 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   }, [freeTextInput, isProcessing, orchestrator]);
 
   // ============================================================================
+  // USER NOTES - Allow users to add context/notes for specific fields
+  // ============================================================================
+
+  const handleAddNote = useCallback((field: string, note: string) => {
+    if (!note || !note.trim()) return;
+    orchestrator.addUserNote(field, note);
+    console.log(`[QuickPlanChat] Added note for ${field}: ${note.substring(0, 50)}...`);
+  }, [orchestrator]);
+
+  // ============================================================================
   // ACKNOWLEDGMENT MESSAGES - Make conversation feel more personal
   // ============================================================================
 
@@ -1433,6 +1443,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
                   type={currentQuestion.inputType}
                   config={currentQuestion.inputConfig}
                   onSubmit={handleUserResponse}
+                  onAddNote={handleAddNote}
                   disabled={isProcessing}
                 />
               </div>

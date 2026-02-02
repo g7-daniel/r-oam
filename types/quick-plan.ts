@@ -118,6 +118,67 @@ export interface PetInfo {
 // Sustainability preference level
 export type SustainabilityPreference = 'standard' | 'eco_conscious' | 'eco_focused';
 
+// ============================================================================
+// FREE-TEXT INPUT & SMART FOLLOW-UPS (Phase 1 Critical)
+// ============================================================================
+
+// User notes attached to any field for nuanced preferences
+export interface UserNote {
+  field: string;
+  note: string;
+  timestamp: Date;
+}
+
+// Workation/remote work needs
+export interface WorkationNeeds {
+  requiresWorkspace: boolean;
+  wifiSpeed: 'basic' | 'fast' | 'excellent'; // 10mbps, 50mbps, 100mbps+
+  workHoursPerDay?: number;
+  needsCoworking?: boolean;
+  needsQuietSpace?: boolean;
+  needsReliablePower?: boolean;
+}
+
+// Child-specific needs and concerns
+export interface ChildNeeds {
+  scaredOfHeights?: boolean;
+  scaredOfWater?: boolean;
+  scaredOfDark?: boolean;
+  scaredOfLoudNoises?: boolean;
+  pickyEater?: boolean;
+  needsNaps?: boolean;
+  animalLover?: boolean;
+  customNotes?: string;
+}
+
+// Surfing details for skill-appropriate recommendations
+export type SurfingLevel = 'never' | 'beginner' | 'intermediate' | 'advanced' | 'watch_only';
+export interface SurfingDetails {
+  level: SurfingLevel;
+  wantsLessons?: boolean;
+  wantsRental?: boolean;
+  preferredWaveType?: 'beach_break' | 'reef_break' | 'point_break' | 'any';
+  avoidCrowds?: boolean;
+}
+
+// Safety context for special considerations
+export interface SafetyContext {
+  isSoloFemale?: boolean;
+  hasSevereAllergies?: boolean;
+  allergyTypes?: string[];
+  needsHospitalProximity?: boolean;
+  mobilityLimitations?: string;
+}
+
+// Theme park preferences
+export interface ThemeParkPreferences {
+  parks?: string[]; // 'disney', 'universal', etc.
+  childFears?: string[]; // 'fast_rides', 'dark_rides', 'heights'
+  wantsCharacterDining?: boolean;
+  hasGeniePlus?: boolean;
+  preferredPace?: 'relaxed' | 'moderate' | 'aggressive';
+}
+
 export interface TripPreferences {
   // Destination
   destinationContext: DestinationContext | null;
@@ -211,6 +272,14 @@ export interface TripPreferences {
   mustIncludeActivities?: string[];
   customFeedback?: string;
   vibes?: string[]; // general trip vibes like 'adventure', 'relaxing', 'cultural'
+
+  // Phase 1 Critical: Free-text notes and smart follow-ups
+  userNotes?: UserNote[];
+  workationNeeds?: WorkationNeeds;
+  childNeeds?: ChildNeeds;
+  surfingDetails?: SurfingDetails;
+  safetyContext?: SafetyContext;
+  themeParkPreferences?: ThemeParkPreferences;
 
   // Lock status
   preferencesLocked: boolean;
@@ -485,6 +554,10 @@ export interface RestaurantCandidate {
   redditScore: number;
   evidence: Evidence[];
   reasons: string[];
+
+  // Booking difficulty
+  bookingDifficulty?: 'easy' | 'moderate' | 'hard' | 'very_hard';
+  bookingAdvice?: string; // "Book 2 months ahead", "Walk-in OK"
 
   // User status
   userStatus: 'default' | 'selected' | 'must' | 'never';
@@ -1026,6 +1099,20 @@ export interface ReplyCardConfig {
   // Always allow custom text input
   allowCustomText?: boolean;
   customTextPlaceholder?: string;
+
+  // For text input card
+  placeholder?: string;
+  multiline?: boolean;
+
+  // For info display
+  infoText?: string;
+  seasonNote?: string;
+
+  // For tracking which field this card is for (used for notes)
+  field?: string;
+
+  // Whether to show optional notes input after selection
+  allowNotes?: boolean;
 }
 
 export interface ChipOption {
