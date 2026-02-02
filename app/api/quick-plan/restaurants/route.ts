@@ -152,6 +152,7 @@ export async function POST(request: NextRequest) {
                         placeId: place.place_id,
                         name: place.name,
                         address: place.formatted_address || place.vicinity || '',
+                        googleMapsUrl: `https://www.google.com/maps/place/?q=place_id:${place.place_id}`,
                         cuisine: [formatCuisineLabel(cuisine)],
                         priceLevel: place.price_level || 2,
                         googleRating: place.rating || 0,

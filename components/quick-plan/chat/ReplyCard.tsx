@@ -1046,6 +1046,12 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
                           <Info className="w-3.5 h-3.5 text-slate-400" />
                         </button>
                       </div>
+                      {/* Address line */}
+                      {restaurant.address && (
+                        <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">
+                          {restaurant.address}
+                        </p>
+                      )}
                       <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 flex-wrap">
                         <span className="flex items-center gap-0.5">
                           <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
@@ -1244,6 +1250,12 @@ function ActivitiesCard({ config, onSubmit, disabled }: CardProps) {
                     {activity.operator && (
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                         by {activity.operator}
+                      </p>
+                    )}
+                    {/* Address line */}
+                    {(activity as any).address && (
+                      <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">
+                        {(activity as any).address}
                       </p>
                     )}
                     <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">

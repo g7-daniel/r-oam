@@ -331,6 +331,7 @@ export interface HotelCandidate {
 
   // Location
   address: string;
+  googleMapsUrl?: string; // Direct link to Google Maps
   city: string;
   lat: number;
   lng: number;
@@ -389,6 +390,7 @@ export interface RestaurantCandidate {
 
   // Location
   address: string;
+  googleMapsUrl?: string; // Direct link to Google Maps
   lat: number;
   lng: number;
   nearArea?: string; // Which area/hotel this restaurant is near
@@ -752,6 +754,7 @@ export interface VerifiedActivity {
   name: string; // e.g., "Horseback riding on Macao Beach"
   operator?: string; // e.g., "Rancho Macao"
   operatorUrl?: string;
+  googleMapsUrl?: string; // Direct link to Google Maps
   location: string;
   type: ActivityType;
 
