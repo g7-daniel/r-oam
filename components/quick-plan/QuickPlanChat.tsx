@@ -21,6 +21,7 @@ import type {
   OrchestratorState,
 } from '@/types/quick-plan';
 import { finalizeQuickPlanTrip } from '@/lib/quick-plan/trip-transformer';
+import { useToast } from '@/components/ui/Toast';
 import { RotateCcw } from 'lucide-react';
 
 // ============================================================================
@@ -1349,6 +1350,7 @@ interface ItineraryPreviewProps {
 
 function ItineraryPreview({ orchestratorState }: ItineraryPreviewProps) {
   const [isNavigating, setIsNavigating] = useState(false);
+  const toast = useToast();
 
   const itinerary = orchestratorState.itinerary;
   const preferences = orchestratorState.preferences;
@@ -1391,8 +1393,10 @@ function ItineraryPreview({ orchestratorState }: ItineraryPreviewProps) {
       window.location.href = `/plan/${tripId}`;
     } catch (error) {
       console.error('[ItineraryPreview] Failed to finalize trip:', error);
-      // Show error to user (could add a toast here in the future)
-      alert('There was an error creating your itinerary. Please try again.');
+      toast.error(
+        'Failed to create itinerary',
+        'There was an error saving your trip. Please try again.'
+      );
       setIsNavigating(false);
     }
   };
