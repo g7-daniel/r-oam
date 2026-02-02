@@ -472,6 +472,17 @@ export interface ItineraryStop {
 // HOTELS
 // ============================================================================
 
+// FIX 4.5: Recommendation explanation for transparency
+export interface RecommendationExplanation {
+  mainReason: string;
+  factors: {
+    factor: string;
+    weight: number;
+    value: string;
+  }[];
+  sources: string[];
+}
+
 export interface HotelCandidate {
   id: string;
   placeId: string; // Google place_id - CANONICAL ID
@@ -527,6 +538,9 @@ export interface HotelCandidate {
   estimatedRoomsNeeded?: number; // For groups > 4 people
   estimatedTotalPrice?: number; // pricePerNight * roomsNeeded
   largeGroupNote?: string; // Tip for large groups (e.g., "Consider a villa")
+
+  // FIX 4.5: Why this recommendation
+  explanation?: RecommendationExplanation;
 }
 
 export interface HotelShortlist {

@@ -2617,6 +2617,108 @@ Respond with just the field name.`;
           console.log('[Orchestrator] Wellness mode activated');
         }
 
+        // FIX 5.3: Family mode
+        if (occasion.id === 'family' || occasion.id === 'family_vacation') {
+          (this.state.preferences as any).specialMode = 'family';
+          (this.state.preferences as any).vibeBoosts = ['family_friendly', 'safe', 'spacious', 'convenient'];
+          (this.state.preferences as any).activityBoosts = ['beach', 'wildlife', 'cultural', 'swimming', 'theme_park'];
+          (this.state.preferences as any).vibeFilters = ['adults_only', 'party', 'nightlife'];
+          (this.state.preferences as any).requireFamilyFriendly = true;
+          console.log('[Orchestrator] Family mode activated');
+        }
+
+        // FIX 5.4: Workation mode
+        if (occasion.id === 'workation' || occasion.id === 'remote_work' || occasion.id === 'digital_nomad') {
+          (this.state.preferences as any).specialMode = 'workation';
+          (this.state.preferences as any).vibeBoosts = ['wifi', 'coworking', 'quiet', 'cafes', 'productive'];
+          (this.state.preferences as any).activityBoosts = ['cultural', 'food_tour', 'hiking', 'beach'];
+          (this.state.preferences as any).accommodationRequirements = ['wifi', 'workspace', 'quiet'];
+          (this.state.preferences as any).requireWorkspace = true;
+          console.log('[Orchestrator] Workation mode activated');
+        }
+
+        // FIX 5.5: Solo traveler mode
+        if (occasion.id === 'solo' || occasion.id === 'solo_travel') {
+          (this.state.preferences as any).specialMode = 'solo';
+          (this.state.preferences as any).vibeBoosts = ['social', 'safe', 'walkable', 'friendly', 'backpacker'];
+          (this.state.preferences as any).activityBoosts = ['food_tour', 'cultural', 'hiking', 'beach', 'nightlife'];
+          (this.state.preferences as any).prioritizeSafety = true;
+          console.log('[Orchestrator] Solo traveler mode activated');
+        }
+
+        // FIX 5.6: Girls trip / Guys trip (social trip)
+        if (occasion.id === 'girls_trip' || occasion.id === 'guys_trip' || occasion.id === 'friends_trip') {
+          (this.state.preferences as any).specialMode = 'social_trip';
+          (this.state.preferences as any).vibeBoosts = ['social', 'lively', 'nightlife', 'trendy', 'fun'];
+          (this.state.preferences as any).activityBoosts = ['nightlife', 'beach', 'spa_wellness', 'food_tour', 'adventure'];
+          (this.state.preferences as any).prioritizeGroupActivities = true;
+          console.log('[Orchestrator] Social trip mode activated');
+        }
+
+        // FIX 5.7: Foodie mode
+        if (occasion.id === 'foodie' || occasion.id === 'culinary' || occasion.id === 'food_exploration') {
+          (this.state.preferences as any).specialMode = 'foodie';
+          (this.state.preferences as any).vibeBoosts = ['foodie', 'authentic', 'local', 'markets', 'dining'];
+          (this.state.preferences as any).activityBoosts = ['food_tour', 'cooking_class', 'wine_tasting', 'cultural'];
+          (this.state.preferences as any).prioritizeDining = true;
+          (this.state.preferences as any).includeMichelinOptions = true;
+          console.log('[Orchestrator] Foodie mode activated');
+        }
+
+        // FIX 5.8: Party mode
+        if (occasion.id === 'party' || occasion.id === 'bachelor' || occasion.id === 'bachelorette' || occasion.id === 'celebration') {
+          (this.state.preferences as any).specialMode = 'party';
+          (this.state.preferences as any).vibeBoosts = ['party', 'nightlife', 'lively', 'social', 'fun'];
+          (this.state.preferences as any).activityBoosts = ['nightlife', 'beach', 'full_moon_party', 'adventure'];
+          (this.state.preferences as any).vibeFilters = ['quiet', 'peaceful', 'family_friendly'];
+          console.log('[Orchestrator] Party mode activated');
+        }
+
+        // FIX 5.9: Cultural immersion mode
+        if (occasion.id === 'cultural' || occasion.id === 'immersion' || occasion.id === 'educational') {
+          (this.state.preferences as any).specialMode = 'cultural';
+          (this.state.preferences as any).vibeBoosts = ['authentic', 'cultural', 'historic', 'local', 'traditional'];
+          (this.state.preferences as any).activityBoosts = ['cultural', 'temple_visit', 'food_tour', 'cooking_class', 'photography'];
+          (this.state.preferences as any).prioritizeAuthenticity = true;
+          console.log('[Orchestrator] Cultural immersion mode activated');
+        }
+
+        // FIX 5.10: Luxury mode
+        if (occasion.id === 'luxury' || occasion.id === 'splurge' || occasion.id === 'special_occasion') {
+          (this.state.preferences as any).specialMode = 'luxury';
+          (this.state.preferences as any).vibeBoosts = ['luxury', 'exclusive', 'upscale', 'sophisticated', 'private'];
+          (this.state.preferences as any).activityBoosts = ['spa_wellness', 'wine_tasting', 'golf', 'sailing', 'private_tour'];
+          (this.state.preferences as any).suggestUpgrade = true;
+          (this.state.preferences as any).includeMichelinOptions = true;
+          console.log('[Orchestrator] Luxury mode activated');
+        }
+
+        // FIX 5.11: Nature/Eco mode
+        if (occasion.id === 'nature' || occasion.id === 'eco' || occasion.id === 'wildlife') {
+          (this.state.preferences as any).specialMode = 'nature';
+          (this.state.preferences as any).vibeBoosts = ['nature', 'eco', 'wildlife', 'scenic', 'outdoors'];
+          (this.state.preferences as any).activityBoosts = ['hiking', 'wildlife', 'snorkel', 'kayaking', 'photography'];
+          (this.state.preferences as any).prioritizeEcoFriendly = true;
+          console.log('[Orchestrator] Nature/Eco mode activated');
+        }
+
+        // FIX 5.12: Photography trip mode
+        if (occasion.id === 'photography' || occasion.id === 'photo_trip') {
+          (this.state.preferences as any).specialMode = 'photography';
+          (this.state.preferences as any).vibeBoosts = ['scenic', 'photogenic', 'unique', 'authentic', 'diverse'];
+          (this.state.preferences as any).activityBoosts = ['photography', 'cultural', 'wildlife', 'hiking', 'sunrise_sunset'];
+          (this.state.preferences as any).prioritizeGoldenHour = true;
+          console.log('[Orchestrator] Photography mode activated');
+        }
+
+        // FIX 5.13: Sports/Active mode
+        if (occasion.id === 'sports' || occasion.id === 'active' || occasion.id === 'fitness') {
+          (this.state.preferences as any).specialMode = 'active';
+          (this.state.preferences as any).vibeBoosts = ['active', 'outdoors', 'adventure', 'fitness'];
+          (this.state.preferences as any).activityBoosts = ['hiking', 'surf', 'cycling', 'rock_climbing', 'water_sports'];
+          console.log('[Orchestrator] Sports/Active mode activated');
+        }
+
         console.log('[Orchestrator] Trip occasion set:', occasion.id);
         break;
 

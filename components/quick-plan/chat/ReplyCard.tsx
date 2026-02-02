@@ -184,6 +184,39 @@ const NOTE_PLACEHOLDERS: Record<string, string> = {
   default: "Any other details that would help plan your perfect trip?",
 };
 
+// FIX 4.4: Confidence Indicator component for recommendations
+function ConfidenceIndicator({ level }: { level: 'high' | 'medium' | 'low' }) {
+  const colors = {
+    high: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+    medium: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
+    low: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+  };
+
+  const labels = {
+    high: 'Verified',
+    medium: 'Likely match',
+    low: 'Best guess',
+  };
+
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full ${colors[level]}`}>
+      {labels[level]}
+    </span>
+  );
+}
+
+// FIX 4.4: Quality tier indicator for experiences
+function QualityTierBadge({ tier }: { tier: 'high' | 'medium' }) {
+  if (tier === 'high') {
+    return (
+      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+        Top pick
+      </span>
+    );
+  }
+  return null;
+}
+
 function ChipsCard({ config, onSubmit, disabled }: CardProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [customText, setCustomText] = useState('');
