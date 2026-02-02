@@ -117,6 +117,81 @@ export async function searchHotelsByGeocode(
   return results;
 }
 
+// Search for luxury hotels using text search with specific keywords
+export async function searchLuxuryHotels(
+  lat: number,
+  lng: number,
+  areaName: string,
+  destination: string,
+  maxResults: number = 20
+): Promise<GooglePlaceResult[]> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    console.warn('Google Maps API key not configured');
+    return [];
+  }
+
+  const results: GooglePlaceResult[] = [];
+  const seenPlaceIds = new Set<string>();
+
+  // Luxury-specific search queries
+  const luxuryQueries = [
+    `luxury resort ${areaName} ${destination}`,
+    `5 star hotel ${areaName} ${destination}`,
+    `four seasons ${areaName}`,
+    `ritz carlton ${areaName}`,
+    `premium resort ${areaName} ${destination}`,
+  ];
+
+  for (const query of luxuryQueries) {
+    if (results.length >= maxResults) break;
+
+    const params = new URLSearchParams({
+      query,
+      location: `${lat},${lng}`,
+      radius: '50000',
+      type: 'lodging',
+      key: apiKey,
+    });
+
+    try {
+      const response = await fetch(
+        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`
+      );
+      const data = await response.json();
+
+      if (data.results) {
+        for (const place of data.results) {
+          // Only include high-rated hotels (4.0+)
+          if (place.place_id &&
+              !seenPlaceIds.has(place.place_id) &&
+              (place.rating || 0) >= 4.0 &&
+              (place.price_level === undefined || place.price_level >= 3)) {
+            seenPlaceIds.add(place.place_id);
+            results.push(place);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Luxury hotel search failed for "${query}":`, error);
+    }
+
+    // Small delay between queries
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+
+  // Sort by rating and price level
+  results.sort((a, b) => {
+    const priceA = a.price_level || 3;
+    const priceB = b.price_level || 3;
+    if (priceA !== priceB) return priceB - priceA;
+    return (b.rating || 0) - (a.rating || 0);
+  });
+
+  console.log(`[Google Maps] Found ${results.length} luxury hotels for ${areaName}`);
+  return results.slice(0, maxResults);
+}
+
 // Geocode a location name to get coordinates
 export async function geocodeLocation(
   locationName: string

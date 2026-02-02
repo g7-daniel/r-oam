@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { searchHotelsWithPagination, searchHotelsByGeocode, geocodeLocation, GooglePlaceResult } from '@/lib/google-maps';
+import { searchHotelsWithPagination, searchHotelsByGeocode, searchLuxuryHotels, geocodeLocation, GooglePlaceResult } from '@/lib/google-maps';
 import { searchHotelRecommendations } from '@/lib/reddit';
 import { getBatchPricingByCity } from '@/lib/makcorps';
 import { HotelCandidate } from '@/types/quick-plan';
@@ -188,11 +188,11 @@ export async function GET(request: NextRequest) {
 }
 
 // Map budget to Google price_level (1-4 scale)
-function getBudgetPriceLevel(budgetMax: number): { min: number; max: number } | null {
-  if (budgetMax <= 150) return { min: 1, max: 2 };      // Budget
-  if (budgetMax <= 300) return { min: 2, max: 3 };      // Mid-range
-  if (budgetMax <= 600) return { min: 2, max: 4 };      // Upscale (include mid-range too)
-  return null;  // Luxury - don't filter, show all high-end
+function getBudgetPriceLevel(budgetMax: number): { min: number; max: number; isLuxury: boolean } | null {
+  if (budgetMax <= 150) return { min: 1, max: 2, isLuxury: false };      // Budget
+  if (budgetMax <= 300) return { min: 2, max: 3, isLuxury: false };      // Mid-range
+  if (budgetMax <= 600) return { min: 3, max: 4, isLuxury: false };      // Upscale
+  return { min: 4, max: 4, isLuxury: true };  // Luxury - only show high-end (price_level 4)
 }
 
 export async function POST(request: NextRequest) {
@@ -294,13 +294,28 @@ export async function POST(request: NextRequest) {
         if (areaCoords) {
           console.log(`[Hotels API] Geocoded ${areaName} to (${areaCoords.lat}, ${areaCoords.lng})`);
 
-          // Search within 50km radius of the area center
-          const nearbyHotels = await searchHotelsByGeocode(
-            areaCoords.lat,
-            areaCoords.lng,
-            50000,  // 50km radius
-            20
-          );
+          // Use luxury search for high budgets, regular search otherwise
+          const isLuxuryBudget = priceLevelRange?.isLuxury || false;
+          let nearbyHotels: GooglePlaceResult[];
+
+          if (isLuxuryBudget) {
+            console.log(`[Hotels API] Using LUXURY hotel search for ${areaName} (budget: $${preferences.budgetMax}+)`);
+            nearbyHotels = await searchLuxuryHotels(
+              areaCoords.lat,
+              areaCoords.lng,
+              areaName,
+              destination,
+              20
+            );
+          } else {
+            // Standard search within 50km radius
+            nearbyHotels = await searchHotelsByGeocode(
+              areaCoords.lat,
+              areaCoords.lng,
+              50000,
+              20
+            );
+          }
 
           console.log(`[Hotels API] Found ${nearbyHotels.length} hotels via Google geocode for ${areaName}`);
 
