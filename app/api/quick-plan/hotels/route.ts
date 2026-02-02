@@ -252,37 +252,41 @@ export async function POST(request: NextRequest) {
         ? { priceLevel: { gte: priceLevelRange.min, lte: priceLevelRange.max } }
         : {};
 
-      // Query DB - FIRST try area-specific match, THEN fallback to country
-      // This ensures each area gets different hotels
-      let hotels = await prisma.hotel.findMany({
-        where: {
-          AND: [
-            // Must be in the right country
-            { country: { contains: destination } },
-            // Must match the specific area (region OR city)
-            {
-              OR: [
-                { region: { contains: areaName } },
-                { city: { contains: areaName } },
-              ],
-            },
-            // Budget filter based on price level
-            priceLevelFilter,
-          ],
-          googleRating: { gte: preferences.minRating || 4.0 },
-        },
-        orderBy: [
-          { googleRating: 'desc' },
-          { reviewCount: 'desc' },
-        ],
-        take: 15,
-      });
-      console.log(`[Hotels API] Area-specific query for ${areaName}: found ${hotels.length} hotels`);
+      let hotels: any[] = [];
+      let dbAvailable = true;
 
-      // If no area-specific results, use GEOCODE-BASED fallback
-      // This ensures we stay in the correct area, not country-wide
+      // Try database first, fallback to Google-only if DB unavailable
+      try {
+        // Query DB - FIRST try area-specific match, THEN fallback to country
+        hotels = await prisma.hotel.findMany({
+          where: {
+            AND: [
+              { country: { contains: destination } },
+              {
+                OR: [
+                  { region: { contains: areaName } },
+                  { city: { contains: areaName } },
+                ],
+              },
+              priceLevelFilter,
+            ],
+            googleRating: { gte: preferences.minRating || 4.0 },
+          },
+          orderBy: [
+            { googleRating: 'desc' },
+            { reviewCount: 'desc' },
+          ],
+          take: 15,
+        });
+        console.log(`[Hotels API] Area-specific query for ${areaName}: found ${hotels.length} hotels`);
+      } catch (dbError: any) {
+        console.warn(`[Hotels API] Database unavailable, using Google search only: ${dbError.message?.slice(0, 100)}`);
+        dbAvailable = false;
+      }
+
+      // If no DB results or DB unavailable, use GEOCODE-BASED search
       if (hotels.length < 3) {
-        console.log(`[Hotels API] Few area-specific results for ${areaName}, using geocode fallback`);
+        console.log(`[Hotels API] ${dbAvailable ? 'Few DB results' : 'DB unavailable'} for ${areaName}, using Google geocode search`);
 
         // Get coordinates for the SPECIFIC AREA
         const areaCoords = await geocodeLocation(`${areaName}, ${destination}`);
@@ -298,75 +302,103 @@ export async function POST(request: NextRequest) {
             20
           );
 
-          console.log(`[Hotels API] Found ${nearbyHotels.length} hotels via geocode for ${areaName}`);
+          console.log(`[Hotels API] Found ${nearbyHotels.length} hotels via Google geocode for ${areaName}`);
 
-          // Index these for future queries
-          for (const hotel of nearbyHotels) {
-            if (hotel.place_id) {
-              try {
-                await prisma.hotel.upsert({
-                  where: { placeId: hotel.place_id },
-                  create: {
-                    placeId: hotel.place_id,
-                    name: hotel.name,
-                    address: hotel.formatted_address || hotel.vicinity || null,
-                    city: areaName,
-                    region: areaName,
-                    country: destination,
-                    countryCode: 'XX',
-                    lat: hotel.geometry.location.lat,
-                    lng: hotel.geometry.location.lng,
-                    googleRating: hotel.rating || null,
-                    reviewCount: hotel.user_ratings_total || null,
-                    priceLevel: hotel.price_level || null,
-                    photoReference: hotel.photos?.[0]?.photo_reference || null,
-                  },
-                  update: {
-                    googleRating: hotel.rating || null,
-                    reviewCount: hotel.user_ratings_total || null,
-                    indexedAt: new Date(),
-                  },
-                });
-              } catch (e) {
-                // Skip duplicates
+          // Convert Google results to hotel format (skip DB indexing if unavailable)
+          if (!dbAvailable || nearbyHotels.length > 0) {
+            // Use Google results directly as hotel candidates
+            const googleHotels = nearbyHotels
+              .filter(h => (h.rating || 0) >= (preferences.minRating || 4.0))
+              .slice(0, 15)
+              .map(hotel => ({
+                id: hotel.place_id,
+                placeId: hotel.place_id,
+                name: hotel.name,
+                address: hotel.formatted_address || hotel.vicinity || null,
+                city: areaName,
+                region: areaName,
+                country: destination,
+                lat: hotel.geometry.location.lat,
+                lng: hotel.geometry.location.lng,
+                googleRating: hotel.rating || null,
+                reviewCount: hotel.user_ratings_total || null,
+                priceLevel: hotel.price_level || null,
+                photoReference: hotel.photos?.[0]?.photo_reference || null,
+              }));
+
+            // If DB available, try to index for future
+            if (dbAvailable) {
+              for (const hotel of nearbyHotels) {
+                if (hotel.place_id) {
+                  try {
+                    await prisma.hotel.upsert({
+                      where: { placeId: hotel.place_id },
+                      create: {
+                        placeId: hotel.place_id,
+                        name: hotel.name,
+                        address: hotel.formatted_address || hotel.vicinity || null,
+                        city: areaName,
+                        region: areaName,
+                        country: destination,
+                        countryCode: 'XX',
+                        lat: hotel.geometry.location.lat,
+                        lng: hotel.geometry.location.lng,
+                        googleRating: hotel.rating || null,
+                        reviewCount: hotel.user_ratings_total || null,
+                        priceLevel: hotel.price_level || null,
+                        photoReference: hotel.photos?.[0]?.photo_reference || null,
+                      },
+                      update: {
+                        googleRating: hotel.rating || null,
+                        reviewCount: hotel.user_ratings_total || null,
+                        indexedAt: new Date(),
+                      },
+                    });
+                  } catch (e) {
+                    // Skip duplicates
+                  }
+                }
               }
-            }
-          }
 
-          // Re-query with new data including lat/lng radius
-          hotels = await prisma.hotel.findMany({
-            where: {
-              AND: [
-                { country: { contains: destination } },
-                {
-                  OR: [
-                    { region: { contains: areaName } },
-                    { city: { contains: areaName } },
+              // Re-query with new data including lat/lng radius
+              hotels = await prisma.hotel.findMany({
+                where: {
+                  AND: [
+                    { country: { contains: destination } },
                     {
-                      AND: [
-                        { lat: { gte: areaCoords.lat - 0.45 } },  // ~50km
-                        { lat: { lte: areaCoords.lat + 0.45 } },
-                        { lng: { gte: areaCoords.lng - 0.45 } },
-                        { lng: { lte: areaCoords.lng + 0.45 } },
-                      ]
-                    }
+                      OR: [
+                        { region: { contains: areaName } },
+                        { city: { contains: areaName } },
+                        {
+                          AND: [
+                            { lat: { gte: areaCoords.lat - 0.45 } },
+                            { lat: { lte: areaCoords.lat + 0.45 } },
+                            { lng: { gte: areaCoords.lng - 0.45 } },
+                            { lng: { lte: areaCoords.lng + 0.45 } },
+                          ]
+                        }
+                      ],
+                    },
                   ],
+                  googleRating: { gte: preferences.minRating || 4.0 },
                 },
-              ],
-              googleRating: { gte: preferences.minRating || 4.0 },
-            },
-            orderBy: [
-              { googleRating: 'desc' },
-              { reviewCount: 'desc' },
-            ],
-            take: 15,
-          });
+                orderBy: [
+                  { googleRating: 'desc' },
+                  { reviewCount: 'desc' },
+                ],
+                take: 15,
+              });
+            } else {
+              // Use Google results directly
+              hotels = googleHotels;
+            }
 
-          console.log(`[Hotels API] After geocode fallback for ${areaName}: ${hotels.length} hotels`);
+            console.log(`[Hotels API] After geocode search for ${areaName}: ${hotels.length} hotels`);
+          }
         }
       }
 
-      // Auto-index if needed
+      // Auto-index if needed (skip if DB unavailable)
       const lastIndexed = indexingTimestamps.get(cacheKey) || 0;
       const cooldownPassed = Date.now() - lastIndexed > INDEXING_COOLDOWN_MS;
 
