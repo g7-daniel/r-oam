@@ -136,13 +136,37 @@ export async function POST(request: NextRequest) {
       dairy_free: 'dairy free',
     };
 
-    // Build dietary prefix for search queries
-    // Only use the first dietary restriction to avoid overly specific searches
+    // FIX 2.5: Build search queries that incorporate ALL dietary restrictions
+    const buildDietarySearchTerms = (baseTerm: string): string[] => {
+      if (activeDietaryRestrictions.length === 0) {
+        return [baseTerm];
+      }
+
+      // Primary search with first restriction
+      const primary = activeDietaryRestrictions[0];
+      const primaryPrefix = dietaryPrefixes[primary] || '';
+
+      // For multiple restrictions, create combined searches
+      if (activeDietaryRestrictions.length > 1) {
+        const combined = activeDietaryRestrictions
+          .map(r => dietaryPrefixes[r])
+          .filter(Boolean)
+          .join(' ');
+        return [
+          `${primaryPrefix} ${baseTerm}`.trim(),
+          `${combined} ${baseTerm}`.trim(),
+        ];
+      }
+
+      return [`${primaryPrefix} ${baseTerm}`.trim()];
+    };
+
+    // Legacy support - still use single prefix for cuisine mapping
     const dietaryPrefix = activeDietaryRestrictions.length > 0 && dietaryPrefixes[activeDietaryRestrictions[0]]
       ? `${dietaryPrefixes[activeDietaryRestrictions[0]]} `
       : '';
 
-    console.log('[Restaurants API] Using dietary prefix:', dietaryPrefix || '(none)');
+    console.log('[Restaurants API] Dietary restrictions:', activeDietaryRestrictions, 'prefix:', dietaryPrefix || '(none)');
 
     // Cuisine type to Google Places search terms
     const cuisineSearchTerms: Record<string, string[]> = {

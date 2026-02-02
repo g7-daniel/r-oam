@@ -199,6 +199,69 @@ const DESTINATION_AREAS: Record<string, Array<{
     { name: 'Nara', type: 'town', characteristics: ['deer', 'temples', 'cultural', 'day_trip', 'peaceful'], description: 'Ancient capital famous for friendly deer and massive Buddha statue. Great day trip from Kyoto.', bestFor: ['cultural', 'wildlife', 'photography'], vibe: ['peaceful', 'cultural', 'nature'] },
     { name: 'Hiroshima', type: 'town', characteristics: ['history', 'peace_memorial', 'cultural', 'food'], description: 'Moving peace memorial and delicious okonomiyaki. Gateway to Miyajima Island.', bestFor: ['cultural', 'food_tour'], vibe: ['cultural', 'moving', 'peaceful'] },
   ],
+
+  // FIX 3.4: Add Spain areas
+  'spain': [
+    { name: 'Barcelona', type: 'town', characteristics: ['beach', 'architecture', 'nightlife', 'food_scene', 'gaudi'], description: 'Stunning Gaudí architecture, Mediterranean beaches, and vibrant nightlife. La Rambla, Sagrada Familia, and tapas bars.', bestFor: ['cultural', 'beach', 'food_tour', 'nightlife'], vibe: ['lively', 'cultural', 'trendy'] },
+    { name: 'Madrid', type: 'town', characteristics: ['museums', 'nightlife', 'food_scene', 'downtown', 'royal_palace'], description: 'Spain\'s capital with world-class museums, late-night dining, and vibrant plazas.', bestFor: ['cultural', 'food_tour', 'nightlife', 'shopping'], vibe: ['lively', 'cultural', 'urban'] },
+    { name: 'Seville', type: 'town', characteristics: ['flamenco', 'historic', 'alcazar', 'tapas', 'hot'], description: 'Andalusian gem with passionate flamenco, stunning Alcázar, and orange-tree-lined streets.', bestFor: ['cultural', 'food_tour', 'photography'], vibe: ['romantic', 'cultural', 'authentic'] },
+    { name: 'San Sebastián', type: 'town', characteristics: ['food_scene', 'beach', 'pintxos', 'michelin', 'basque'], description: 'Foodie paradise with more Michelin stars per capita than anywhere. Beautiful beaches too.', bestFor: ['food_tour', 'beach', 'cultural'], vibe: ['foodie', 'upscale', 'relaxed'] },
+    { name: 'Ibiza', type: 'town', characteristics: ['nightlife', 'beach', 'clubs', 'party', 'electronic_music'], description: 'World-famous party island with legendary clubs and beautiful beaches. Also has a quieter north side.', bestFor: ['nightlife', 'beach'], vibe: ['party', 'lively', 'young'] },
+    { name: 'Mallorca', type: 'region', characteristics: ['beach', 'mountains', 'cycling', 'family', 'resort'], description: 'Beautiful Balearic island with stunning beaches, mountain villages, and great cycling.', bestFor: ['beach', 'hiking', 'cycling'], vibe: ['relaxed', 'scenic', 'family'] },
+  ],
+
+  // FIX 3.5: Add Italy areas
+  'italy': [
+    { name: 'Rome', type: 'town', characteristics: ['ancient_ruins', 'museums', 'food_scene', 'vatican', 'history'], description: 'Eternal City with ancient ruins, Vatican, and incredible pasta. Colosseum, Trevi Fountain, and more.', bestFor: ['cultural', 'food_tour', 'photography'], vibe: ['cultural', 'historic', 'romantic'] },
+    { name: 'Florence', type: 'town', characteristics: ['renaissance', 'art', 'museums', 'food_scene', 'architecture'], description: 'Renaissance masterpiece with Uffizi Gallery, Duomo, and Tuscan cuisine. Art lover\'s paradise.', bestFor: ['cultural', 'food_tour', 'shopping'], vibe: ['cultural', 'romantic', 'artistic'] },
+    { name: 'Venice', type: 'town', characteristics: ['canals', 'romantic', 'unique', 'gondola', 'masks'], description: 'Floating city with romantic canals and no cars. Magical but crowded - go early morning or evening.', bestFor: ['cultural', 'photography', 'romantic'], vibe: ['romantic', 'unique', 'magical'] },
+    { name: 'Amalfi Coast', type: 'region', characteristics: ['coastal', 'scenic_drives', 'beaches', 'lemons', 'luxury'], description: 'Dramatic coastline with colorful cliffside villages. Positano, Ravello, and limoncello.', bestFor: ['beach', 'photography', 'food_tour'], vibe: ['romantic', 'scenic', 'luxury'] },
+    { name: 'Cinque Terre', type: 'region', characteristics: ['hiking', 'coastal', 'colorful_villages', 'wine', 'train'], description: 'Five colorful villages connected by hiking trails and train. No cars allowed.', bestFor: ['hiking', 'photography', 'beach'], vibe: ['scenic', 'active', 'authentic'] },
+    { name: 'Lake Como', type: 'region', characteristics: ['lake', 'luxury', 'villas', 'scenic', 'relaxed'], description: 'Stunning alpine lake with elegant villas and celebrity appeal. George Clooney\'s neighborhood.', bestFor: ['relaxation', 'photography', 'boating'], vibe: ['luxury', 'romantic', 'serene'] },
+  ],
+
+  // FIX 3.6: Add Portugal areas
+  'portugal': [
+    { name: 'Lisbon', type: 'town', characteristics: ['hills', 'trams', 'nightlife', 'food_scene', 'historic'], description: 'Hilly capital with iconic trams, pastéis de nata, and great nightlife in Bairro Alto.', bestFor: ['cultural', 'food_tour', 'nightlife'], vibe: ['lively', 'trendy', 'cultural'] },
+    { name: 'Porto', type: 'town', characteristics: ['port_wine', 'riverside', 'bridges', 'historic', 'tiles'], description: 'Charming riverside city famous for port wine cellars and beautiful azulejo tiles.', bestFor: ['food_tour', 'cultural', 'wine_tasting'], vibe: ['authentic', 'cultural', 'foodie'] },
+    { name: 'Algarve', type: 'region', characteristics: ['beach', 'cliffs', 'golf', 'resort', 'caves'], description: 'Southern coast with dramatic cliffs, golden beaches, and sea caves. Great for golf too.', bestFor: ['beach', 'golf', 'adventure'], vibe: ['relaxed', 'scenic', 'family'] },
+    { name: 'Sintra', type: 'town', characteristics: ['palaces', 'forests', 'romantic', 'day_trip', 'fairytale'], description: 'Fairytale palaces and misty forests just outside Lisbon. Pena Palace is stunning.', bestFor: ['cultural', 'photography', 'hiking'], vibe: ['romantic', 'magical', 'scenic'] },
+  ],
+
+  // FIX 3.7: Add Greece areas
+  'greece': [
+    { name: 'Santorini', type: 'town', characteristics: ['caldera', 'sunset', 'romantic', 'wine', 'iconic'], description: 'Iconic whitewashed buildings and stunning caldera sunsets. Ultimate romantic destination.', bestFor: ['photography', 'wine_tasting', 'romantic'], vibe: ['romantic', 'iconic', 'luxury'] },
+    { name: 'Athens', type: 'town', characteristics: ['acropolis', 'ancient', 'food_scene', 'nightlife', 'history'], description: 'Ancient history meets modern vibrancy. Acropolis, Plaka, and rooftop bars.', bestFor: ['cultural', 'food_tour', 'nightlife'], vibe: ['cultural', 'historic', 'lively'] },
+    { name: 'Mykonos', type: 'town', characteristics: ['party', 'beach', 'nightlife', 'windmills', 'lgbtq_friendly'], description: 'Party island with famous beach clubs and late-night scene. Also has quieter corners.', bestFor: ['nightlife', 'beach'], vibe: ['party', 'lively', 'trendy'] },
+    { name: 'Crete', type: 'region', characteristics: ['beaches', 'mountains', 'history', 'food', 'diverse'], description: 'Largest Greek island with everything - beaches, mountains, ancient palaces, and great food.', bestFor: ['beach', 'hiking', 'cultural', 'food_tour'], vibe: ['diverse', 'authentic', 'adventurous'] },
+    { name: 'Rhodes', type: 'town', characteristics: ['medieval', 'beach', 'old_town', 'history', 'family'], description: 'Medieval old town and beautiful beaches. Great for history buffs and families.', bestFor: ['cultural', 'beach', 'family'], vibe: ['historic', 'family', 'relaxed'] },
+  ],
+
+  // FIX 3.8: Add France areas
+  'france': [
+    { name: 'Paris', type: 'town', characteristics: ['museums', 'romantic', 'food_scene', 'fashion', 'iconic'], description: 'City of Light with Eiffel Tower, Louvre, and incredible pastries. Romantic and cultural.', bestFor: ['cultural', 'food_tour', 'shopping', 'photography'], vibe: ['romantic', 'cultural', 'elegant'] },
+    { name: 'Nice', type: 'town', characteristics: ['beach', 'promenade', 'art', 'riviera', 'mediterranean'], description: 'French Riviera gem with beautiful Promenade des Anglais and great art museums.', bestFor: ['beach', 'cultural', 'food_tour'], vibe: ['relaxed', 'elegant', 'sunny'] },
+    { name: 'Provence', type: 'region', characteristics: ['lavender', 'wine', 'villages', 'scenic', 'relaxed'], description: 'Rolling lavender fields, charming villages, and excellent rosé wine.', bestFor: ['wine_tasting', 'photography', 'cycling'], vibe: ['relaxed', 'romantic', 'scenic'] },
+    { name: 'Bordeaux', type: 'town', characteristics: ['wine', 'architecture', 'food_scene', 'river', 'elegant'], description: 'Wine capital with beautiful 18th-century architecture and incredible gastronomy.', bestFor: ['wine_tasting', 'food_tour', 'cultural'], vibe: ['elegant', 'foodie', 'refined'] },
+    { name: 'Chamonix', type: 'town', characteristics: ['mountains', 'skiing', 'hiking', 'alps', 'adventure'], description: 'Alpine paradise at the foot of Mont Blanc. Skiing in winter, hiking in summer.', bestFor: ['skiing', 'hiking', 'adventure'], vibe: ['adventure', 'nature', 'active'] },
+  ],
+
+  // FIX 3.9: Add Australia areas
+  'australia': [
+    { name: 'Sydney', type: 'town', characteristics: ['harbor', 'beaches', 'opera_house', 'urban', 'iconic'], description: 'Iconic harbor city with Opera House, Bondi Beach, and vibrant food scene.', bestFor: ['beach', 'cultural', 'food_tour'], vibe: ['lively', 'urban', 'coastal'] },
+    { name: 'Melbourne', type: 'town', characteristics: ['coffee', 'art', 'food_scene', 'laneways', 'cultural'], description: 'Australia\'s cultural capital with best coffee, street art, and diverse dining.', bestFor: ['food_tour', 'cultural', 'shopping'], vibe: ['trendy', 'cultural', 'foodie'] },
+    { name: 'Great Barrier Reef', type: 'region', characteristics: ['reef', 'diving', 'snorkeling', 'marine_life', 'nature'], description: 'World\'s largest coral reef system. Best accessed from Cairns or Port Douglas.', bestFor: ['diving', 'snorkel', 'wildlife'], vibe: ['nature', 'adventure', 'bucket_list'] },
+    { name: 'Gold Coast', type: 'region', characteristics: ['beach', 'surf', 'theme_parks', 'nightlife', 'family'], description: 'Stunning surf beaches and theme parks. Great for families and surfers.', bestFor: ['beach', 'surf', 'family'], vibe: ['lively', 'fun', 'beach'] },
+    { name: 'Byron Bay', type: 'town', characteristics: ['hippie', 'beach', 'wellness', 'surf', 'bohemian'], description: 'Bohemian beach town with great surf, yoga retreats, and laid-back vibes.', bestFor: ['beach', 'surf', 'spa_wellness'], vibe: ['relaxed', 'bohemian', 'wellness'] },
+  ],
+
+  // FIX 3.10: Add Peru areas
+  'peru': [
+    { name: 'Cusco', type: 'town', characteristics: ['inca', 'historic', 'altitude', 'colonial', 'gateway'], description: 'Former Inca capital and gateway to Machu Picchu. Beautiful colonial architecture at altitude.', bestFor: ['cultural', 'hiking', 'photography'], vibe: ['historic', 'cultural', 'adventurous'] },
+    { name: 'Machu Picchu', type: 'region', characteristics: ['wonder', 'inca', 'hiking', 'spiritual', 'bucket_list'], description: 'Iconic Inca citadel in the clouds. Life-changing experience for most visitors.', bestFor: ['hiking', 'cultural', 'photography'], vibe: ['spiritual', 'epic', 'bucket_list'] },
+    { name: 'Lima', type: 'town', characteristics: ['food_scene', 'coastal', 'museums', 'ceviche', 'gastronomy'], description: 'South America\'s culinary capital with world-class restaurants and fresh ceviche.', bestFor: ['food_tour', 'cultural'], vibe: ['foodie', 'urban', 'coastal'] },
+    { name: 'Sacred Valley', type: 'region', characteristics: ['inca', 'markets', 'hiking', 'ruins', 'acclimatization'], description: 'Beautiful valley with Inca ruins and traditional markets. Good for altitude acclimatization.', bestFor: ['cultural', 'hiking', 'shopping'], vibe: ['authentic', 'scenic', 'spiritual'] },
+  ],
 };
 
 // Legacy fallback for backwards compatibility

@@ -399,6 +399,47 @@ export async function POST(request: NextRequest) {
       sustainabilityPreference?: 'standard' | 'eco_conscious' | 'eco_focused';
     };
 
+    // FIX 2.6: Input Validation
+    if (!areaIds || !Array.isArray(areaIds) || areaIds.length === 0) {
+      return NextResponse.json(
+        { error: 'areaIds must be a non-empty array' },
+        { status: 400 }
+      );
+    }
+
+    if (!destination || typeof destination !== 'string') {
+      return NextResponse.json(
+        { error: 'destination is required and must be a string' },
+        { status: 400 }
+      );
+    }
+
+    if (checkIn && checkOut) {
+      const startDate = new Date(checkIn);
+      const endDate = new Date(checkOut);
+
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        return NextResponse.json(
+          { error: 'Invalid date format. Use YYYY-MM-DD' },
+          { status: 400 }
+        );
+      }
+
+      if (endDate <= startDate) {
+        return NextResponse.json(
+          { error: 'checkOut must be after checkIn' },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (adults !== undefined && (typeof adults !== 'number' || adults < 1 || adults > 20)) {
+      return NextResponse.json(
+        { error: 'adults must be a number between 1 and 20' },
+        { status: 400 }
+      );
+    }
+
     const results: Record<string, HotelCandidate[]> = {};
 
     // Calculate party size and room needs
