@@ -1,18 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchPlaces, getExperiencesByCategory, getPhotoUrl, getPlaceDetails } from '@/lib/google-maps';
 import type { Experience, ExperienceCategory } from '@/types';
-
-// Calculate distance between two coordinates in km (Haversine formula)
-function getDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371; // Earth's radius in km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLng/2) * Math.sin(dLng/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
-}
+import { calculateHaversineDistance as getDistanceKm } from '@/lib/utils/geo';
 
 // Handle POST requests (some components might use POST)
 export async function POST(request: NextRequest) {
@@ -69,7 +58,10 @@ export async function POST(request: NextRequest) {
         lat: exp.latitude || exp.lat || 0,
         lng: exp.longitude || exp.lng || 0,
       }));
-      return NextResponse.json({ places: normalized });
+      const response = NextResponse.json({ places: normalized });
+      // Places data can be cached for 10 minutes
+      response.headers.set('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1200');
+      return response;
     }
 
     if (searchQuery && searchQuery !== searchDestination) {
@@ -129,7 +121,10 @@ export async function POST(request: NextRequest) {
             : undefined,
         };
       });
-      return NextResponse.json({ places: normalizedResults });
+      const searchResponse = NextResponse.json({ places: normalizedResults });
+      // Places search data can be cached for 10 minutes
+      searchResponse.headers.set('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1200');
+      return searchResponse;
     }
 
     // Default: get a mix of experiences
@@ -164,7 +159,9 @@ export async function POST(request: NextRequest) {
       lng: exp.longitude || exp.lng || 0,
     }));
 
-    return NextResponse.json({ places: normalized });
+    const mixResponse = NextResponse.json({ places: normalized });
+    mixResponse.headers.set('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1200');
+    return mixResponse;
   } catch (error) {
     console.error('Places API POST error:', error);
     return NextResponse.json({
@@ -179,8 +176,9 @@ export async function GET(request: NextRequest) {
 
   const destination = searchParams.get('destination');
   const category = searchParams.get('category') as ExperienceCategory | null;
-  const tripType = searchParams.get('tripType');
-  const budget = parseInt(searchParams.get('budget') || '500', 10);
+  // tripType and budget are available for future filtering
+  // const tripType = searchParams.get('tripType');
+  // const budget = parseInt(searchParams.get('budget') || '500', 10);
 
   if (!destination) {
     return NextResponse.json(
@@ -192,7 +190,9 @@ export async function GET(request: NextRequest) {
   try {
     if (category) {
       const experiences = await getExperiencesByCategory(destination, category);
-      return NextResponse.json(experiences);
+      const catResponse = NextResponse.json(experiences);
+      catResponse.headers.set('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1200');
+      return catResponse;
     }
 
     // Get a mix of experiences from different categories
@@ -222,7 +222,9 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => (b.rating || 0) - (a.rating || 0))
       .slice(0, 20);
 
-    return NextResponse.json(sortedExperiences);
+    const expResponse = NextResponse.json(sortedExperiences);
+    expResponse.headers.set('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1200');
+    return expResponse;
   } catch (error) {
     console.error('Places API error:', error);
 

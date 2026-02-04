@@ -1,11 +1,12 @@
 'use client';
 
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import { GoogleMap, useJsApiLoader, Marker, Polyline, InfoWindow } from '@react-google-maps/api';
 import { Loader2, Map, Calendar, Bookmark } from 'lucide-react';
 import clsx from 'clsx';
-import type { CollectionItem } from '@/stores/tripStoreV2';
+import type { CollectionItem } from '@/stores/tripStore';
+import { clientEnv } from '@/lib/env';
 
 interface RightMapPanelProps {
   selectedDayIndex: number;
@@ -42,13 +43,13 @@ export default function RightMapPanel({
   mapView,
   setMapView,
 }: RightMapPanelProps) {
-  const { trip, scheduledItems, collections } = useTripStoreV2();
+  const { trip, scheduledItems, collections } = useTripStore();
   const [activeMarker, setActiveMarker] = useState<string | null>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const boundsRef = useRef<string>(''); // Track bounds to prevent unnecessary updates
 
   const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: clientEnv.GOOGLE_MAPS_API_KEY,
     libraries: ['places'],
   });
 

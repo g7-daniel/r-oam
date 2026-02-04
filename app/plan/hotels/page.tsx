@@ -3,11 +3,11 @@
 import { useRouter } from 'next/navigation';
 import Step5HotelsV2 from '@/components/journey/Step5HotelsV2';
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 
 export default function HotelsPage() {
   const router = useRouter();
-  const { trip } = useTripStoreV2();
+  const { trip } = useTripStore();
   const { destinations } = trip;
 
   // Check if all hotels are selected

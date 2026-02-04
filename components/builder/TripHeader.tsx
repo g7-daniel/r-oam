@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useTripStore } from '@/stores/tripStore';
 import {
   Share2,
   Settings,
@@ -14,11 +14,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { format } from 'date-fns';
+import { formatDateRange } from '@/lib/date-utils';
 import clsx from 'clsx';
 
 export default function TripHeader() {
-  const { trip, setBasics, resetTrip } = useTripStoreV2();
+  const { trip, setBasics, resetTrip } = useTripStore();
   const { destinations, basics } = trip;
   const router = useRouter();
 
@@ -28,6 +28,17 @@ export default function TripHeader() {
   const [showSettings, setShowSettings] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Track timeout for cleanup
+  const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Generate trip name from destinations
   const defaultTripName = destinations.length > 0
@@ -49,21 +60,25 @@ export default function TripHeader() {
 
   // Format date range
   const dateRange = basics.startDate && basics.endDate
-    ? `${format(new Date(basics.startDate), 'MMM d')} - ${format(new Date(basics.endDate), 'MMM d, yyyy')}`
+    ? formatDateRange(basics.startDate, basics.endDate)
     : 'Dates not set';
 
   // Total nights
   const totalNights = destinations.reduce((sum, d) => sum + d.nights, 0);
 
-  const handleCopyLink = async () => {
+  const handleCopyLink = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
       setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
+      // Clear any existing timeout before setting a new one
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      copyTimeoutRef.current = setTimeout(() => setCopySuccess(false), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
     }
-  };
+  }, []);
 
   const handleExportPDF = () => {
     // In production, this would generate a PDF

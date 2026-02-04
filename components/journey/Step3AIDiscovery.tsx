@@ -1,26 +1,20 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import Card from '@/components/ui/Card';
 import RestaurantAvailability from '@/components/ui/RestaurantAvailability';
 import ExperienceCart from '@/components/ui/ExperienceCart';
-import { RedditUpvoteBadge } from '@/components/ui/RedditReviewCard';
 import {
   Send,
-  Sparkles,
-  MapPin,
   Clock,
-  MessageCircle,
   Check,
   ChevronRight,
   AlertCircle,
   Loader2,
   ArrowBigUp,
   X,
-  ExternalLink,
   Heart,
-  Star,
   Info,
   UtensilsCrossed,
   Plus,
@@ -968,7 +962,7 @@ export default function Step3AIDiscovery() {
     experienceCart,
     // Dining reservation
     addDiningReservation,
-  } = useTripStoreV2();
+  } = useTripStore();
 
   const { destinations, activeDestinationId, basics } = trip;
   const activeDestination = destinations.find((d) => d.destinationId === activeDestinationId);
@@ -983,6 +977,17 @@ export default function Step3AIDiscovery() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [activeGeoCluster, setActiveGeoCluster] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Track toast timeout for cleanup
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
   const welcomeSentRef = useRef<Set<string>>(new Set()); // Track which destinations got welcome message
 
   // Get geographic clusters for current recommendations
@@ -1023,9 +1028,14 @@ export default function Step3AIDiscovery() {
     return { all: all.length, experiences: experiences.length, dining: dining.length };
   }, [activeDestination?.discovery.recommendations, isInCart]);
 
+  // Track if we've already set the initial destination
+  const hasSetInitialDestination = useRef(false);
+
   // Set first destination as active when entering this step
   useEffect(() => {
+    if (hasSetInitialDestination.current) return;
     if (destinations.length > 0) {
+      hasSetInitialDestination.current = true;
       // Find first incomplete destination, or first destination if all complete
       const firstIncomplete = destinations.find((d) => !d.discovery.isComplete);
       const targetDestId = firstIncomplete?.destinationId || destinations[0].destinationId;
@@ -1033,7 +1043,7 @@ export default function Step3AIDiscovery() {
         setActiveDestination(targetDestId);
       }
     }
-  }, []); // Only run on mount
+  }, [destinations, activeDestinationId, setActiveDestination]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -1204,13 +1214,16 @@ export default function Step3AIDiscovery() {
   }, [activeDestination, completeDiscovery, getNextIncompleteDestination, setActiveDestination]);
 
   // Handle adding a recommendation to the cart
-  const handleAddToCart = (rec: Recommendation) => {
+  const handleAddToCart = useCallback((rec: Recommendation) => {
     if (!activeDestination) return;
     addToCart(activeDestination.destinationId, rec);
-    // Show toast notification
+    // Show toast notification with cleanup tracking
     setToastMessage(`Added "${rec.name}" to your trip!`);
-    setTimeout(() => setToastMessage(null), 3000);
-  };
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    toastTimeoutRef.current = setTimeout(() => setToastMessage(null), 3000);
+  }, [activeDestination, addToCart]);
 
   const handleComplete = () => {
     if (!activeDestination) return;

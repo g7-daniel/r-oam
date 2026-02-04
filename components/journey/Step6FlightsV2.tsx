@@ -1,19 +1,17 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import Card from '@/components/ui/Card';
 import {
   Plane,
   ChevronRight,
   Check,
   Clock,
-  DollarSign,
   AlertCircle,
   Loader2,
   ToggleLeft,
   ToggleRight,
-  X,
   Filter,
   SlidersHorizontal,
 } from 'lucide-react';
@@ -385,7 +383,7 @@ export default function Step6FlightsV2() {
     unskipFlightLeg,
     canProceedFromFlights,
     buildFlightLegs,
-  } = useTripStoreV2();
+  } = useTripStore();
 
   const { flights, destinations, basics } = trip;
   const [activeLegId, setActiveLegId] = useState<string | null>(null);

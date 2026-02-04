@@ -3,6 +3,17 @@
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import clsx from 'clsx';
+import {
+  toDateString,
+  toDate,
+  formatDate,
+  getNights,
+  isBefore,
+  getToday,
+  addDays,
+  MONTH_NAMES,
+  DAY_NAMES_SHORT,
+} from '@/lib/date-utils';
 
 interface DateRangePickerProps {
   startDate: string | null;
@@ -11,33 +22,18 @@ interface DateRangePickerProps {
   minDate?: string;
 }
 
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-];
-
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-// Format date as YYYY-MM-DD without timezone conversion
-function formatDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 export default function DateRangePicker({
   startDate,
   endDate,
   onChange,
   minDate,
 }: DateRangePickerProps) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getToday();
 
   const [currentMonth, setCurrentMonth] = useState(() => {
-    if (startDate) {
-      return new Date(startDate);
+    const start = toDate(startDate);
+    if (start) {
+      return new Date(start.getFullYear(), start.getMonth(), 1);
     }
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
@@ -87,13 +83,14 @@ export default function DateRangePicker({
   };
 
   const handleDateClick = (date: Date) => {
-    const dateStr = formatDateString(date);
+    const dateStr = toDateString(date);
+    if (!dateStr) return;
 
     // Check if date is before minimum
     if (minDate && dateStr < minDate) return;
 
     // Check if date is in the past
-    if (date < today) return;
+    if (isBefore(date, today)) return;
 
     if (!selectingEnd || !startDate) {
       // Selecting start date
@@ -114,129 +111,133 @@ export default function DateRangePicker({
 
   const isDateInRange = (date: Date) => {
     if (!startDate || !endDate) return false;
-    const dateStr = formatDateString(date);
-    return dateStr > startDate && dateStr < endDate;
+    const dateStr = toDateString(date);
+    return dateStr !== null && dateStr > startDate && dateStr < endDate;
   };
 
   const isStartDate = (date: Date) => {
     if (!startDate) return false;
-    return formatDateString(date) === startDate;
+    return toDateString(date) === startDate;
   };
 
   const isEndDate = (date: Date) => {
     if (!endDate) return false;
-    return formatDateString(date) === endDate;
+    return toDateString(date) === endDate;
   };
 
   const isDisabled = (date: Date) => {
-    if (date < today) return true;
-    if (minDate && formatDateString(date) < minDate) return true;
+    if (isBefore(date, today)) return true;
+    const dateStr = toDateString(date);
+    if (minDate && dateStr && dateStr < minDate) return true;
     return false;
   };
 
   const formatDisplayDate = (dateStr: string | null) => {
     if (!dateStr) return '';
-    // Parse YYYY-MM-DD without timezone conversion
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    });
+    return formatDate(dateStr, 'medium');
   };
 
-  const getTripDuration = () => {
-    if (!startDate || !endDate) return null;
-    // Parse YYYY-MM-DD without timezone conversion
-    const [sy, sm, sd] = startDate.split('-').map(Number);
-    const [ey, em, ed] = endDate.split('-').map(Number);
-    const start = new Date(sy, sm - 1, sd);
-    const end = new Date(ey, em - 1, ed);
-    const nights = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    return nights;
-  };
-
-  const nights = getTripDuration();
+  const nights = startDate && endDate ? getNights(startDate, endDate) : null;
 
   return (
     <div className="relative">
       {/* Trigger */}
-      <div
+      <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-4 p-4 bg-white border border-slate-200 rounded-xl cursor-pointer hover:border-primary-300 transition-colors"
+        className="flex items-center gap-4 p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl cursor-pointer hover:border-orange-300 dark:hover:border-orange-500 transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 w-full text-left"
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label={startDate && endDate ? `Selected dates: ${formatDisplayDate(startDate)} to ${formatDisplayDate(endDate)}. Click to change` : 'Select travel dates'}
       >
         <div className="flex-1">
-          <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
-            <Calendar className="w-4 h-4" />
+          <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-1">
+            <Calendar className="w-4 h-4" aria-hidden="true" />
             <span>Start Date</span>
           </div>
           <p className={clsx(
             'font-medium',
-            startDate ? 'text-slate-900' : 'text-slate-400'
+            startDate ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-slate-500'
           )}>
             {startDate ? formatDisplayDate(startDate) : 'Select date'}
           </p>
         </div>
 
-        <div className="h-12 w-px bg-slate-200" />
+        <div className="h-12 w-px bg-slate-200 dark:bg-slate-600" aria-hidden="true" />
 
         <div className="flex-1">
-          <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
-            <Calendar className="w-4 h-4" />
+          <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-1">
+            <Calendar className="w-4 h-4" aria-hidden="true" />
             <span>End Date</span>
           </div>
           <p className={clsx(
             'font-medium',
-            endDate ? 'text-slate-900' : 'text-slate-400'
+            endDate ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-slate-500'
           )}>
             {endDate ? formatDisplayDate(endDate) : 'Select date'}
           </p>
         </div>
 
-        {nights !== null && (
+        {nights !== null && nights > 0 && (
           <>
-            <div className="h-12 w-px bg-slate-200" />
-            <div className="px-4 py-2 bg-primary-50 rounded-lg">
-              <p className="text-2xl font-bold text-primary-600">{nights}</p>
-              <p className="text-xs text-primary-500">nights</p>
+            <div className="h-12 w-px bg-slate-200 dark:bg-slate-600" aria-hidden="true" />
+            <div className="px-4 py-2 bg-orange-50 dark:bg-orange-900/30 rounded-lg">
+              <p className="text-2xl font-bold text-orange-600 dark:text-orange-400" aria-hidden="true">{nights}</p>
+              <p className="text-xs text-orange-500 dark:text-orange-400" aria-hidden="true">nights</p>
+              <span className="sr-only">{nights} nights selected</span>
             </div>
           </>
         )}
-      </div>
+
+        {/* Show hint when dates not selected */}
+        {!startDate && !endDate && (
+          <div className="hidden sm:flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500">
+            <span>Click to select</span>
+          </div>
+        )}
+      </button>
 
       {/* Calendar Dropdown - centered modal for better visibility */}
       {isOpen && (
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 z-40 bg-black/20"
+            className="fixed inset-0 z-40 bg-black/20 dark:bg-black/40"
             onClick={() => setIsOpen(false)}
           />
 
           {/* Calendar - centered modal */}
-          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-white rounded-xl shadow-xl border border-slate-200 p-4 z-50 max-h-[80vh] overflow-y-auto">
+          <div
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-4 z-50 max-h-[80vh] overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select travel dates"
+          >
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
               <button
+                type="button"
                 onClick={handlePrevMonth}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500"
+                aria-label="Previous month"
               >
-                <ChevronLeft className="w-5 h-5 text-slate-600" />
+                <ChevronLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" aria-hidden="true" />
               </button>
-              <h3 className="font-semibold text-slate-900">
+              <h3 className="font-semibold text-slate-900 dark:text-white" aria-live="polite">
                 {MONTH_NAMES[currentMonth.getMonth()]} {currentMonth.getFullYear()}
               </h3>
               <button
+                type="button"
                 onClick={handleNextMonth}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500"
+                aria-label="Next month"
               >
-                <ChevronRight className="w-5 h-5 text-slate-600" />
+                <ChevronRight className="w-5 h-5 text-slate-600 dark:text-slate-400" aria-hidden="true" />
               </button>
             </div>
 
-            {/* Instruction */}
-            <p className="text-sm text-center text-slate-500 mb-4">
+            {/* Instruction with validation hint */}
+            <p className="text-sm text-center text-slate-500 dark:text-slate-400 mb-4">
               {!startDate
                 ? 'Select your start date'
                 : selectingEnd
@@ -245,11 +246,12 @@ export default function DateRangePicker({
             </p>
 
             {/* Day names */}
-            <div className="grid grid-cols-7 gap-1 mb-2">
-              {DAY_NAMES.map((day) => (
+            <div className="grid grid-cols-7 gap-1 mb-2" role="row" aria-hidden="true">
+              {DAY_NAMES_SHORT.map((day) => (
                 <div
                   key={day}
-                  className="h-8 flex items-center justify-center text-xs font-medium text-slate-500"
+                  className="h-8 flex items-center justify-center text-xs font-medium text-slate-500 dark:text-slate-400"
+                  aria-label={day}
                 >
                   {day}
                 </div>
@@ -257,26 +259,31 @@ export default function DateRangePicker({
             </div>
 
             {/* Calendar grid */}
-            <div className="grid grid-cols-7 gap-1">
+            <div className="grid grid-cols-7 gap-1" role="grid" aria-label="Calendar days">
               {calendarDays.map(({ date, isCurrentMonth }, idx) => {
                 const isStart = isStartDate(date);
                 const isEnd = isEndDate(date);
                 const isInRange = isDateInRange(date);
                 const disabled = isDisabled(date);
+                const dateLabel = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
                 return (
                   <button
                     key={idx}
+                    type="button"
                     onClick={() => !disabled && handleDateClick(date)}
                     disabled={disabled}
+                    role="gridcell"
+                    aria-selected={isStart || isEnd}
+                    aria-label={`${dateLabel}${isStart ? ', start date' : ''}${isEnd ? ', end date' : ''}${disabled ? ', unavailable' : ''}`}
                     className={clsx(
-                      'h-10 flex items-center justify-center text-sm rounded-lg transition-all relative',
-                      !isCurrentMonth && 'text-slate-300',
-                      isCurrentMonth && !disabled && 'text-slate-700 hover:bg-slate-100',
-                      disabled && 'text-slate-300 cursor-not-allowed',
-                      isStart && 'bg-primary-500 text-white hover:bg-primary-600 rounded-r-none',
-                      isEnd && 'bg-primary-500 text-white hover:bg-primary-600 rounded-l-none',
-                      isInRange && 'bg-primary-100 rounded-none',
+                      'h-11 flex items-center justify-center text-sm rounded-lg transition-all relative focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-inset',
+                      !isCurrentMonth && 'text-slate-300 dark:text-slate-600',
+                      isCurrentMonth && !disabled && 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700',
+                      disabled && 'text-slate-300 dark:text-slate-600 cursor-not-allowed',
+                      isStart && 'bg-orange-500 text-white hover:bg-orange-600 rounded-r-none',
+                      isEnd && 'bg-orange-500 text-white hover:bg-orange-600 rounded-l-none',
+                      isInRange && 'bg-orange-100 dark:bg-orange-900/30 rounded-none',
                       (isStart && isEnd) && 'rounded-lg',
                     )}
                   >
@@ -287,8 +294,8 @@ export default function DateRangePicker({
             </div>
 
             {/* Quick select */}
-            <div className="mt-4 pt-4 border-t border-slate-100">
-              <p className="text-xs text-slate-500 mb-2">Quick select:</p>
+            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Quick select:</p>
               <div className="flex flex-wrap gap-2">
                 {[
                   { label: '1 Week', days: 7 },
@@ -298,22 +305,26 @@ export default function DateRangePicker({
                 ].map(({ label, days }) => (
                   <button
                     key={label}
+                    type="button"
                     onClick={() => {
-                      const start = startDate ? new Date(startDate) : new Date();
-                      start.setHours(0, 0, 0, 0);
-                      if (start < today) start.setTime(today.getTime());
+                      let start = toDate(startDate) || new Date();
+                      if (isBefore(start, today)) {
+                        start = today;
+                      }
 
-                      const end = new Date(start);
-                      end.setDate(end.getDate() + days);
+                      const end = addDays(start, days);
+                      if (!end) return;
 
-                      onChange(
-                        formatDateString(start),
-                        formatDateString(end)
-                      );
+                      const startStr = toDateString(start);
+                      const endStr = toDateString(end);
+                      if (!startStr || !endStr) return;
+
+                      onChange(startStr, endStr);
                       setSelectingEnd(false);
                       setIsOpen(false);
                     }}
-                    className="px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 rounded-full text-slate-600 transition-colors"
+                    className="px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full text-slate-600 dark:text-slate-300 transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    aria-label={`Select ${label} trip duration`}
                   >
                     {label}
                   </button>
@@ -324,11 +335,13 @@ export default function DateRangePicker({
             {/* Clear button */}
             {(startDate || endDate) && (
               <button
+                type="button"
                 onClick={() => {
                   onChange(null, null);
                   setSelectingEnd(false);
                 }}
-                className="mt-3 w-full py-2 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+                className="mt-3 w-full py-2 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 rounded-lg"
+                aria-label="Clear selected dates"
               >
                 Clear dates
               </button>

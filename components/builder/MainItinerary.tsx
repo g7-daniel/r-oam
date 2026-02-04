@@ -1,10 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import CitySection from './CitySection';
 import DayContainer from './DayContainer';
-import { addDays } from 'date-fns';
+import { addDays, toDate } from '@/lib/date-utils';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface MainItineraryProps {
@@ -16,9 +16,11 @@ interface MainItineraryProps {
 export default function MainItinerary({
   selectedDayIndex,
   setSelectedDayIndex,
-  totalDays,
+  totalDays: _totalDays,
 }: MainItineraryProps) {
-  const { trip, scheduledItems } = useTripStoreV2();
+  // totalDays is available for pagination/display purposes
+  void _totalDays;
+  const { trip, scheduledItems } = useTripStore();
   const { destinations, basics } = trip;
 
   const [expandedDays, setExpandedDays] = useState<Set<number>>(() => {
@@ -84,7 +86,7 @@ export default function MainItinerary({
     }[] = [];
 
     let currentDayIndex = 0;
-    const startDate = basics.startDate ? new Date(basics.startDate) : null;
+    const startDate = toDate(basics.startDate);
 
     destinations.forEach((dest, destIndex) => {
       const cityIcons: Record<string, string> = {

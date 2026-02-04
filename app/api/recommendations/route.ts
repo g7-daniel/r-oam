@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { searchReddit, analyzeSentiment } from '@/lib/reddit';
+import { searchReddit } from '@/lib/reddit';
 import { searchPlaces, getPhotoUrl, getPlaceDetails } from '@/lib/google-maps';
 import { getSubredditsForDestination, getSearchTermsForCategory } from '@/lib/data/subredditMapping';
 import OpenAI from 'openai';

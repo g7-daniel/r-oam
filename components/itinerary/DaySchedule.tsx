@@ -5,6 +5,7 @@ import type { ItineraryDay, ItineraryItem } from '@/types';
 import ItinerarySlot from './ItinerarySlot';
 import { Calendar, Sun, Sunset, Moon, Plane, ChevronDown, ChevronUp } from 'lucide-react';
 import clsx from 'clsx';
+import { formatDate as formatDateUtil } from '@/lib/date-utils';
 
 interface DayScheduleProps {
   day: ItineraryDay;
@@ -25,12 +26,7 @@ export default function DaySchedule({
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric',
-    });
+    return formatDateUtil(dateString, 'long');
   };
 
   const getTimeOfDayIcon = () => {

@@ -312,7 +312,12 @@ export function groupAirportsByCity(airports: AirportData[]): Map<string, Airpor
   return grouped;
 }
 
-// Get airport by IATA code
+// Pre-built Map for O(1) IATA code lookups (initialized once at module load)
+const AIRPORTS_BY_IATA = new Map<string, AirportData>(
+  AIRPORTS.map(airport => [airport.iata.toUpperCase(), airport])
+);
+
+// Get airport by IATA code - O(1) lookup
 export function getAirportByIata(iata: string): AirportData | undefined {
-  return AIRPORTS.find((a) => a.iata.toUpperCase() === iata.toUpperCase());
+  return AIRPORTS_BY_IATA.get(iata.toUpperCase());
 }

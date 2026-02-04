@@ -4,6 +4,7 @@ import { useCallback, useState, useMemo } from 'react';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Polyline } from '@react-google-maps/api';
 import type { Experience } from '@/types';
 import { Loader2 } from 'lucide-react';
+import { clientEnv } from '@/lib/env';
 
 interface TripMapProps {
   experiences: Experience[];
@@ -67,7 +68,7 @@ export default function TripMap({
   const [activeMarker, setActiveMarker] = useState<string | null>(null);
 
   const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: clientEnv.GOOGLE_MAPS_API_KEY,
     libraries: ['places'],
   });
 

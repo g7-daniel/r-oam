@@ -120,6 +120,19 @@ const config: Config = {
         'gradient-sunset': 'linear-gradient(135deg, #FF4500 0%, #ff7a3d 50%, #ffc9aa 100%)',
         'gradient-ocean': 'linear-gradient(180deg, #0079D3 0%, #005299 100%)',
       },
+      // Semantic z-index scale to prevent stacking conflicts
+      // Use these instead of arbitrary z-values for consistency
+      zIndex: {
+        'base': '0',
+        'dropdown': '10',     // Dropdowns, autocomplete lists
+        'sticky': '20',       // Sticky headers within sections
+        'fixed': '30',        // Fixed navigation, footers
+        'drawer': '40',       // Side drawers, panels
+        'modal': '50',        // Modal dialogs
+        'overlay': '60',      // Overlays above modals (nested modals)
+        'popover': '70',      // Popovers, tooltips above modals
+        'toast': '100',       // Toast notifications (always on top)
+      },
       animation: {
         'shimmer': 'shimmer 2s infinite linear',
         'fade-in': 'fadeIn 0.3s ease-in-out',

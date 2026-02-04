@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { matchAndPriceHotel } from '@/lib/booking-com';
 import { getHotelListByGeocode, getHotelPricesByIds } from '@/lib/amadeus';
 import { calculateLevenshteinSimilarity, normalizeHotelName } from '@/lib/utils/string';
+import { calculateHaversineDistance } from '@/lib/utils/geo';
 
 const MATCH_DISTANCE_METERS = 10000;
 const MATCH_NAME_SIMILARITY = 0.5;
@@ -57,12 +58,9 @@ function estimatePriceByHotelName(name: string): number {
   return 160 + Math.floor(Math.random() * 90);
 }
 
+// Distance in meters using centralized Haversine utility
 function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return calculateHaversineDistance(lat1, lng1, lat2, lng2) * 1000; // Convert km to meters
 }
 
 export async function GET(request: NextRequest) {
@@ -296,48 +294,75 @@ export async function POST(request: NextRequest) {
     source: string;
   }> = {};
 
-  // Process in batches of 5 to avoid rate limits
+  // Step 1: Batch fetch all cached prices (single DB query instead of N queries)
+  const cachedPrices = await prisma.priceCache.findMany({
+    where: {
+      placeId: { in: placeIds },
+      checkIn,
+      checkOut,
+      adults,
+      expiresAt: { gt: new Date() },
+    },
+  });
+
+  // Create lookup map for cached prices
+  const cachedPricesMap = new Map(cachedPrices.map(c => [c.placeId, c]));
+  const uncachedPlaceIds: string[] = [];
+
+  for (const placeId of placeIds) {
+    const cached = cachedPricesMap.get(placeId);
+    if (cached) {
+      results[placeId] = {
+        pricePerNight: cached.pricePerNight,
+        totalPrice: cached.totalPrice,
+        currency: cached.currency,
+        hasAvailability: cached.hasAvailability,
+        isEstimate: !cached.hasAvailability,
+        source: 'cache',
+      };
+    } else {
+      uncachedPlaceIds.push(placeId);
+    }
+  }
+
+  console.log(`Cache hit: ${placeIds.length - uncachedPlaceIds.length}, need to fetch: ${uncachedPlaceIds.length}`);
+
+  if (uncachedPlaceIds.length === 0) {
+    return NextResponse.json({ pricing: results });
+  }
+
+  // Step 2: Batch fetch all hotels for uncached prices (single DB query)
+  const hotels = await prisma.hotel.findMany({
+    where: { placeId: { in: uncachedPlaceIds } },
+  });
+
+  const hotelMap = new Map(hotels.map(h => [h.placeId, h]));
+
+  // Mark hotels that weren't found
+  for (const placeId of uncachedPlaceIds) {
+    if (!hotelMap.has(placeId)) {
+      results[placeId] = {
+        pricePerNight: null,
+        totalPrice: null,
+        currency: null,
+        hasAvailability: false,
+        isEstimate: true,
+        source: 'not_found',
+      };
+    }
+  }
+
+  // Step 3: Process external API calls in batches (still need to rate limit external APIs)
+  const hotelsToPrice = hotels.filter(h => !results[h.placeId]);
   const BATCH_SIZE = 5;
 
-  for (let i = 0; i < placeIds.length; i += BATCH_SIZE) {
-    const batch = placeIds.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < hotelsToPrice.length; i += BATCH_SIZE) {
+    const batch = hotelsToPrice.slice(i, i + BATCH_SIZE);
 
     await Promise.all(
-      batch.map(async (placeId: string) => {
+      batch.map(async (hotel) => {
+        const placeId = hotel.placeId;
         try {
-          // Check cache first
-          const cached = await prisma.priceCache.findUnique({
-            where: {
-              placeId_checkIn_checkOut_adults: { placeId, checkIn, checkOut, adults },
-            },
-          });
-
-          if (cached && cached.expiresAt > new Date()) {
-            results[placeId] = {
-              pricePerNight: cached.pricePerNight,
-              totalPrice: cached.totalPrice,
-              currency: cached.currency,
-              hasAvailability: cached.hasAvailability,
-              isEstimate: !cached.hasAvailability,
-              source: 'cache',
-            };
-            return;
-          }
-
-          // Get hotel
-          const hotel = await prisma.hotel.findUnique({ where: { placeId } });
-          if (!hotel) {
-            results[placeId] = {
-              pricePerNight: null,
-              totalPrice: null,
-              currency: null,
-              hasAvailability: false,
-              isEstimate: true,
-              source: 'not_found',
-            };
-            return;
-          }
-
           // Try Booking.com
           const bookingResult = await matchAndPriceHotel(
             hotel.name,

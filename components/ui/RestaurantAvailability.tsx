@@ -2,14 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import {
-  Clock,
   Users,
   Check,
   Loader2,
   ExternalLink,
   Phone,
   Calendar,
-  MapPin,
   AlertCircle,
   Sparkles,
 } from 'lucide-react';
@@ -71,19 +69,22 @@ const SEATING_LABELS: Record<string, string> = {
 
 export default function RestaurantAvailability({
   restaurantName,
-  destinationName,
+  destinationName: _destinationName,
   date,
   defaultPartySize,
   onBook,
   onAgentBook,
   onUserBook,
 }: RestaurantAvailabilityProps) {
-  const [partySize, setPartySize] = useState(defaultPartySize);
+  // destinationName is available for future use (e.g., location-based search)
+  void _destinationName;
+  const [partySize] = useState(defaultPartySize);
   const [additionalGuests, setAdditionalGuests] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
-  const [bookingStatus, setBookingStatus] = useState<'idle' | 'checking' | 'available' | 'unavailable' | 'booked'>('idle');
+  // bookingStatus will be used when actual booking API is integrated
+  const [, setBookingStatus] = useState<'idle' | 'checking' | 'available' | 'unavailable' | 'booked'>('idle');
   const [preferredTime, setPreferredTime] = useState('19:00');
 
   const totalPartySize = partySize + additionalGuests;

@@ -3,6 +3,7 @@
  */
 
 import type { Experience, Hotel } from '@/types';
+import { calculateHaversineDistance as geoDistance } from '@/lib/utils/geo';
 
 interface Coordinates {
   lat: number;
@@ -32,28 +33,13 @@ export function calculateExperienceCentroid(experiences: Experience[]): Coordina
 
 /**
  * Calculate Haversine distance between two coordinates in kilometers
+ * Wrapper around the centralized geo utility for coordinate-object API
  */
 export function calculateHaversineDistance(
   coord1: Coordinates,
   coord2: Coordinates
 ): number {
-  const R = 6371; // Earth's radius in kilometers
-  const dLat = toRadians(coord2.lat - coord1.lat);
-  const dLng = toRadians(coord2.lng - coord1.lng);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRadians(coord1.lat)) *
-      Math.cos(toRadians(coord2.lat)) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function toRadians(degrees: number): number {
-  return degrees * (Math.PI / 180);
+  return geoDistance(coord1.lat, coord1.lng, coord2.lat, coord2.lng);
 }
 
 /**

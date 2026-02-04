@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import { Droppable, Draggable } from '@hello-pangea/dnd';
 import {
   MapPin,
@@ -16,11 +16,12 @@ import {
   ArrowUp,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { handleImageError, getPlaceholderImage } from '@/lib/utils';
 
 type CollectionType = 'experiences' | 'restaurants' | string;
 
 export default function CollectionsPanel() {
-  const { trip, collections, removeFromCollection, customLists, createCustomList, deleteCustomList } = useTripStoreV2();
+  const { trip, collections, removeFromCollection, customLists, createCustomList } = useTripStore();
   const [activeCollection, setActiveCollection] = useState<CollectionType>('experiences');
   const [showNewListInput, setShowNewListInput] = useState(false);
   const [newListName, setNewListName] = useState('');
@@ -223,23 +224,14 @@ export default function CollectionsPanel() {
                           <GripVertical className="w-4 h-4" />
                         </div>
 
-                        {/* Image with fallback initial */}
-                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900/50 dark:to-primary-800/50 relative">
-                          {/* Fallback initial - always rendered behind */}
-                          <span className="absolute inset-0 flex items-center justify-center text-primary-400 dark:text-primary-300 font-bold text-sm sm:text-base z-0">
-                            {item.name?.charAt(0)?.toUpperCase() || '?'}
-                          </span>
-                          {/* Image on top - hides on error to reveal initial */}
-                          {item.imageUrl && item.imageUrl.length > 0 && (
-                            <img
-                              src={item.imageUrl}
-                              alt={item.name}
-                              className="absolute inset-0 w-full h-full object-cover z-10"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
-                            />
-                          )}
+                        {/* Image with fallback placeholder */}
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900/50 dark:to-primary-800/50">
+                          <img
+                            src={item.imageUrl || getPlaceholderImage('generic')}
+                            alt={item.name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => handleImageError(e, 'generic')}
+                          />
                         </div>
 
                         {/* Content */}

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
-import type { CollectionItem } from '@/stores/tripStoreV2';
+import dynamic from 'next/dynamic';
+import { useTripStore } from '@/stores/tripStore';
+import type { CollectionItem } from '@/stores/tripStore';
 import {
   Search,
   X,
@@ -14,9 +15,24 @@ import {
   Clock,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { handleImageError, getPlaceholderImage } from '@/lib/utils';
 import { getSubredditsForDestination, isGlobalSubreddit, getGlobalSubredditColor } from '@/lib/data/subredditMapping';
 import { getCategoriesForDestination } from '@/lib/data/categories';
-import PlaceDetailModal from './PlaceDetailModal';
+
+// Dynamic import for PlaceDetailModal - reduces initial bundle size
+const PlaceDetailModal = dynamic(
+  () => import('./PlaceDetailModal'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-8">
+          <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+        </div>
+      </div>
+    ),
+  }
+);
 
 interface AddPlaceSearchProps {
   dayIndex: number;
@@ -51,7 +67,7 @@ export default function AddPlaceSearch({
   destinationId,
   onClose,
 }: AddPlaceSearchProps) {
-  const { trip, scheduleItem, addToCollection } = useTripStoreV2();
+  const { trip, scheduleItem, addToCollection } = useTripStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [places, setPlaces] = useState<PlaceResult[]>([]);
@@ -407,18 +423,13 @@ export default function AddPlaceSearch({
                     : "bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 hover:border-slate-200 dark:hover:border-slate-600 hover:shadow-md"
                 )}
               >
-                {/* Image with Unsplash fallback */}
+                {/* Image with placeholder fallback */}
                 <div className="w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 bg-slate-100 dark:bg-slate-700">
                   <img
-                    src={place.imageUrl || `https://source.unsplash.com/100x100/?${encodeURIComponent(place.category || 'travel')}`}
+                    src={place.imageUrl || getPlaceholderImage('generic')}
                     alt={place.name}
                     className="w-full h-full object-cover"
-                    onError={(e) => {
-                      const img = e.target as HTMLImageElement;
-                      if (!img.src.includes('unsplash.com')) {
-                        img.src = `https://source.unsplash.com/100x100/?${encodeURIComponent(place.name || 'restaurant')}`;
-                      }
-                    }}
+                    onError={(e) => handleImageError(e, 'generic')}
                   />
                 </div>
 

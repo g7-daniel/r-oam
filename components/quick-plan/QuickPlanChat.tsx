@@ -1,16 +1,21 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { AnimatePresence } from 'framer-motion';
 import ChatTranscript, { EmptyTranscript, PhaseDivider } from './chat/ChatTranscript';
-import ChatMessage from './chat/ChatMessage';
 import ReplyCard from './chat/ReplyCard';
 import SnooAgent from './chat/SnooAgent';
-import DebugDrawer, { DebugButton } from './chat/DebugDrawer';
+import { DebugButton } from './chat/DebugDrawer';
 import {
-  QuickPlanOrchestrator,
   createOrchestrator,
 } from '@/lib/quick-plan/orchestrator';
+
+// Dynamic import for DebugDrawer - only loaded when debug panel is opened
+const DebugDrawer = dynamic(
+  () => import('./chat/DebugDrawer').then(mod => ({ default: mod.default })),
+  { ssr: false }
+);
 import type {
   ChatMessage as ChatMessageType,
   QuestionConfig,
@@ -22,8 +27,11 @@ import type {
 } from '@/types/quick-plan';
 import { finalizeQuickPlanTrip } from '@/lib/quick-plan/trip-transformer';
 import { useToast } from '@/components/ui/Toast';
+import { parseAPIErrorResponse, getUserFriendlyMessage } from '@/lib/errors';
+import { dedupedPost } from '@/lib/request-dedup';
 import { RotateCcw, Send, MessageCircle, ArrowLeft, SkipForward } from 'lucide-react';
 import { ProgressIndicatorCompact } from './ProgressIndicator';
+import { LoadingCard } from './LoadingMessage';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -56,25 +64,35 @@ export default function QuickPlanChat() {
   const [isProcessing, setIsProcessing] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
+  // Track timeouts for cleanup
+  const startOverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (startOverTimeoutRef.current) {
+        clearTimeout(startOverTimeoutRef.current);
+      }
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Free text input state
   const [freeTextInput, setFreeTextInput] = useState('');
   const [showFreeTextInput, setShowFreeTextInput] = useState(false);
 
+  // Loading state - tracks what's currently being loaded for better UX
+  type LoadingType = 'hotel' | 'restaurant' | 'experience' | 'area' | 'itinerary' | null;
+  const [currentLoadingType, setCurrentLoadingType] = useState<LoadingType>(null);
+
   // ============================================================================
   // INITIALIZATION
   // ============================================================================
 
-  useEffect(() => {
-    // Prevent double initialization in React 18 Strict Mode
-    if (hasInitialized.current) return;
-    hasInitialized.current = true;
-
-    // Start the conversation
-    startConversation();
-  }, []);
-
-  const startConversation = async () => {
+  const startConversation = useCallback(async () => {
     setSnooState('typing');
     setIsTyping(true);
 
@@ -94,7 +112,16 @@ export default function QuickPlanChat() {
 
     setIsTyping(false);
     setSnooState('idle');
-  };
+  }, [orchestrator]);
+
+  useEffect(() => {
+    // Prevent double initialization in React 18 Strict Mode
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
+
+    // Start the conversation
+    startConversation();
+  }, [startConversation]);
 
   // ============================================================================
   // START OVER FUNCTIONALITY
@@ -124,12 +151,15 @@ export default function QuickPlanChat() {
     // Reset the initialization flag to allow restart
     hasInitialized.current = false;
 
-    // Start fresh conversation
-    setTimeout(() => {
+    // Start fresh conversation with cleanup tracking
+    if (startOverTimeoutRef.current) {
+      clearTimeout(startOverTimeoutRef.current);
+    }
+    startOverTimeoutRef.current = setTimeout(() => {
       hasInitialized.current = true;
       startConversation();
     }, 100);
-  }, [orchestrator]);
+  }, [orchestrator, startConversation]);
 
   // ============================================================================
   // FREE TEXT INPUT - Allow users to ask questions or provide context
@@ -177,11 +207,20 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         orchestrator.addSnooMessage(snooResponse, 'idle');
         setMessages([...orchestrator.getMessages()]);
       } else {
+        // Parse error response for better messaging
+        const errorMessage = await parseAPIErrorResponse(response);
+        console.error('[FreeText] API error:', response.status, errorMessage);
+
+        // Provide a graceful fallback message
         orchestrator.addSnooMessage("Thanks for sharing! I'll factor that into your trip planning.", 'idle');
         setMessages([...orchestrator.getMessages()]);
       }
     } catch (error) {
       console.error('[FreeText] Error processing message:', error);
+      const friendlyMessage = getUserFriendlyMessage(error);
+      console.error('[FreeText] User-friendly message:', friendlyMessage);
+
+      // Graceful fallback - don't show error to user, just continue
       orchestrator.addSnooMessage("Thanks for the input! Let's continue planning your trip.", 'idle');
       setMessages([...orchestrator.getMessages()]);
     }
@@ -217,16 +256,37 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     }
   }, [orchestrator]);
 
-  // FIX 4.3: Skip functionality
+  // FIX 4.3: Skip functionality - properly advance to next question
   const handleSkip = useCallback(async () => {
     if (!currentQuestion) return;
+
+    setIsProcessing(true);
+    setSnooState('thinking');
+
+    // Add user message to show the skip action in the chat transcript
+    orchestrator.addUserMessage('(Skipped)');
+    setMessages([...orchestrator.getMessages()]);
+
+    // Mark the current question as skipped
     orchestrator.processUserResponse(currentQuestion.id, 'SKIP');
-    const question = await orchestrator.selectNextQuestion();
-    if (question) {
-      setCurrentQuestion(question);
-      orchestrator.state.currentQuestion = question;
-    }
+    setCurrentQuestion(null);
+
     console.log('[QuickPlanChat] Skipped question:', currentQuestion.field);
+
+    // Get the next question
+    const nextQuestion = await orchestrator.selectNextQuestion();
+
+    if (nextQuestion) {
+      // Add Snoo's message for the next question
+      orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
+      setMessages([...orchestrator.getMessages()]);
+      setCurrentQuestion(nextQuestion);
+      orchestrator.state.currentQuestion = nextQuestion;
+    }
+
+    setIsProcessing(false);
+    setSnooState('idle');
+    setDebugLog([...orchestrator.getDebugLog()]);
   }, [orchestrator, currentQuestion]);
 
   // Check if we can go back (have question history)
@@ -495,10 +555,26 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       const cuisineTypes = cuisinePrefs.map(c => c.id);
       console.log('[QuickPlanChat] Cuisine preferences answered:', cuisineTypes);
 
-      // Fetch restaurants for all cuisine types
-      await fetchRestaurantsByCuisine(cuisineTypes);
+      // PARALLELIZED: Fetch restaurants AND experiences concurrently to reduce loading time
+      // Get activity types for parallel fetch
+      const state = orchestrator.getState();
+      const selectedActivities = state.preferences.selectedActivities || [];
+      const activityTypes = selectedActivities.map(a => a.type);
 
-      // After restaurants are fetched, get the next question (restaurant selection)
+      console.log('[QuickPlanChat] Fetching restaurants and experiences in parallel');
+
+      // Execute both fetches in parallel
+      const fetchPromises: Promise<void>[] = [
+        fetchRestaurantsByCuisine(cuisineTypes),
+      ];
+      if (activityTypes.length > 0) {
+        fetchPromises.push(fetchExperiencesByType(activityTypes));
+      }
+
+      await Promise.all(fetchPromises);
+      console.log('[QuickPlanChat] Parallel fetch complete');
+
+      // After fetches complete, get the next question (restaurant selection)
       const restaurantQuestion = await orchestrator.selectNextQuestion();
       console.log('[Restaurants] After fetch, selectNextQuestion returned:', restaurantQuestion ? {
         field: restaurantQuestion.field,
@@ -517,17 +593,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
       } else {
-        // No restaurant question - restaurants are done, check for experiences
-        console.log('[Restaurants] No more restaurants, checking for experiences');
+        // No restaurant question - experiences already fetched in parallel above
+        console.log('[Restaurants] No more restaurants, experiences already fetched in parallel');
 
-        // Fetch experiences if user has selected activities
-        const state = orchestrator.getState();
-        const selectedActivities = state.preferences.selectedActivities || [];
+        // Get the next question (experiences were already fetched above in parallel)
         if (selectedActivities.length > 0) {
-          const activityTypes = selectedActivities.map(a => a.type);
-          await fetchExperiencesByType(activityTypes);
-
-          // After experiences are fetched, get the next question
           const experienceQuestion = await orchestrator.selectNextQuestion();
           if (experienceQuestion && experienceQuestion.field === 'experiences') {
             orchestrator.addSnooMessage(experienceQuestion.snooMessage, 'idle');
@@ -773,8 +843,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setPhase('satisfied');
         setIsProcessing(false);
 
-        // Auto-navigate to the full itinerary after a short delay
-        setTimeout(async () => {
+        // Auto-navigate to the full itinerary after a short delay with cleanup tracking
+        if (navigationTimeoutRef.current) {
+          clearTimeout(navigationTimeoutRef.current);
+        }
+        navigationTimeoutRef.current = setTimeout(async () => {
           try {
             const tripId = finalizeQuickPlanTrip(orchestrator.getState());
             console.log('[QuickPlanChat] Satisfaction confirmed, navigating to trip:', tripId);
@@ -824,6 +897,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
   const handleEnrichmentPhase = async () => {
     setSnooState('thinking');
+    setCurrentLoadingType('area'); // Set loading state for areas discovery
 
     // Add phase transition message
     orchestrator.addSnooMessage(
@@ -842,16 +916,16 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       const prefs = orchestrator.getState().preferences;
       const selectedSubreddits = (prefs as any).selectedSubreddits || ['travel', 'solotravel'];
 
-      const areasResponse = await fetch('/api/quick-plan/discover-areas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          destination,
-          preferences: prefs,
-          subreddits: selectedSubreddits,
-        }),
-      });
-      const areasData = await areasResponse.json();
+      // Use deduplicated fetch to prevent duplicate API calls
+      const areasData = await dedupedPost<{
+        areas?: any[];
+        redditPostCount?: number;
+        llmAreasCount?: number;
+      }>('/api/quick-plan/discover-areas', {
+        destination,
+        preferences: prefs,
+        subreddits: selectedSubreddits,
+      }, { cacheTTL: 5 * 60 * 1000, timeout: 60000 }); // Cache for 5 mins, 60s timeout
 
       // Update status based on actual API results
       setEnrichmentStatus(prev => ({ ...prev, reddit: 'done', areas: 'done' }));
@@ -884,14 +958,31 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       }
       setMessages([...orchestrator.getMessages()]);
       setSnooState('celebrating');
+      setCurrentLoadingType(null); // Clear loading state
 
-    } catch (error) {
-      console.error('Enrichment failed:', error);
+    } catch (error: any) {
+      console.error('[Enrichment] Failed:', error);
+      console.error('[Enrichment] Error name:', error?.name);
+      console.error('[Enrichment] Error message:', error?.message);
+      console.error('[Enrichment] Error stack:', error?.stack);
+      if (error?.data) {
+        console.error('[Enrichment] Error data:', error.data);
+      }
+      const friendlyMessage = getUserFriendlyMessage(error);
+
       setEnrichmentStatus(prev => ({
         ...prev,
         reddit: 'error',
         areas: 'error',
       }));
+      setCurrentLoadingType(null); // Clear loading state on error
+
+      // Show a helpful message instead of failing silently
+      orchestrator.addSnooMessage(
+        `I had some trouble researching ${destination}, but let's continue with your trip planning. ${friendlyMessage}`,
+        'concerned'
+      );
+      setMessages([...orchestrator.getMessages()]);
     }
 
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -927,6 +1018,9 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       return;
     }
 
+    // Set loading state for skeleton display
+    setCurrentLoadingType('hotel');
+
     orchestrator.addSnooMessage(
       `Searching for hotels that match your preferences...`,
       'thinking'
@@ -953,89 +1047,87 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       const travelingWithPets = (state.preferences as any).travelingWithPets;
       const sustainabilityPreference = (state.preferences as any).sustainabilityPreference;
 
-      const response = await fetch('/api/quick-plan/hotels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          areaIds,
-          destination,
-          preferences: {
-            budgetMin: budget?.min || 150,  // Default to store's initial budget
-            budgetMax: budget?.max || 350,  // Default to store's initial budget
-            minRating: 4.0,
-          },
-          coordinates: firstArea ? {
-            lat: firstArea.centerLat || 0,
-            lng: firstArea.centerLng || 0,
-          } : undefined,
-          // Pass dates for Makcorps real-time pricing
-          checkIn: formatDateForAPI(state.preferences.startDate),
-          checkOut: formatDateForAPI(state.preferences.endDate),
-          adults: state.preferences.adults || 2,
-          children: state.preferences.children || 0,
-          estimatedRooms: state.preferences.estimatedRoomsNeeded,
-          // Pass all filtering preferences
-          accessibilityNeeds,
-          accommodationType,
-          travelingWithPets,
-          sustainabilityPreference,
-        }),
-      });
+      // Use deduplicated fetch to prevent duplicate API calls on rapid clicks
+      const data = await dedupedPost<{
+        hotelsByArea?: Record<string, any[]>;
+      }>('/api/quick-plan/hotels', {
+        areaIds,
+        destination,
+        preferences: {
+          budgetMin: budget?.min || 150,  // Default to store's initial budget
+          budgetMax: budget?.max || 350,  // Default to store's initial budget
+          minRating: 4.0,
+        },
+        coordinates: firstArea ? {
+          lat: firstArea.centerLat || 0,
+          lng: firstArea.centerLng || 0,
+        } : undefined,
+        // Pass dates for Makcorps real-time pricing
+        checkIn: formatDateForAPI(state.preferences.startDate),
+        checkOut: formatDateForAPI(state.preferences.endDate),
+        adults: state.preferences.adults || 2,
+        children: state.preferences.children || 0,
+        estimatedRooms: state.preferences.estimatedRoomsNeeded,
+        // Pass all filtering preferences
+        accessibilityNeeds,
+        accommodationType,
+        travelingWithPets,
+        sustainabilityPreference,
+      }, { cacheTTL: 3 * 60 * 1000, timeout: 45000 }); // Cache for 3 mins, 45s timeout
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[Hotels] API response:', data);
+      console.log('[Hotels] API response:', data);
 
-        // Store hotels for each area
-        let totalHotels = 0;
-        if (data.hotelsByArea) {
-          for (const [areaId, hotels] of Object.entries(data.hotelsByArea)) {
-            const hotelList = hotels as any[];
-            if (hotelList.length > 0) {
-              orchestrator.setDiscoveredHotels(areaId, hotelList);
-              totalHotels += hotelList.length;
-              console.log(`Found ${hotelList.length} hotels for area ${areaId}`);
-            }
+      // Store hotels for each area
+      let totalHotels = 0;
+      if (data.hotelsByArea) {
+        for (const [areaId, hotels] of Object.entries(data.hotelsByArea)) {
+          const hotelList = hotels as any[];
+          if (hotelList.length > 0) {
+            orchestrator.setDiscoveredHotels(areaId, hotelList);
+            totalHotels += hotelList.length;
+            console.log(`Found ${hotelList.length} hotels for area ${areaId}`);
           }
         }
+      }
 
-        if (totalHotels > 0) {
-          orchestrator.addSnooMessage(
-            `Found ${totalHotels} hotels across your selected areas!`,
-            'celebrating'
-          );
-        } else {
-          // No hotels found - let user know and skip to next question
-          orchestrator.addSnooMessage(
-            `I couldn't find any hotels matching your preferences in those areas yet. Let me move on to the next step.`,
-            'concerned'
-          );
-          // Mark hotels as complete (skipped) so we don't get stuck
-          orchestrator.setConfidence('hotels', 'partial');
-        }
-        setMessages([...orchestrator.getMessages()]);
-      } else {
-        console.error('[Hotels] API error:', response.status, response.statusText);
+      if (totalHotels > 0) {
         orchestrator.addSnooMessage(
-          `Having trouble finding hotels right now. Let's continue with the rest of your trip.`,
+          `Found ${totalHotels} hotels across your selected areas!`,
+          'celebrating'
+        );
+      } else {
+        // No hotels found - let user know and skip to next question
+        orchestrator.addSnooMessage(
+          `I couldn't find any hotels matching your preferences in those areas yet. Let me move on to the next step.`,
           'concerned'
         );
+        // Mark hotels as complete (skipped) so we don't get stuck
         orchestrator.setConfidence('hotels', 'partial');
-        setMessages([...orchestrator.getMessages()]);
       }
+      setMessages([...orchestrator.getMessages()]);
 
       setEnrichmentStatus(prev => ({ ...prev, hotels: 'done' }));
       orchestrator.setEnrichmentStatus('hotels', 'done');
+      setCurrentLoadingType(null); // Clear loading state
     } catch (error) {
       console.error('[Hotels] Fetch failed:', error);
-      orchestrator.addSnooMessage(
-        `Having trouble finding hotels right now. Let's continue with the rest of your trip.`,
-        'concerned'
-      );
+      const friendlyMessage = getUserFriendlyMessage(error);
+
+      // Check for specific error types
+      const isTimeout = friendlyMessage.toLowerCase().includes('timeout') || friendlyMessage.toLowerCase().includes('took too long');
+      const isNetworkError = friendlyMessage.toLowerCase().includes('connect') || friendlyMessage.toLowerCase().includes('network');
+      const message = isTimeout
+        ? `The hotel search took too long. Let's continue with the rest of your trip - you can always add hotels later.`
+        : isNetworkError
+          ? `Unable to connect to search for hotels. Please check your connection. Let's continue with the rest of your trip.`
+          : `Having trouble finding hotels right now. Let's continue with the rest of your trip.`;
+
+      orchestrator.addSnooMessage(message, 'concerned');
       orchestrator.setConfidence('hotels', 'partial');
       orchestrator.setEnrichmentStatus('hotels', 'error');
       setMessages([...orchestrator.getMessages()]);
       setEnrichmentStatus(prev => ({ ...prev, hotels: 'error' }));
+      setCurrentLoadingType(null); // Clear loading state on error
     }
   };
 
@@ -1061,6 +1153,9 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       console.log('[Restaurants] No cuisines selected, skipping restaurant fetch');
       return;
     }
+
+    // Set loading state for skeleton display
+    setCurrentLoadingType('restaurant');
 
     orchestrator.addSnooMessage(
       `Finding the best ${cuisineTypes.length > 1 ? 'restaurants' : cuisineTypes[0]} restaurants near your hotels...`,
@@ -1094,76 +1189,75 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       const dietaryRestrictions = (state.preferences as any).dietaryRestrictions || [];
       console.log('[Restaurants] Fetching restaurants for cuisines:', cuisineTypes, 'with hotels:', hotelsData, 'dietary:', dietaryRestrictions);
 
-      const response = await fetch('/api/quick-plan/restaurants', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cuisineTypes,
-          destination,
-          hotels: hotelsData,
-          areas: selectedAreas.map(a => ({
-            id: a.id,
-            name: a.name,
-            centerLat: a.centerLat,
-            centerLng: a.centerLng,
-          })),
-          dietaryRestrictions, // Pass dietary restrictions to API
-        }),
-      });
+      // Use deduplicated fetch to prevent duplicate API calls on rapid clicks
+      const data = await dedupedPost<{
+        restaurantsByCuisine?: Record<string, any[]>;
+      }>('/api/quick-plan/restaurants', {
+        cuisineTypes,
+        destination,
+        hotels: hotelsData,
+        areas: selectedAreas.map(a => ({
+          id: a.id,
+          name: a.name,
+          centerLat: a.centerLat,
+          centerLng: a.centerLng,
+        })),
+        dietaryRestrictions, // Pass dietary restrictions to API
+      }, { cacheTTL: 5 * 60 * 1000, timeout: 45000 }); // Cache for 5 mins, 45s timeout
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[Restaurants] API response:', data);
+      console.log('[Restaurants] API response:', data);
 
-        // Store restaurants by cuisine type
-        let totalRestaurants = 0;
-        if (data.restaurantsByCuisine) {
-          for (const [cuisine, restaurants] of Object.entries(data.restaurantsByCuisine)) {
-            const restaurantList = restaurants as any[];
-            if (restaurantList.length > 0) {
-              // Use setDiscoveredRestaurants but keyed by cuisine instead of area
-              orchestrator.setDiscoveredRestaurants(cuisine, restaurantList);
-              totalRestaurants += restaurantList.length;
-              console.log(`Found ${restaurantList.length} ${cuisine} restaurants`);
-            }
+      // Store restaurants by cuisine type
+      let totalRestaurants = 0;
+      if (data.restaurantsByCuisine) {
+        for (const [cuisine, restaurants] of Object.entries(data.restaurantsByCuisine)) {
+          const restaurantList = restaurants as any[];
+          if (restaurantList.length > 0) {
+            // Use setDiscoveredRestaurants but keyed by cuisine instead of area
+            orchestrator.setDiscoveredRestaurants(cuisine, restaurantList);
+            totalRestaurants += restaurantList.length;
+            console.log(`Found ${restaurantList.length} ${cuisine} restaurants`);
           }
         }
+      }
 
-        if (totalRestaurants > 0) {
-          const cuisineLabels = cuisineTypes.length > 2
-            ? `${cuisineTypes.length} cuisine types`
-            : cuisineTypes.join(' and ');
-          orchestrator.addSnooMessage(
-            `Found ${totalRestaurants} great ${cuisineLabels} restaurants near your hotels!`,
-            'celebrating'
-          );
-        } else {
-          orchestrator.addSnooMessage(
-            `I couldn't find restaurants for those cuisines near your hotels. Let's continue with your itinerary.`,
-            'concerned'
-          );
-        }
-        setMessages([...orchestrator.getMessages()]);
-      } else {
-        console.error('[Restaurants] API error:', response.status, response.statusText);
+      if (totalRestaurants > 0) {
+        const cuisineLabels = cuisineTypes.length > 2
+          ? `${cuisineTypes.length} cuisine types`
+          : cuisineTypes.join(' and ');
         orchestrator.addSnooMessage(
-          `Having trouble finding restaurants right now. Let's continue with your itinerary.`,
+          `Found ${totalRestaurants} great ${cuisineLabels} restaurants near your hotels!`,
+          'celebrating'
+        );
+      } else {
+        orchestrator.addSnooMessage(
+          `I couldn't find restaurants for those cuisines near your hotels. Let's continue with your itinerary.`,
           'concerned'
         );
-        setMessages([...orchestrator.getMessages()]);
       }
+      setMessages([...orchestrator.getMessages()]);
 
       setEnrichmentStatus(prev => ({ ...prev, restaurants: 'done' }));
       orchestrator.setEnrichmentStatus('restaurants', 'done');
+      setCurrentLoadingType(null); // Clear loading state
     } catch (error) {
       console.error('[Restaurants] Fetch failed:', error);
-      orchestrator.addSnooMessage(
-        `Having trouble finding restaurants right now. Let's continue with your itinerary.`,
-        'concerned'
-      );
+      const friendlyMessage = getUserFriendlyMessage(error);
+
+      // Check for specific error types
+      const isRateLimit = friendlyMessage.toLowerCase().includes('too many') || friendlyMessage.toLowerCase().includes('rate limit');
+      const isNetworkError = friendlyMessage.toLowerCase().includes('connect') || friendlyMessage.toLowerCase().includes('network');
+      const message = isRateLimit
+        ? `We're getting a lot of requests right now. Let's continue with your itinerary - you can browse restaurants later.`
+        : isNetworkError
+          ? `Unable to connect to search for restaurants. Please check your connection. Let's continue with your itinerary.`
+          : `Having trouble finding restaurants right now. Let's continue with your itinerary.`;
+
+      orchestrator.addSnooMessage(message, 'concerned');
       orchestrator.setEnrichmentStatus('restaurants', 'error');
       setMessages([...orchestrator.getMessages()]);
       setEnrichmentStatus(prev => ({ ...prev, restaurants: 'error' }));
+      setCurrentLoadingType(null); // Clear loading state on error
     }
   };
 
@@ -1198,6 +1292,9 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     };
     const emoji = activityEmojis[activityTypes[0]] || '🎯';
 
+    // Set loading state for skeleton display
+    setCurrentLoadingType('experience');
+
     orchestrator.addSnooMessage(
       `${emoji} Finding the best ${activityTypes.length > 1 ? 'experiences' : activityTypes[0]} tours and activities near your hotels...`,
       'thinking'
@@ -1227,74 +1324,73 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
       console.log('[Experiences] Fetching experiences for activities:', activityTypes, 'with hotels:', hotelsData);
 
-      const response = await fetch('/api/quick-plan/experiences', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          activityTypes,
-          destination,
-          hotels: hotelsData,
-          areas: selectedAreas.map(a => ({
-            id: a.id,
-            name: a.name,
-            centerLat: a.centerLat,
-            centerLng: a.centerLng,
-          })),
-        }),
-      });
+      // Use deduplicated fetch to prevent duplicate API calls on rapid clicks
+      const data = await dedupedPost<{
+        experiencesByType?: Record<string, any[]>;
+      }>('/api/quick-plan/experiences', {
+        activityTypes,
+        destination,
+        hotels: hotelsData,
+        areas: selectedAreas.map(a => ({
+          id: a.id,
+          name: a.name,
+          centerLat: a.centerLat,
+          centerLng: a.centerLng,
+        })),
+      }, { cacheTTL: 5 * 60 * 1000, timeout: 45000 }); // Cache for 5 mins, 45s timeout
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[Experiences] API response:', data);
+      console.log('[Experiences] API response:', data);
 
-        // Store experiences by activity type
-        let totalExperiences = 0;
-        if (data.experiencesByType) {
-          for (const [activity, experiences] of Object.entries(data.experiencesByType)) {
-            const experienceList = experiences as any[];
-            if (experienceList.length > 0) {
-              orchestrator.setDiscoveredExperiences(activity, experienceList);
-              totalExperiences += experienceList.length;
-              console.log(`Found ${experienceList.length} ${activity} experiences`);
-            }
+      // Store experiences by activity type
+      let totalExperiences = 0;
+      if (data.experiencesByType) {
+        for (const [activity, experiences] of Object.entries(data.experiencesByType)) {
+          const experienceList = experiences as any[];
+          if (experienceList.length > 0) {
+            orchestrator.setDiscoveredExperiences(activity, experienceList);
+            totalExperiences += experienceList.length;
+            console.log(`Found ${experienceList.length} ${activity} experiences`);
           }
         }
+      }
 
-        if (totalExperiences > 0) {
-          const activityLabels = activityTypes.length > 2
-            ? `${activityTypes.length} activity types`
-            : activityTypes.join(' and ');
-          orchestrator.addSnooMessage(
-            `Found ${totalExperiences} great ${activityLabels} experiences near your hotels!`,
-            'celebrating'
-          );
-        } else {
-          orchestrator.addSnooMessage(
-            `I couldn't find tour options for those activities near your hotels. Let's continue with your itinerary.`,
-            'concerned'
-          );
-        }
-        setMessages([...orchestrator.getMessages()]);
-      } else {
-        console.error('[Experiences] API error:', response.status, response.statusText);
+      if (totalExperiences > 0) {
+        const activityLabels = activityTypes.length > 2
+          ? `${activityTypes.length} activity types`
+          : activityTypes.join(' and ');
         orchestrator.addSnooMessage(
-          `Having trouble finding experiences right now. Let's continue with your itinerary.`,
+          `Found ${totalExperiences} great ${activityLabels} experiences near your hotels!`,
+          'celebrating'
+        );
+      } else {
+        orchestrator.addSnooMessage(
+          `I couldn't find tour options for those activities near your hotels. Let's continue with your itinerary.`,
           'concerned'
         );
-        setMessages([...orchestrator.getMessages()]);
       }
+      setMessages([...orchestrator.getMessages()]);
 
       setEnrichmentStatus(prev => ({ ...prev, experiences: 'done' }));
       orchestrator.setEnrichmentStatus('experiences', 'done');
+      setCurrentLoadingType(null); // Clear loading state
     } catch (error) {
       console.error('[Experiences] Fetch failed:', error);
-      orchestrator.addSnooMessage(
-        `Having trouble finding experiences right now. Let's continue with your itinerary.`,
-        'concerned'
-      );
+      const friendlyMessage = getUserFriendlyMessage(error);
+
+      // Check for specific error types
+      const isTimeout = friendlyMessage.toLowerCase().includes('timeout') || friendlyMessage.toLowerCase().includes('took too long');
+      const isNetworkError = friendlyMessage.toLowerCase().includes('connect') || friendlyMessage.toLowerCase().includes('network');
+      const message = isTimeout
+        ? `The experience search took too long. Let's continue with your itinerary - you can browse activities later.`
+        : isNetworkError
+          ? `Unable to connect to search for experiences. Please check your connection. Let's continue with your itinerary.`
+          : `Having trouble finding experiences right now. Let's continue with your itinerary.`;
+
+      orchestrator.addSnooMessage(message, 'concerned');
       orchestrator.setEnrichmentStatus('experiences', 'error');
       setMessages([...orchestrator.getMessages()]);
       setEnrichmentStatus(prev => ({ ...prev, experiences: 'error' }));
+      setCurrentLoadingType(null); // Clear loading state on error
     }
   };
 
@@ -1304,6 +1400,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
   const handleGenerationPhase = async () => {
     setSnooState('thinking');
+    setCurrentLoadingType('itinerary'); // Set loading state for itinerary generation
 
     orchestrator.addSnooMessage(
       "Building your personalized itinerary...",
@@ -1358,48 +1455,54 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     };
 
     try {
-      const response = await fetch('/api/quick-plan/generate-itinerary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          preferences: { ...prefs, selectedSplit: autoSplit },
-          areas: state.discoveredData.areas,
-          hotels: hotelsObj,
-          restaurants: restaurantsObj,
-        }),
-      });
+      // Use deduplicated fetch to prevent duplicate API calls on rapid clicks
+      const data = await dedupedPost<{
+        itinerary?: any;
+      }>('/api/quick-plan/generate-itinerary', {
+        preferences: { ...prefs, selectedSplit: autoSplit },
+        areas: state.discoveredData.areas,
+        hotels: hotelsObj,
+        restaurants: restaurantsObj,
+      }, { cacheTTL: 2 * 60 * 1000, timeout: 90000 }); // Cache for 2 mins, 90s timeout for complex generation
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.itinerary) {
-          orchestrator.setItinerary(data.itinerary);
-          orchestrator.addSnooMessage(
-            "Your itinerary is ready! Take a look and let me know what you think.",
-            'celebrating'
-          );
-        } else {
-          orchestrator.addSnooMessage(
-            "I've put together a plan for you. Take a look!",
-            'celebrating'
-          );
-        }
-      } else {
-        console.error('Itinerary generation failed:', await response.text());
+      if (data.itinerary) {
+        orchestrator.setItinerary(data.itinerary);
         orchestrator.addSnooMessage(
-          "Had some trouble generating the itinerary. Let me try a simpler approach.",
-          'idle'
+          "Your itinerary is ready! Take a look and let me know what you think.",
+          'celebrating'
+        );
+      } else {
+        orchestrator.addSnooMessage(
+          "I've put together a plan for you. Take a look!",
+          'celebrating'
         );
       }
     } catch (error) {
-      console.error('Itinerary generation error:', error);
-      orchestrator.addSnooMessage(
-        "Something went wrong building your itinerary. Let's try again.",
-        'idle'
-      );
+      console.error('[Generation] Itinerary generation error:', error);
+      const friendlyMessage = getUserFriendlyMessage(error);
+
+      // Check for specific error types
+      const isRateLimit = friendlyMessage.toLowerCase().includes('too many') || friendlyMessage.toLowerCase().includes('rate limit');
+      const isTimeout = friendlyMessage.toLowerCase().includes('timeout') || friendlyMessage.toLowerCase().includes('took too long');
+      const isNetworkError = friendlyMessage.toLowerCase().includes('connect') || friendlyMessage.toLowerCase().includes('network');
+
+      let message: string;
+      if (isRateLimit) {
+        message = "Our AI is a bit busy right now. Let me try a simpler approach to your itinerary.";
+      } else if (isTimeout) {
+        message = "The itinerary took longer than expected to generate. Let me simplify things a bit.";
+      } else if (isNetworkError) {
+        message = "Unable to connect to generate your itinerary. Please check your connection and try again.";
+      } else {
+        message = "Had some trouble generating the itinerary. Let me try a simpler approach.";
+      }
+
+      orchestrator.addSnooMessage(message, 'concerned');
     }
 
     setMessages([...orchestrator.getMessages()]);
     setSnooState('celebrating');
+    setCurrentLoadingType(null); // Clear loading state
 
     await new Promise(resolve => setTimeout(resolve, 500));
     setSnooState('idle');
@@ -1414,27 +1517,27 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   // ============================================================================
 
   return (
-    <div className="flex items-center justify-center min-h-[calc(100vh-80px)] p-4 sm:p-6">
-      {/* Centered chat frame */}
-      <div className="w-full max-w-2xl h-[calc(100vh-120px)] max-h-[800px] bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
-        {/* Chat header */}
-        <div className="flex-shrink-0 px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+    <div className="flex items-center justify-center min-h-[calc(100vh-80px)] p-2 sm:p-4 md:p-6">
+      {/* Centered chat frame - responsive width and height */}
+      <div className="w-full max-w-2xl h-[calc(100vh-100px)] sm:h-[calc(100vh-120px)] max-h-[800px] bg-white dark:bg-slate-800 rounded-xl sm:rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
+        {/* Chat header - responsive padding */}
+        <div className="flex-shrink-0 px-3 sm:px-6 py-3 sm:py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               <SnooAgent state={snooState} size="sm" showLabel={false} />
               <div>
                 <h2 className="font-semibold text-slate-900 dark:text-white text-sm">Snoo</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Your AI travel buddy</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 hidden xs:block">Your AI travel buddy</p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               {/* Progress indicator - FIX 4.12 */}
               <ProgressIndicatorCompact currentPhase={phase} className="hidden sm:flex" />
-              {/* Start Over button */}
+              {/* Start Over button - touch-friendly size */}
               <button
                 onClick={handleStartOver}
                 disabled={isProcessing}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] sm:min-w-0 px-2 sm:px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Start over from the beginning"
               >
                 <RotateCcw className="w-4 h-4" />
@@ -1477,20 +1580,20 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           )}
         </div>
 
-        {/* Reply card area - anchored at bottom */}
-        <div className="flex-shrink-0 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4">
+        {/* Reply card area - anchored at bottom, responsive padding */}
+        <div className="flex-shrink-0 border-t border-slate-200 dark:border-slate-700 bg-gradient-to-b from-slate-50 to-white dark:from-slate-900/50 dark:to-slate-800/50 p-3 sm:p-5">
           <AnimatePresence mode="wait">
             {currentQuestion && !isProcessing && (
               <div ref={inputRef}>
-                {/* FIX 4.2 & 4.3: Go Back and Skip buttons */}
+                {/* FIX 4.2 & 4.3: Go Back and Skip buttons - touch-friendly */}
                 <div className="flex items-center justify-between mb-2">
                   {canGoBack ? (
                     <button
                       onClick={handleGoBack}
-                      className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
+                      className="flex items-center gap-1.5 min-h-[44px] px-2 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
                     >
                       <ArrowLeft className="w-4 h-4" />
-                      Go back
+                      <span className="hidden xs:inline">Go back</span>
                     </button>
                   ) : (
                     <div /> // Spacer
@@ -1498,7 +1601,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
                   {canSkip && (
                     <button
                       onClick={handleSkip}
-                      className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
+                      className="flex items-center gap-1.5 min-h-[44px] px-2 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
                     >
                       Skip
                       <SkipForward className="w-4 h-4" />
@@ -1516,51 +1619,96 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
             )}
           </AnimatePresence>
 
-          {/* Processing indicator */}
+          {/* Processing indicator with contextual loading */}
           {isProcessing && (
-            <div className="flex items-center justify-center gap-3 py-4">
-              <SnooAgent state={snooState} size="sm" showLabel={true} />
+            <div className="py-4 space-y-3">
+              {/* Main processing indicator */}
+              <div className="flex items-center justify-center gap-3">
+                <SnooAgent state={snooState} size="sm" showLabel={true} />
+              </div>
+
+              {/* Contextual loading card when fetching data */}
+              {currentLoadingType && (
+                <LoadingCard
+                  type={currentLoadingType}
+                  count={3}
+                />
+              )}
             </div>
           )}
 
-          {/* Free text input toggle and form */}
+          {/* Free text input toggle and form - responsive */}
           {!isProcessing && (
-            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+            <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-slate-200 dark:border-slate-700">
               {showFreeTextInput ? (
-                <form onSubmit={handleFreeTextSubmit} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={freeTextInput}
-                    onChange={(e) => setFreeTextInput(e.target.value)}
-                    placeholder="Ask Snoo anything or add context..."
-                    autoFocus
-                    className="flex-1 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!freeTextInput.trim()}
-                    className="px-4 py-2 bg-orange-500 text-white rounded-xl font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowFreeTextInput(false);
-                      setFreeTextInput('');
-                    }}
-                    className="px-3 py-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-xl transition-colors"
-                  >
-                    Cancel
-                  </button>
+                <form onSubmit={handleFreeTextSubmit} className="space-y-2">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={freeTextInput}
+                      onChange={(e) => {
+                        // Limit to 500 characters
+                        if (e.target.value.length <= 500) {
+                          setFreeTextInput(e.target.value);
+                        }
+                      }}
+                      placeholder="Ask Snoo anything or add context..."
+                      autoFocus
+                      maxLength={500}
+                      aria-label="Message to Snoo"
+                      className={`w-full px-3 sm:px-4 py-3 sm:py-2 rounded-xl border bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-base sm:text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                        freeTextInput.length > 450
+                          ? 'border-amber-400 focus:ring-amber-500'
+                          : 'border-slate-300 dark:border-slate-600 focus:ring-orange-500'
+                      }`}
+                    />
+                    {/* Character count - always visible */}
+                    <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs transition-colors ${
+                      freeTextInput.length > 450
+                        ? 'text-amber-500'
+                        : freeTextInput.length > 400
+                        ? 'text-slate-500'
+                        : 'text-slate-300 dark:text-slate-600'
+                    }`}>
+                      {freeTextInput.length}/500
+                    </span>
+                  </div>
+
+                  {/* Validation hint */}
+                  {freeTextInput.length > 450 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      Approaching character limit
+                    </p>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={!freeTextInput.trim()}
+                      className="flex-1 sm:flex-none min-h-[44px] px-4 py-2 bg-orange-500 text-white rounded-xl font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Send className="w-4 h-4" />
+                      <span className="sm:hidden">Send</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowFreeTextInput(false);
+                        setFreeTextInput('');
+                      }}
+                      className="min-h-[44px] px-3 py-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-xl transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </form>
               ) : (
                 <button
                   onClick={() => setShowFreeTextInput(true)}
-                  className="w-full flex items-center justify-center gap-2 py-2 text-sm text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 min-h-[44px] py-2.5 text-sm text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   <MessageCircle className="w-4 h-4" />
-                  <span>Ask Snoo a question or add context</span>
+                  <span className="text-sm font-medium">Ask Snoo a question or add context</span>
                 </button>
               )}
             </div>
@@ -1591,7 +1739,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
 function formatUserResponse(value: unknown): string {
   if (typeof value === 'string') {
-    return value;
+    return value.trim() || 'Skipped';
   }
 
   // Handle arrays FIRST (before object check since arrays are objects)
@@ -1745,33 +1893,33 @@ function ItineraryPreview({ orchestratorState }: ItineraryPreviewProps) {
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-lg shadow-slate-200/50 dark:shadow-none">
       {/* Header */}
-      <div className="p-4 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-b border-slate-200 dark:border-slate-700">
-        <h3 className="font-semibold text-slate-900 dark:text-white text-lg">
+      <div className="p-5 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-b border-slate-200 dark:border-slate-700">
+        <h3 className="font-bold text-slate-900 dark:text-white text-xl">
           Your Trip to {preferences.destinationContext?.canonicalName || 'Your Destination'}
         </h3>
-        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1.5 font-medium">
           {days.length} days · {stops.length} {stops.length === 1 ? 'location' : 'locations'}
         </p>
       </div>
 
       {/* Stops summary */}
-      <div className="p-4 border-b border-slate-200 dark:border-slate-700">
-        <div className="flex flex-wrap gap-2">
+      <div className="p-5 border-b border-slate-200 dark:border-slate-700">
+        <div className="flex flex-wrap gap-3">
           {stops.map((stop: any, idx: number) => (
             <div
               key={stop.areaId || idx}
-              className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg"
+              className="flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-700/50 rounded-xl border border-slate-200 dark:border-slate-600 shadow-sm"
             >
-              <span className="w-6 h-6 flex items-center justify-center bg-orange-500 text-white rounded-full text-xs font-bold">
+              <span className="w-7 h-7 flex items-center justify-center bg-gradient-to-br from-orange-500 to-amber-500 text-white rounded-full text-sm font-bold shadow-sm">
                 {idx + 1}
               </span>
               <div>
-                <p className="font-medium text-slate-900 dark:text-white text-sm">
+                <p className="font-semibold text-slate-900 dark:text-white text-sm">
                   {stop.areaName || stop.area?.name || `Stop ${idx + 1}`}
                 </p>
-                <p className="text-xs text-slate-500">{stop.nights} nights</p>
+                <p className="text-xs text-slate-500 font-medium">{stop.nights} nights</p>
               </div>
             </div>
           ))}
@@ -1783,40 +1931,40 @@ function ItineraryPreview({ orchestratorState }: ItineraryPreviewProps) {
         {days.map((day: any) => (
           <div
             key={day.dayNumber}
-            className="p-4 border-b border-slate-100 dark:border-slate-700 last:border-b-0"
+            className="p-5 border-b border-slate-100 dark:border-slate-700 last:border-b-0 hover:bg-slate-50/50 dark:hover:bg-slate-700/20 transition-colors"
           >
-            <div className="flex items-center gap-2 mb-2">
-              <span className="px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 rounded text-xs font-medium">
+            <div className="flex items-center gap-2.5 mb-3">
+              <span className="px-2.5 py-1 bg-gradient-to-r from-orange-100 to-amber-100 dark:from-orange-900/30 dark:to-amber-900/30 text-orange-700 dark:text-orange-400 rounded-lg text-xs font-bold">
                 Day {day.dayNumber}
               </span>
               {day.date && (
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-slate-500 font-medium">
                   {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                 </span>
               )}
             </div>
 
-            <div className="space-y-2 ml-2">
+            <div className="space-y-2.5 ml-1">
               {day.morning && (
-                <div className="flex items-start gap-2">
-                  <span className="text-xs text-slate-400 w-16">Morning</span>
-                  <p className="text-sm text-slate-700 dark:text-slate-300">{day.morning.description || day.morning.activity}</p>
+                <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors">
+                  <span className="text-xs text-slate-400 dark:text-slate-500 w-16 font-semibold uppercase tracking-wide pt-0.5">Morning</span>
+                  <p className="text-sm text-slate-700 dark:text-slate-300 flex-1 leading-relaxed">{day.morning.description || day.morning.activity}</p>
                 </div>
               )}
               {day.afternoon && (
-                <div className="flex items-start gap-2">
-                  <span className="text-xs text-slate-400 w-16">Afternoon</span>
-                  <p className="text-sm text-slate-700 dark:text-slate-300">{day.afternoon.description || day.afternoon.activity}</p>
+                <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors">
+                  <span className="text-xs text-slate-400 dark:text-slate-500 w-16 font-semibold uppercase tracking-wide pt-0.5">Afternoon</span>
+                  <p className="text-sm text-slate-700 dark:text-slate-300 flex-1 leading-relaxed">{day.afternoon.description || day.afternoon.activity}</p>
                 </div>
               )}
               {day.evening && (
-                <div className="flex items-start gap-2">
-                  <span className="text-xs text-slate-400 w-16">Evening</span>
-                  <p className="text-sm text-slate-700 dark:text-slate-300">{day.evening.description || day.evening.activity}</p>
+                <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors">
+                  <span className="text-xs text-slate-400 dark:text-slate-500 w-16 font-semibold uppercase tracking-wide pt-0.5">Evening</span>
+                  <p className="text-sm text-slate-700 dark:text-slate-300 flex-1 leading-relaxed">{day.evening.description || day.evening.activity}</p>
                 </div>
               )}
               {!day.morning && !day.afternoon && !day.evening && (
-                <p className="text-sm text-slate-500 italic">Free day to explore</p>
+                <p className="text-sm text-slate-500 italic p-2">Free day to explore</p>
               )}
             </div>
           </div>
@@ -1824,11 +1972,11 @@ function ItineraryPreview({ orchestratorState }: ItineraryPreviewProps) {
       </div>
 
       {/* Footer with action button */}
-      <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">
+      <div className="p-5 bg-gradient-to-b from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-800 border-t border-slate-200 dark:border-slate-700">
         <button
           onClick={handleTakeToItinerary}
           disabled={isNavigating}
-          className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white font-semibold hover:from-orange-600 hover:to-amber-600 transition-all shadow-lg shadow-orange-500/25 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="w-full py-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold text-lg hover:from-orange-600 hover:to-amber-600 transition-all shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 transform hover:scale-[1.01] active:scale-[0.99]"
         >
           {isNavigating ? (
             <>

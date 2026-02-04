@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Star, DollarSign, MapPin, Clock, ExternalLink, MessageSquare, Check } from 'lucide-react';
 import type { HotelCandidate, RestaurantCandidate, Evidence } from '@/types/quick-plan';
+import FallbackImage from '@/components/ui/FallbackImage';
 
 type ItemType = 'hotel' | 'restaurant' | 'experience';
 
@@ -99,43 +100,43 @@ export default function DetailDrawer({
             aria-hidden="true"
           />
 
-          {/* Drawer - slide up from bottom */}
+          {/* Drawer - slide up from bottom, full-screen on mobile */}
           <motion.div
             ref={drawerRef}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl z-50 max-h-[85vh] overflow-hidden flex flex-col shadow-2xl"
+            className="fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 rounded-t-2xl z-50 max-h-[95vh] sm:max-h-[85vh] overflow-hidden flex flex-col shadow-2xl"
             role="dialog"
             aria-modal="true"
             aria-labelledby="drawer-title"
           >
-            {/* Handle bar */}
-            <div className="flex justify-center pt-2 pb-1">
-              <div className="w-10 h-1 bg-slate-300 rounded-full" />
+            {/* Handle bar - touch-friendly */}
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-12 h-1.5 bg-slate-300 dark:bg-slate-600 rounded-full" />
             </div>
 
-            {/* Header */}
-            <div className="px-4 py-3 border-b border-slate-100 flex items-start justify-between">
-              <div className="flex-1 min-w-0">
+            {/* Header - responsive padding and text */}
+            <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-slate-100 dark:border-slate-700 flex items-start justify-between">
+              <div className="flex-1 min-w-0 pr-2">
                 <p className="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">
                   {type === 'hotel' ? 'Hotel' : type === 'restaurant' ? 'Restaurant' : 'Experience'}
                 </p>
-                <h2 id="drawer-title" className="font-semibold text-slate-900 text-lg leading-tight">{item.name}</h2>
+                <h2 id="drawer-title" className="font-semibold text-slate-900 dark:text-white text-base sm:text-lg leading-tight">{item.name}</h2>
                 {(item as HotelCandidate | RestaurantCandidate).address && (
-                  <p className="text-sm text-slate-500 mt-0.5 flex items-center gap-1">
-                    <MapPin className="w-3 h-3" />
-                    {(item as HotelCandidate | RestaurantCandidate).address}
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1">
+                    <MapPin className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate">{(item as HotelCandidate | RestaurantCandidate).address}</span>
                   </p>
                 )}
-                {/* Google Maps Link */}
+                {/* Google Maps Link - touch-friendly */}
                 {((item as any).googleMapsUrl || (item as any).placeId) && (
                   <a
                     href={(item as any).googleMapsUrl || `https://www.google.com/maps/place/?q=place_id:${(item as any).placeId}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-blue-600 hover:text-blue-800 mt-1 flex items-center gap-1"
+                    className="text-xs sm:text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 inline-flex items-center gap-1 min-h-[44px] sm:min-h-0"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <ExternalLink className="w-3 h-3" />
@@ -146,7 +147,7 @@ export default function DetailDrawer({
               <button
                 ref={closeButtonRef}
                 onClick={onClose}
-                className="p-2 hover:bg-slate-100 rounded-full transition-colors -mr-2"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors -mr-1"
                 aria-label="Close drawer"
               >
                 <X className="w-5 h-5 text-slate-400" />
@@ -160,15 +161,15 @@ export default function DetailDrawer({
               {type === 'experience' && <ExperienceDetails experience={item as ExperienceItem} />}
             </div>
 
-            {/* Footer with action button */}
+            {/* Footer with action button - touch-friendly */}
             {onSelect && (
-              <div className="p-4 border-t border-slate-100 bg-white">
+              <div className="p-3 sm:p-4 border-t border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 safe-area-inset-bottom">
                 <button
                   onClick={() => {
                     onSelect();
                     onClose();
                   }}
-                  className={`w-full py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
+                  className={`w-full min-h-[48px] sm:min-h-[44px] py-3 rounded-xl font-medium text-base sm:text-sm transition-all flex items-center justify-center gap-2 ${
                     isSelected
                       ? 'bg-green-500 text-white'
                       : 'bg-orange-500 hover:bg-orange-600 text-white'
@@ -200,21 +201,15 @@ function HotelDetails({ hotel }: { hotel: HotelCandidate }) {
   return (
     <div className="p-4 space-y-5">
       {/* Image */}
-      <div className="w-full h-48 rounded-xl overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800">
-        {hotel.imageUrl ? (
-          <img
-            src={hotel.imageUrl}
-            alt={hotel.name}
-            loading="lazy"
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-              (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-6xl">🏨</div>';
-            }}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-6xl">🏨</div>
-        )}
+      <div className="relative w-full h-48 rounded-xl overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800">
+        <FallbackImage
+          src={hotel.imageUrl}
+          alt={hotel.name}
+          fill
+          fallbackType="hotel"
+          sizes="(max-width: 640px) 100vw, 50vw"
+          showSkeleton
+        />
       </div>
 
       {/* Rating & Price Row */}
@@ -333,21 +328,15 @@ function RestaurantDetails({ restaurant }: { restaurant: RestaurantCandidate }) 
   return (
     <div className="p-4 space-y-5">
       {/* Image */}
-      <div className="w-full h-48 rounded-xl overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800">
-        {restaurant.imageUrl ? (
-          <img
-            src={restaurant.imageUrl}
-            alt={restaurant.name}
-            loading="lazy"
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-              (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-6xl">🍽️</div>';
-            }}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-6xl">🍽️</div>
-        )}
+      <div className="relative w-full h-48 rounded-xl overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800">
+        <FallbackImage
+          src={restaurant.imageUrl}
+          alt={restaurant.name}
+          fill
+          fallbackType="restaurant"
+          sizes="(max-width: 640px) 100vw, 50vw"
+          showSkeleton
+        />
       </div>
 
       {/* Rating & Price Row */}
@@ -445,21 +434,15 @@ function ExperienceDetails({ experience }: { experience: ExperienceItem }) {
   return (
     <div className="p-4 space-y-5">
       {/* Image */}
-      <div className="w-full h-48 rounded-xl overflow-hidden bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900/30 dark:to-purple-800/30">
-        {experience.imageUrl ? (
-          <img
-            src={experience.imageUrl}
-            alt={experience.name}
-            loading="lazy"
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-              (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-6xl">🎯</div>';
-            }}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-6xl">🎯</div>
-        )}
+      <div className="relative w-full h-48 rounded-xl overflow-hidden bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900/30 dark:to-purple-800/30">
+        <FallbackImage
+          src={experience.imageUrl}
+          alt={experience.name}
+          fill
+          fallbackType="experience"
+          sizes="(max-width: 640px) 100vw, 50vw"
+          showSkeleton
+        />
       </div>
 
       {/* Rating & Type Row */}

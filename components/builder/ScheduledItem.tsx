@@ -1,27 +1,41 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Draggable } from '@hello-pangea/dnd';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import {
   GripVertical,
   Clock,
   Star,
-  MapPin,
-  Utensils,
   X,
   Navigation,
-  AlertCircle,
   Calendar,
   Edit3,
   Trash2,
   Check,
+  Loader2,
 } from 'lucide-react';
 import clsx from 'clsx';
-import type { CollectionItem } from '@/stores/tripStoreV2';
-import { calculateAllTravelModes, formatDistance, getTransportIcon, formatTravelTime } from '@/lib/utils/travelTime';
-import PlaceDetailModal from './PlaceDetailModal';
+import type { CollectionItem } from '@/stores/tripStore';
+import { calculateAllTravelModes, formatDistance, getTransportIcon } from '@/lib/utils/travelTime';
+import { handleImageError, getPlaceholderImage } from '@/lib/utils';
 import RestaurantAvailability from '@/components/ui/RestaurantAvailability';
+
+// Dynamic import for PlaceDetailModal - heavy modal with images and details
+const PlaceDetailModal = dynamic(
+  () => import('./PlaceDetailModal'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-8">
+          <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+        </div>
+      </div>
+    ),
+  }
+);
 
 interface ScheduledItemProps {
   item: CollectionItem;
@@ -35,10 +49,12 @@ export default function ScheduledItem({
   item,
   index,
   dayIndex,
-  isLast,
+  isLast: _isLast,
   previousItem,
 }: ScheduledItemProps) {
-  const { unscheduleItem, trip, updateScheduledItem } = useTripStoreV2();
+  // isLast is available for styling the last item differently
+  void _isLast;
+  const { unscheduleItem, trip, updateScheduledItem } = useTripStore();
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [showReservationMenu, setShowReservationMenu] = useState(false);
@@ -305,23 +321,14 @@ export default function ScheduledItem({
               {index + 1}
             </div>
 
-            {/* Photo thumbnail with fallback initial */}
-            <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900/50 dark:to-primary-800/50 relative">
-              {/* Fallback initial - always rendered behind */}
-              <span className="absolute inset-0 flex items-center justify-center text-primary-400 dark:text-primary-300 font-bold text-sm sm:text-lg z-0">
-                {item.name?.charAt(0)?.toUpperCase() || '?'}
-              </span>
-              {/* Image on top - hides on error to reveal initial */}
-              {item.imageUrl && item.imageUrl.length > 0 && (
-                <img
-                  src={item.imageUrl}
-                  alt={item.name}
-                  className="absolute inset-0 w-full h-full object-cover z-10"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = 'none';
-                  }}
-                />
-              )}
+            {/* Photo thumbnail with fallback placeholder */}
+            <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900/50 dark:to-primary-800/50">
+              <img
+                src={item.imageUrl || getPlaceholderImage('generic')}
+                alt={item.name}
+                className="w-full h-full object-cover"
+                onError={(e) => handleImageError(e, 'generic')}
+              />
             </div>
 
             {/* Content */}

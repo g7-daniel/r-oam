@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { searchHotelsWithPagination, searchHotelsByGeocode, GooglePlaceResult } from '@/lib/google-maps';
+import { BoundedSet } from '@/lib/bounded-cache';
 
-// Track which destinations are currently being indexed to prevent duplicate indexing
-const indexingInProgress = new Set<string>();
+// Track which destinations are currently being indexed (bounded to prevent memory leaks)
+const indexingInProgress = new BoundedSet<string>(100, 10); // max 100 items, 10 min TTL
 
 // Estimate star rating based on hotel name
 function getStarRating(name: string): number {
@@ -246,10 +247,10 @@ export async function GET(request: NextRequest) {
     longitude: hotel.lng,
     stars: hotel.priceLevel ? Math.min(hotel.priceLevel + 2, 5) : getStarRating(hotel.name),
     googleRating: hotel.googleRating,
-    guestRating: hotel.googleRating ? hotel.googleRating * 2 : null, // Convert 5-point to 10-point
+    guestRating: hotel.googleRating != null ? hotel.googleRating * 2 : null, // Convert 5-point to 10-point
     reviewCount: hotel.reviewCount,
     imageUrl: hotel.photoReference
-      ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${hotel.photoReference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+      ? `/api/photo-proxy?ref=${encodeURIComponent(hotel.photoReference)}&maxwidth=400`
       : null,
     amenities: generateAmenities(hotel.name),
     distanceToCenter: 5.0, // Will be calculated when we have user location
@@ -266,7 +267,7 @@ export async function GET(request: NextRequest) {
   formattedHotels.sort((a, b) => {
     if (a.isLuxury && !b.isLuxury) return -1;
     if (!a.isLuxury && b.isLuxury) return 1;
-    return (b.googleRating || 0) - (a.googleRating || 0);
+    return (b.googleRating ?? 0) - (a.googleRating ?? 0);
   });
 
   return NextResponse.json({

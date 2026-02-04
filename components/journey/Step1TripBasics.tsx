@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import dynamic from 'next/dynamic';
+import { useTripStore } from '@/stores/tripStore';
 import AirportAutocomplete from '@/components/ui/AirportAutocomplete';
-import DateRangePicker from '@/components/ui/DateRangePicker';
 import Card from '@/components/ui/Card';
 import {
-  Calendar,
+  Loader2,
   Users,
   DollarSign,
   Zap,
@@ -24,11 +24,24 @@ import clsx from 'clsx';
 import type { AirportData } from '@/lib/data/airports';
 import type { BudgetStyle, Pace } from '@/lib/schemas/trip';
 
-const BUDGET_STYLES: { value: BudgetStyle; label: string; icon: React.ElementType; description: string }[] = [
-  { value: 'budget', label: 'Budget', icon: Coffee, description: 'Hostels, street food, public transit' },
-  { value: 'mid', label: 'Mid-Range', icon: Sparkles, description: 'Nice hotels, local restaurants' },
-  { value: 'premium', label: 'Premium', icon: Zap, description: 'Boutique hotels, fine dining' },
-  { value: 'luxury', label: 'Luxury', icon: Rocket, description: '5-star everything, VIP access' },
+// Dynamic import for DateRangePicker - reduces initial bundle size
+const DateRangePicker = dynamic(
+  () => import('@/components/ui/DateRangePicker'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-12 bg-slate-100 dark:bg-slate-700 rounded-lg animate-pulse flex items-center justify-center">
+        <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+      </div>
+    ),
+  }
+);
+
+const BUDGET_STYLES: { value: BudgetStyle; label: string; icon: React.ElementType; description: string; priceRange: string }[] = [
+  { value: 'budget', label: 'Budget', icon: Coffee, description: 'Hostels, street food, public transit', priceRange: '$50-100/day' },
+  { value: 'mid', label: 'Mid-Range', icon: Sparkles, description: 'Nice hotels, local restaurants', priceRange: '$150-250/day' },
+  { value: 'premium', label: 'Premium', icon: Zap, description: 'Boutique hotels, fine dining', priceRange: '$300-500/day' },
+  { value: 'luxury', label: 'Luxury', icon: Rocket, description: '5-star everything, VIP access', priceRange: '$500+/day' },
 ];
 
 const PACE_OPTIONS: { value: Pace; label: string; description: string }[] = [
@@ -57,10 +70,10 @@ const getBudgetStyleForAmount = (amount: number): BudgetStyle => {
 };
 
 export default function Step1TripBasics() {
-  const { trip, setOriginAirport, setDates, setTravelers, setBudget, setPace, setTripTypeTags, setRoundTrip } = useTripStoreV2();
+  const { trip, setOriginAirport, setDates, setTravelers, setBudget, setPace, setTripTypeTags, setRoundTrip } = useTripStore();
   const { basics } = trip;
 
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors] = useState<Record<string, string>>({});
 
   // Convert AirportData to schema format
   const handleAirportChange = useCallback(
@@ -107,10 +120,8 @@ export default function Step1TripBasics() {
     setTripTypeTags(updated);
   };
 
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return '';
-    return dateStr;
-  };
+  // formatDate is available for future date formatting needs
+  // const formatDate = (dateStr: string | null) => dateStr || '';
 
   return (
     <div className="space-y-8">
@@ -202,9 +213,10 @@ export default function Step1TripBasics() {
                 type="button"
                 onClick={() => handleTravelerChange('adults', -1)}
                 disabled={basics.travelers.adults <= 1}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="Decrease adults"
               >
-                <Minus className="w-4 h-4" />
+                <Minus className="w-5 h-5" />
               </button>
               <span className="w-8 text-center font-semibold text-lg">
                 {basics.travelers.adults}
@@ -213,9 +225,10 @@ export default function Step1TripBasics() {
                 type="button"
                 onClick={() => handleTravelerChange('adults', 1)}
                 disabled={basics.travelers.adults >= 9}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="Increase adults"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-5 h-5" />
               </button>
             </div>
           </div>
@@ -232,9 +245,10 @@ export default function Step1TripBasics() {
                 type="button"
                 onClick={() => handleTravelerChange('children', -1)}
                 disabled={basics.travelers.children <= 0}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="Decrease children"
               >
-                <Minus className="w-4 h-4" />
+                <Minus className="w-5 h-5" />
               </button>
               <span className="w-8 text-center font-semibold text-lg">
                 {basics.travelers.children}
@@ -243,9 +257,10 @@ export default function Step1TripBasics() {
                 type="button"
                 onClick={() => handleTravelerChange('children', 1)}
                 disabled={basics.travelers.children >= 9}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="Increase children"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-5 h-5" />
               </button>
             </div>
           </div>
@@ -275,6 +290,7 @@ export default function Step1TripBasics() {
               step={100}
               className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               placeholder="Total trip budget in USD"
+              aria-label="Total trip budget in USD"
             />
           </div>
 
@@ -309,6 +325,12 @@ export default function Step1TripBasics() {
                     {style.label}
                   </p>
                   <p className="text-xs text-slate-500 mt-0.5">{style.description}</p>
+                  <p className={clsx(
+                    'text-xs mt-1 font-medium',
+                    isSelected ? 'text-primary-600' : 'text-slate-400'
+                  )}>
+                    {style.priceRange}
+                  </p>
                 </button>
               );
             })}

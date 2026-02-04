@@ -1,9 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { format, addDays, isBefore, startOfDay } from 'date-fns';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
+import {
+  toDate,
+  toDateString,
+  formatDate,
+  addDays as addDaysUtil,
+  isBefore as isBeforeUtil,
+  startOfDay as startOfDayUtil,
+  getToday,
+  isSameDay,
+  MONTH_NAMES,
+} from '@/lib/date-utils';
 
 interface DatePickerProps {
   label?: string;
@@ -13,13 +23,6 @@ interface DatePickerProps {
   onEndDateChange: (date: Date | null) => void;
   minDate?: Date;
   className?: string;
-}
-
-// Helper to ensure we have a Date object
-function toDate(value: Date | string | null): Date | null {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  return new Date(value);
 }
 
 export default function DatePicker({
@@ -59,7 +62,8 @@ export default function DatePicker({
     );
 
     // Don't allow selecting dates before minDate
-    if (isBefore(selectedDate, startOfDay(minDate))) return;
+    const minDateStart = startOfDayUtil(minDate);
+    if (minDateStart && isBeforeUtil(selectedDate, minDateStart)) return;
 
     if (!selectingEnd || !startDate) {
       // First click - set start date
@@ -68,7 +72,7 @@ export default function DatePicker({
       setSelectingEnd(true);
     } else {
       // Second click - set end date
-      if (isBefore(selectedDate, startDate)) {
+      if (isBeforeUtil(selectedDate, startDate)) {
         // If clicked date is before start, make it the new start
         onStartDateChange(selectedDate);
         onEndDateChange(null);
@@ -83,28 +87,29 @@ export default function DatePicker({
 
   const isInRange = (day: number) => {
     if (!startDate || !endDate) return false;
-    const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
+    const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day, 12, 0, 0);
     return date > startDate && date < endDate;
   };
 
   const isSelected = (day: number) => {
-    const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
-    const dateStr = format(date, 'yyyy-MM-dd');
-    return (
-      (startDate && format(startDate, 'yyyy-MM-dd') === dateStr) ||
-      (endDate && format(endDate, 'yyyy-MM-dd') === dateStr)
-    );
+    const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day, 12, 0, 0);
+    const dateStr = toDateString(date);
+    const startStr = toDateString(startDate);
+    const endStr = toDateString(endDate);
+    return dateStr === startStr || dateStr === endStr;
   };
 
   const isDisabled = (day: number) => {
-    const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
-    return isBefore(date, startOfDay(minDate));
+    const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day, 12, 0, 0);
+    const minDateStart = startOfDayUtil(minDate);
+    return minDateStart ? isBeforeUtil(date, minDateStart) : false;
   };
 
   const handleQuickSelect = (days: number) => {
     const start = new Date();
     start.setHours(12, 0, 0, 0);
-    const end = addDays(start, days);
+    const end = addDaysUtil(start, days);
+    if (!end) return;
     onStartDateChange(start);
     onEndDateChange(end);
     setSelectingEnd(false);
@@ -119,19 +124,26 @@ export default function DatePicker({
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="input flex items-center justify-between w-full text-left"
+        aria-label={startDate && endDate ? `Selected dates: ${formatDate(startDate, 'short')} to ${formatDate(endDate, 'full')}. Click to change` : 'Open date picker'}
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
       >
         <span className={clsx(!startDate && 'text-reddit-gray-400')}>
           {startDate
             ? endDate
-              ? `${format(startDate, 'MMM d')} - ${format(endDate, 'MMM d, yyyy')}`
-              : `${format(startDate, 'MMM d, yyyy')} - Select end date`
+              ? `${formatDate(startDate, 'short')} - ${formatDate(endDate, 'full')}`
+              : `${formatDate(startDate, 'full')} - Select end date`
             : 'Select dates'}
         </span>
         <Calendar className="w-5 h-5 text-reddit-gray-400" />
       </button>
 
       {isOpen && (
-        <div className="absolute z-50 mt-2 p-4 bg-white rounded-xl shadow-lg border border-reddit-gray-200 min-w-[320px]">
+        <div
+          className="absolute z-50 mt-2 p-4 bg-white rounded-xl shadow-lg border border-reddit-gray-200 min-w-[320px]"
+          role="dialog"
+          aria-label="Date picker calendar"
+        >
           {/* Month navigation */}
           <div className="flex items-center justify-between mb-4">
             <button
@@ -142,11 +154,12 @@ export default function DatePicker({
                 )
               }
               className="p-2 hover:bg-reddit-gray-100 rounded-lg transition-colors"
+              aria-label="Previous month"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
-            <span className="font-semibold">
-              {format(viewMonth, 'MMMM yyyy')}
+            <span className="font-semibold" aria-live="polite">
+              {MONTH_NAMES[viewMonth.getMonth()]} {viewMonth.getFullYear()}
             </span>
             <button
               type="button"
@@ -156,6 +169,7 @@ export default function DatePicker({
                 )
               }
               className="p-2 hover:bg-reddit-gray-100 rounded-lg transition-colors"
+              aria-label="Next month"
             >
               <ChevronRight className="w-5 h-5" />
             </button>
@@ -183,15 +197,17 @@ export default function DatePicker({
           </div>
 
           {/* Days grid */}
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1" role="grid" aria-label="Calendar days">
             {Array.from({ length: firstDayOfMonth }).map((_, i) => (
-              <div key={`empty-${i}`} className="w-10 h-10" />
+              <div key={`empty-${i}`} className="w-10 h-10" role="gridcell" />
             ))}
             {Array.from({ length: daysInMonth }).map((_, i) => {
               const day = i + 1;
               const disabled = isDisabled(day);
               const selected = isSelected(day);
               const inRange = isInRange(day);
+              const currentDate = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day, 12, 0, 0);
+              const dateLabel = formatDate(currentDate, 'long');
 
               return (
                 <button
@@ -199,6 +215,9 @@ export default function DatePicker({
                   type="button"
                   disabled={disabled}
                   onClick={() => handleDateClick(day)}
+                  aria-label={`${dateLabel}${selected ? ', selected' : ''}${disabled ? ', unavailable' : ''}`}
+                  aria-selected={selected || undefined}
+                  role="gridcell"
                   className={clsx(
                     'w-10 h-10 flex items-center justify-center rounded-lg text-sm transition-all',
                     disabled && 'text-reddit-gray-300 cursor-not-allowed',

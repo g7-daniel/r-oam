@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import DateRangePicker from '@/components/ui/DateRangePicker';
 import {
   MapPin,
   Plus,
@@ -20,6 +20,19 @@ import {
   Globe,
   Loader2,
 } from 'lucide-react';
+
+// Dynamic import for DateRangePicker - reduces initial bundle size
+const DateRangePicker = dynamic(
+  () => import('@/components/ui/DateRangePicker'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-12 bg-slate-100 dark:bg-slate-700 rounded-lg animate-pulse flex items-center justify-center">
+        <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+      </div>
+    ),
+  }
+);
 import clsx from 'clsx';
 import type { Place } from '@/lib/schemas/trip';
 import {
@@ -46,7 +59,7 @@ export default function StartPage() {
     setTripTypeTags,
     setDestinationHeroImage,
     updateDestinationNights,
-  } = useTripStoreV2();
+  } = useTripStore();
   const { destinations, basics } = trip;
 
   const [searchQuery, setSearchQuery] = useState('');

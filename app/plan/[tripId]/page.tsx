@@ -1,78 +1,67 @@
-'use client';
+import type { Metadata, ResolvingMetadata } from 'next';
+import TripPageContent from '@/components/plan/TripPageContent';
 
-import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
-import ItineraryBuilder from '@/components/builder/ItineraryBuilder';
+type Props = {
+  params: Promise<{ tripId: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+};
+
+export async function generateMetadata(
+  { params }: Props,
+  parent: ResolvingMetadata
+): Promise<Metadata> {
+  const { tripId } = await params;
+
+  // Format the trip ID for display (remove hyphens, capitalize)
+  const formattedTripId = tripId
+    .split('-')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+
+  // Get parent metadata for fallback images
+  const previousImages = (await parent).openGraph?.images || [];
+
+  return {
+    title: `Trip Planner - ${formattedTripId}`,
+    description: `Plan and customize your trip itinerary. Add destinations, hotels, restaurants, and experiences based on real traveler recommendations from Reddit.`,
+    keywords: [
+      'trip itinerary',
+      'travel planning',
+      'vacation planner',
+      'trip builder',
+      'destination planning',
+      'travel schedule',
+    ],
+    openGraph: {
+      title: `Trip Planner - ${formattedTripId} | r/oam`,
+      description: `Build your perfect trip itinerary with real recommendations from Reddit travelers.`,
+      url: `/plan/${tripId}`,
+      images: [
+        {
+          url: '/og-trip-planner.png',
+          width: 1200,
+          height: 630,
+          alt: `r/oam Trip Planner - ${formattedTripId}`,
+        },
+        ...previousImages,
+      ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `Trip Planner - ${formattedTripId} | r/oam`,
+      description: `Build your perfect trip itinerary with real recommendations from Reddit.`,
+      images: ['/og-trip-planner.png'],
+    },
+    alternates: {
+      canonical: `/plan/${tripId}`,
+    },
+    robots: {
+      index: false, // Don't index individual trip pages (they're user-specific)
+      follow: true,
+    },
+  };
+}
 
 export default function TripPage() {
-  const params = useParams();
-  const router = useRouter();
-  const { trip } = useTripStoreV2();
-  const [isReady, setIsReady] = useState(false);
-  const [hasDestinations, setHasDestinations] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    // Check localStorage directly to see if there are destinations
-    // This avoids race conditions with Zustand hydration
-    try {
-      const stored = localStorage.getItem('wandercraft-trip-v2');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        const destinations = parsed?.state?.trip?.destinations || [];
-        setHasDestinations(destinations.length > 0);
-      } else {
-        setHasDestinations(false);
-      }
-    } catch (e) {
-      // If localStorage fails, fall back to store state after delay
-      setHasDestinations(null);
-    }
-    setIsReady(true);
-  }, []);
-
-  useEffect(() => {
-    // Redirect only if we're sure there are no destinations
-    if (isReady && hasDestinations === false) {
-      router.push('/plan/start');
-    }
-  }, [isReady, hasDestinations, router]);
-
-  // Show loading until ready
-  if (!isReady) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-primary-200 dark:border-primary-800 border-t-primary-500 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-slate-400">Loading your trip...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // If we checked localStorage and found no destinations, show redirect message
-  if (hasDestinations === false) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
-        <div className="text-center">
-          <p className="text-gray-600 dark:text-slate-400">Redirecting to start...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // If localStorage check failed, use store state (with fallback)
-  if (hasDestinations === null && trip.destinations.length === 0) {
-    // Give store more time to hydrate before redirecting
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-primary-200 dark:border-primary-800 border-t-primary-500 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-slate-400">Loading your trip...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return <ItineraryBuilder />;
+  return <TripPageContent />;
 }

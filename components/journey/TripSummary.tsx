@@ -1,19 +1,17 @@
 'use client';
 
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import {
   Plane,
-  MapPin,
   Hotel,
   Sparkles,
-  Calendar,
   Users,
-  DollarSign,
   Check,
   X,
   ChevronRight,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { formatDate, formatDateRange } from '@/lib/date-utils';
 
 interface TripSummaryProps {
   className?: string;
@@ -21,7 +19,7 @@ interface TripSummaryProps {
 }
 
 export default function TripSummary({ className, compact = false }: TripSummaryProps) {
-  const { trip, getTotalBudgetSpent, getRemainingBudget, getFlightsSummary, experienceCart, diningReservations } = useTripStoreV2();
+  const { trip, getTotalBudgetSpent, getRemainingBudget, getFlightsSummary, experienceCart, diningReservations } = useTripStore();
   const { basics, destinations, flights } = trip;
 
   const spent = getTotalBudgetSpent();
@@ -52,8 +50,7 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Dates</span>
               <span className="font-medium">
-                {new Date(basics.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} -
-                {new Date(basics.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                {formatDateRange(basics.startDate, basics.endDate)}
               </span>
             </div>
           )}
@@ -80,8 +77,7 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
         </h3>
         {basics.startDate && basics.endDate && (
           <p className="text-sm text-white/80 mt-1">
-            {new Date(basics.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} -{' '}
-            {new Date(basics.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {formatDateRange(basics.startDate, basics.endDate)}
           </p>
         )}
       </div>

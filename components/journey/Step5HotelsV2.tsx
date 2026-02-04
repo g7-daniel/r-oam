@@ -1,13 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import Card from '@/components/ui/Card';
 import {
   Hotel,
   MapPin,
   Star,
-  DollarSign,
   Check,
   AlertCircle,
   Wifi,
@@ -21,7 +20,6 @@ import {
   ChevronRight,
   Bed,
   Users,
-  Bath,
   Utensils,
   Waves,
   Sparkles,
@@ -29,25 +27,12 @@ import {
   Search,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { handleImageError, getPlaceholderImage } from '@/lib/utils';
 import HotelSnooChat, { type RedditHotel } from './HotelSnooChat';
 import type { Hotel as HotelType } from '@/lib/schemas/trip';
 
-// Amenity icons
-const AMENITY_ICONS: Record<string, React.ElementType> = {
-  wifi: Wifi,
-  parking: Car,
-  gym: Dumbbell,
-  breakfast: Coffee,
-};
-
-// All available amenities
-const ALL_AMENITIES = [
-  'wifi', 'pool', 'gym', 'spa', 'restaurant', 'parking', 'breakfast',
-  'beach_access', 'airport_shuttle', 'pet_friendly', 'room_service',
-  'air_conditioning', 'bar', 'laundry', 'concierge', 'business_center'
-];
-
-const PROPERTY_TYPES = ['hotel', 'resort', 'apartment', 'villa', 'hostel', 'boutique'];
+// Amenity icons - used for visual display of hotel amenities
+// Note: AMENITY_ICONS, ALL_AMENITIES, and PROPERTY_TYPES are prepared for future filtering features
 
 // Available subreddits for hotel recommendations - grouped by category
 const HOTEL_SUBREDDITS = {
@@ -255,9 +240,7 @@ function HotelDetailModal({
               src={hotelImages[currentImageIndex] || ROOM_TYPE_IMAGES.standard[0]}
               alt={`${hotel.name} - ${currentImageIndex === 0 ? 'Hotel' : selectedRoomType.name}`}
               className="w-full h-full object-cover"
-              onError={(e) => {
-                e.currentTarget.src = ROOM_TYPE_IMAGES.standard[currentImageIndex % 4];
-              }}
+              onError={(e) => handleImageError(e, 'hotel')}
             />
             {/* Image label */}
             <div className="absolute top-4 left-4 bg-black/60 text-white text-xs px-2 py-1 rounded">
@@ -464,7 +447,7 @@ export default function Step5HotelsV2() {
     setActiveDestination,
     setHotelResults,
     selectHotel,
-  } = useTripStoreV2();
+  } = useTripStore();
 
   const { destinations, activeDestinationId, basics } = trip;
   const activeDestination = destinations.find((d) => d.destinationId === activeDestinationId);
@@ -1502,13 +1485,10 @@ export default function Step5HotelsV2() {
                         {/* Image */}
                         <div className="relative w-48 h-36 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 flex-shrink-0">
                           <img
-                            src={hotel.imageUrl}
+                            src={hotel.imageUrl || getPlaceholderImage('hotel')}
                             alt={hotel.name}
                             className="w-full h-full object-cover"
-                            onError={(e) => {
-                              const img = e.target as HTMLImageElement;
-                              img.src = HOTEL_IMAGES[Math.floor(Math.random() * HOTEL_IMAGES.length)];
-                            }}
+                            onError={(e) => handleImageError(e, 'hotel')}
                           />
                           {/* Reddit Pick badge - only show when subreddits are selected */}
                           {hotel.isRedditRecommended && selectedSubreddits.size > 0 && (

@@ -1,14 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import {
   X,
   Star,
   Clock,
   MapPin,
-  Phone,
-  Globe,
   Navigation,
   Plus,
   Calendar,
@@ -18,7 +16,8 @@ import {
   Utensils,
 } from 'lucide-react';
 import clsx from 'clsx';
-import type { CollectionItem } from '@/stores/tripStoreV2';
+import type { CollectionItem } from '@/stores/tripStore';
+import { handleImageError, getPlaceholderImage } from '@/lib/utils';
 import RestaurantAvailability from '@/components/ui/RestaurantAvailability';
 
 interface PlaceDetailModalProps {
@@ -32,7 +31,7 @@ export default function PlaceDetailModal({
   onClose,
   onSchedule,
 }: PlaceDetailModalProps) {
-  const { trip, addToCollection, scheduleItem, updateScheduledItem, scheduledItems, unscheduleItem } = useTripStoreV2();
+  const { trip, addToCollection, scheduleItem, updateScheduledItem, scheduledItems, unscheduleItem } = useTripStore();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [showBookingModal, setShowBookingModal] = useState(false);
 
@@ -69,7 +68,8 @@ export default function PlaceDetailModal({
     setShowBookingModal(false);
   };
 
-  const handleAgentBook = (partySize: number, preferredTime: string) => {
+  const handleAgentBook = (_partySize: number, preferredTime: string) => {
+    // partySize is available for future use (e.g., sending to booking API)
     updateScheduledItem(item.id, { reservationTime: `Pending (${preferredTime})` });
     setShowBookingModal(false);
   };
@@ -96,40 +96,35 @@ export default function PlaceDetailModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60"
         onClick={onClose}
       />
 
-      {/* Modal */}
-      <div className="relative w-full max-w-2xl max-h-[90vh] bg-white dark:bg-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-        {/* Close button */}
+      {/* Modal - full screen on mobile, modal on larger screens */}
+      <div className="relative w-full sm:max-w-2xl h-full sm:h-auto sm:max-h-[90vh] bg-white dark:bg-slate-800 sm:rounded-2xl rounded-t-2xl shadow-2xl overflow-hidden flex flex-col">
+        {/* Close button - touch-friendly */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-10 p-2 bg-black/30 hover:bg-black/50 text-white rounded-full transition-colors"
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10 min-w-[44px] min-h-[44px] flex items-center justify-center bg-black/30 hover:bg-black/50 text-white rounded-full transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* Image gallery */}
-        <div className="relative h-64 bg-gradient-to-br from-primary-200 to-primary-300 dark:from-primary-900 dark:to-primary-800 flex-shrink-0">
-          {/* Fallback - large initial letter */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-8xl font-bold text-primary-400/50 dark:text-primary-500/50">
-              {item.name?.charAt(0)?.toUpperCase() || '?'}
-            </span>
-          </div>
-          {/* Image on top (if available and not errored) */}
-          {images.length > 0 && !imageError && (
-            <img
-              src={images[currentImageIndex]}
-              alt={item.name}
-              className="relative w-full h-full object-cover z-10"
-              onError={() => setImageError(true)}
-            />
-          )}
+        {/* Image gallery - responsive height */}
+        <div className="relative h-48 sm:h-64 bg-gradient-to-br from-primary-200 to-primary-300 dark:from-primary-900 dark:to-primary-800 flex-shrink-0">
+          {/* Image with placeholder fallback */}
+          <img
+            src={images.length > 0 && !imageError ? images[currentImageIndex] : getPlaceholderImage('generic')}
+            alt={item.name}
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              setImageError(true);
+              handleImageError(e, 'generic');
+            }}
+          />
 
           {/* Image navigation */}
           {images.length > 1 && (
@@ -163,14 +158,14 @@ export default function PlaceDetailModal({
           )}
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        {/* Content - responsive padding */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {/* Title and rating */}
           <div className="mb-4">
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mb-2">
               {item.name}
             </h2>
-            <div className="flex flex-wrap items-center gap-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs sm:text-sm">
               {item.rating && (
                 <span className="flex items-center gap-1 font-medium text-slate-900 dark:text-white">
                   <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
@@ -296,8 +291,8 @@ export default function PlaceDetailModal({
           )}
 
           {/* Day selector for scheduling */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+          <div className="mb-4 sm:mb-6">
+            <label className="block text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               {isScheduled ? (
                 <span>
                   Currently on <span className="text-green-600 dark:text-green-400">Day {(scheduledDayIndex ?? 0) + 1}</span>
@@ -309,13 +304,13 @@ export default function PlaceDetailModal({
                 'Schedule for:'
               )}
             </label>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {Array.from({ length: Math.min(totalDays, 7) }).map((_, idx) => (
                 <button
                   key={idx}
                   onClick={() => setSelectedDay(idx)}
                   className={clsx(
-                    'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors relative',
+                    'min-h-[44px] px-3 py-1.5 rounded-lg text-sm font-medium transition-colors relative',
                     selectedDay === idx
                       ? 'bg-primary-500 text-white'
                       : scheduledDayIndex === idx
@@ -338,39 +333,42 @@ export default function PlaceDetailModal({
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex-shrink-0 p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-          <div className="flex flex-wrap gap-3">
-            <a
-              href={mapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 transition-colors"
-            >
-              <Navigation className="w-4 h-4" />
-              Get Directions
-            </a>
-            {/* Only show Save button if not already scheduled */}
-            {!isScheduled && (
-              <button
-                onClick={handleAddToCollection}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 transition-colors"
+        {/* Actions - responsive layout with touch-friendly buttons */}
+        <div className="flex-shrink-0 p-3 sm:p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 safe-area-inset-bottom">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-3">
+            {/* Secondary actions row on mobile */}
+            <div className="flex gap-2 sm:contents">
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 min-h-[44px] px-3 sm:px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 transition-colors text-sm"
               >
-                <Plus className="w-4 h-4" />
-                Save
-              </button>
-            )}
-            {isRestaurant && !item.reservationTime && (
-              <button
-                onClick={() => setShowBookingModal(true)}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-colors font-medium"
-              >
-                <Calendar className="w-4 h-4" />
-                Book Table
-              </button>
-            )}
+                <Navigation className="w-4 h-4" />
+                <span className="hidden xs:inline">Directions</span>
+              </a>
+              {/* Only show Save button if not already scheduled */}
+              {!isScheduled && (
+                <button
+                  onClick={handleAddToCollection}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 min-h-[44px] px-3 sm:px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 transition-colors text-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Save
+                </button>
+              )}
+              {isRestaurant && !item.reservationTime && (
+                <button
+                  onClick={() => setShowBookingModal(true)}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 min-h-[44px] px-3 sm:px-4 py-2.5 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-colors font-medium text-sm"
+                >
+                  <Calendar className="w-4 h-4" />
+                  <span className="hidden xs:inline">Book</span>
+                </button>
+              )}
+            </div>
 
-            {/* Schedule/Move/Remove buttons based on current state */}
+            {/* Primary action button - full width on mobile */}
             {isScheduled ? (
               scheduledDayIndex === selectedDay ? (
                 // Already on this day - show remove option
@@ -379,7 +377,7 @@ export default function PlaceDetailModal({
                     unscheduleItem(item.id);
                     onClose();
                   }}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium"
+                  className="w-full sm:flex-1 flex items-center justify-center gap-2 min-h-[48px] sm:min-h-[44px] px-4 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium"
                 >
                   <X className="w-4 h-4" />
                   Remove from Day {selectedDay + 1}
@@ -393,7 +391,7 @@ export default function PlaceDetailModal({
                     onSchedule?.(selectedDay);
                     onClose();
                   }}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary-500 text-white rounded-xl hover:bg-primary-600 transition-colors font-medium"
+                  className="w-full sm:flex-1 flex items-center justify-center gap-2 min-h-[48px] sm:min-h-[44px] px-4 py-2.5 bg-primary-500 text-white rounded-xl hover:bg-primary-600 transition-colors font-medium"
                 >
                   <Calendar className="w-4 h-4" />
                   Move to Day {selectedDay + 1}
@@ -403,7 +401,7 @@ export default function PlaceDetailModal({
               // Not scheduled - show add option
               <button
                 onClick={handleSchedule}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary-500 text-white rounded-xl hover:bg-primary-600 transition-colors font-medium"
+                className="w-full sm:flex-1 flex items-center justify-center gap-2 min-h-[48px] sm:min-h-[44px] px-4 py-2.5 bg-primary-500 text-white rounded-xl hover:bg-primary-600 transition-colors font-medium"
               >
                 <Calendar className="w-4 h-4" />
                 Add to Day {selectedDay + 1}

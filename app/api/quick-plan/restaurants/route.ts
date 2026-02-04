@@ -7,6 +7,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { RestaurantCandidate } from '@/types/quick-plan';
 import { searchRestaurantRecommendations } from '@/lib/reddit';
 import { redditCache, placesCache, CACHE_TTL, createCacheKey, fetchWithTimeout } from '@/lib/api-cache';
+import { calculateHaversineDistance } from '@/lib/utils/geo';
+import {
+  restaurantsPostSchema,
+  validateRequestBody,
+  isValidCoordinate,
+} from '@/lib/api-validation';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 const GOOGLE_API_TIMEOUT = 15000; // 15 second timeout
@@ -16,20 +22,19 @@ const MAX_DISTANCE_METERS = 15000; // 15km - reasonable driving distance
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    // Validate request body using Zod schema
+    const validationResult = await validateRequestBody(request, restaurantsPostSchema);
+    if (!validationResult.success) {
+      return validationResult.error;
+    }
+
     const {
       cuisineTypes,
       destination,
-      hotels, // { areaId: { lat, lng, name } }
-      areas,  // [{ id, name, centerLat, centerLng }]
-      dietaryRestrictions = [], // ['vegan', 'halal', etc.]
-    } = body as {
-      cuisineTypes: string[];
-      destination: string;
-      hotels: Record<string, { lat: number; lng: number; name: string }>;
-      areas: { id: string; name: string; centerLat?: number; centerLng?: number }[];
-      dietaryRestrictions?: string[];
-    };
+      hotels,
+      areas,
+      dietaryRestrictions,
+    } = validationResult.data;
 
     console.log('[Restaurants API] Request:', {
       cuisineTypes,
@@ -45,23 +50,13 @@ export async function POST(request: NextRequest) {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
       console.error('[Restaurants API] No Google Maps API key configured');
-      return NextResponse.json({ error: 'API key not configured' }, { status: 500 });
+      return NextResponse.json({
+        error: 'CONFIGURATION_ERROR',
+        message: 'Restaurant search is temporarily unavailable. Please try again later.',
+        restaurantsByCuisine: {},
+        totalCount: 0,
+      }, { status: 500 });
     }
-
-    // FIX 2.10: Coordinate validation function
-    const isValidCoordinate = (lat: number, lng: number): boolean => {
-      return (
-        typeof lat === 'number' &&
-        typeof lng === 'number' &&
-        !isNaN(lat) &&
-        !isNaN(lng) &&
-        lat >= -90 &&
-        lat <= 90 &&
-        lng >= -180 &&
-        lng <= 180 &&
-        !(lat === 0 && lng === 0) // Null island check
-      );
-    };
 
     // Build hotel coordinates list for proximity filtering
     const hotelCoords: { areaId: string; areaName: string; lat: number; lng: number }[] = [];
@@ -122,7 +117,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         restaurantsByCuisine: {},
         totalCount: 0,
-        error: 'No location coordinates available',
+        warning: 'NO_COORDINATES',
+        message: 'No valid location coordinates available. Please select a hotel or area first.',
       });
     }
 
@@ -164,111 +160,129 @@ export async function POST(request: NextRequest) {
 
     const results: Record<string, RestaurantCandidate[]> = {};
 
-    // FIX 2.4: Global deduplication - move globalSeenPlaceIds OUTSIDE the cuisine loop
-    // This prevents the same restaurant appearing in multiple cuisine categories
-    const globalSeenPlaceIds = new Set<string>();
+    // =================================================================
+    // PARALLELIZED: Process all cuisine types concurrently using Promise.all
+    // =================================================================
+    console.log(`[Restaurants API] Processing ${cuisineTypes.length} cuisine types in parallel`);
 
-    for (const cuisine of cuisineTypes) {
+    // For global deduplication across cuisines, we track seen place IDs per cuisine
+    // and dedupe after parallel execution
+    const cuisineResults = await Promise.all(cuisineTypes.map(async (cuisine) => {
       const searchTerms = cuisineSearchTerms[cuisine] || [`${cuisine} restaurant`];
       const allRestaurants: RestaurantCandidate[] = [];
+      const localSeenPlaceIds = new Set<string>();
 
-      // Search near each hotel location (with caching)
+      // Parallelize searches across hotels and search terms
+      const searchPromises: Promise<{ hotel: typeof hotelCoords[0]; searchTerm: string; data: any } | null>[] = [];
+
       for (const hotel of hotelCoords) {
         for (const searchTerm of searchTerms.slice(0, 2)) {
-          try {
-            const searchQuery = `${searchTerm} ${hotel.areaName} ${destination}`;
-            const cacheKey = createCacheKey('places-restaurants', {
-              query: searchQuery,
-              lat: hotel.lat.toFixed(2),
-              lng: hotel.lng.toFixed(2),
-            });
-
-            // Check cache first
-            let data = placesCache.get<any>(cacheKey);
-
-            if (!data) {
-              const params = new URLSearchParams({
+          searchPromises.push((async () => {
+            try {
+              const searchQuery = `${searchTerm} ${hotel.areaName} ${destination}`;
+              const cacheKey = createCacheKey('places-restaurants', {
                 query: searchQuery,
-                type: 'restaurant',
-                key: apiKey,
-                location: `${hotel.lat},${hotel.lng}`,
-                radius: String(MAX_DISTANCE_METERS),
+                lat: hotel.lat.toFixed(2),
+                lng: hotel.lng.toFixed(2),
               });
 
-              const response = await fetchWithTimeout(
-                `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
-                {},
-                GOOGLE_API_TIMEOUT
-              );
+              // Check cache first
+              let data = placesCache.get<any>(cacheKey);
 
-              if (response.ok) {
-                data = await response.json();
-                // Cache the response
-                placesCache.set(cacheKey, data, CACHE_TTL.RESTAURANTS);
-              }
-            }
+              if (!data) {
+                const params = new URLSearchParams({
+                  query: searchQuery,
+                  type: 'restaurant',
+                  key: apiKey,
+                  location: `${hotel.lat},${hotel.lng}`,
+                  radius: String(MAX_DISTANCE_METERS),
+                });
 
-            if (data?.results) {
-                for (const place of data.results) {
-                  if (place.place_id && !globalSeenPlaceIds.has(place.place_id)) {
-                    globalSeenPlaceIds.add(place.place_id);
+                const response = await fetchWithTimeout(
+                  `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+                  {},
+                  GOOGLE_API_TIMEOUT
+                );
 
-                    // Calculate distance from this hotel
-                    const placeLat = place.geometry?.location?.lat;
-                    const placeLng = place.geometry?.location?.lng;
-                    const distance = placeLat && placeLng
-                      ? calculateDistance(hotel.lat, hotel.lng, placeLat, placeLng)
-                      : Infinity;
-
-                    // Only include if within max distance
-                    if (distance <= MAX_DISTANCE_METERS) {
-                      // Get Reddit data for this restaurant
-                      const redditData = redditRestaurants.get(place.name.toLowerCase());
-
-                      // Estimate booking difficulty
-                      const booking = estimateBookingDifficulty(place);
-
-                      allRestaurants.push({
-                        id: place.place_id,
-                        placeId: place.place_id,
-                        name: place.name,
-                        address: place.formatted_address || place.vicinity || '',
-                        googleMapsUrl: `https://www.google.com/maps/place/?q=place_id:${place.place_id}`,
-                        cuisine: [formatCuisineLabel(cuisine)],
-                        priceLevel: place.price_level || 2,
-                        googleRating: place.rating || 0,
-                        reviewCount: place.user_ratings_total || 0,
-                        imageUrl: place.photos?.[0]?.photo_reference
-                          ? `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
-                          : '/images/restaurant-placeholder.svg',
-                        lat: placeLat || 0,
-                        lng: placeLng || 0,
-                        redditScore: redditData?.mentions || 0,
-                        evidence: redditData?.quote ? [{
-                          type: 'reddit_thread' as const,
-                          snippet: redditData.quote,
-                          subreddit: 'food',
-                          score: redditData.mentions,
-                        }] : [],
-                        reasons: [
-                          ...generateReasons(place, distance, hotel.areaName),
-                          ...(redditData && redditData.mentions > 0 ? [`Mentioned ${redditData.mentions}x on Reddit`] : []),
-                        ],
-                        bestFor: ['dinner'] as ('lunch' | 'dinner' | 'brunch')[],
-                        requiresReservation: (place.price_level || 2) >= 3,
-                        bookingDifficulty: booking.difficulty,
-                        bookingAdvice: booking.advice,
-                        userStatus: 'default' as const,
-                        // Custom fields for display
-                        nearArea: hotel.areaName,
-                        distanceFromHotel: Math.round(distance / 1000 * 10) / 10, // km with 1 decimal
-                      });
-                    }
-                  }
+                if (response.ok) {
+                  data = await response.json();
+                  // Cache the response
+                  placesCache.set(cacheKey, data, CACHE_TTL.RESTAURANTS);
                 }
               }
-          } catch (error) {
-            console.error(`[Restaurants API] Search failed for ${searchTerm}:`, error);
+
+              return { hotel, searchTerm, data };
+            } catch (error) {
+              console.error(`[Restaurants API] Search failed for ${searchTerm}:`, error);
+              return null;
+            }
+          })());
+        }
+      }
+
+      // Wait for all searches to complete
+      const searchResults = await Promise.all(searchPromises);
+
+      // Process results
+      for (const result of searchResults) {
+        if (!result || !result.data?.results) continue;
+
+        const { hotel, data } = result;
+        for (const place of data.results) {
+          if (place.place_id && !localSeenPlaceIds.has(place.place_id)) {
+            localSeenPlaceIds.add(place.place_id);
+
+            // Calculate distance from this hotel
+            const placeLat = place.geometry?.location?.lat;
+            const placeLng = place.geometry?.location?.lng;
+            const distance = placeLat && placeLng
+              ? calculateDistance(hotel.lat, hotel.lng, placeLat, placeLng)
+              : Infinity;
+
+            // Only include if within max distance
+            if (distance <= MAX_DISTANCE_METERS) {
+              // Get Reddit data for this restaurant
+              const redditData = redditRestaurants.get(place.name.toLowerCase());
+
+              // Estimate booking difficulty
+              const booking = estimateBookingDifficulty(place);
+
+              allRestaurants.push({
+                id: place.place_id,
+                placeId: place.place_id,
+                name: place.name,
+                address: place.formatted_address || place.vicinity || '',
+                googleMapsUrl: `https://www.google.com/maps/place/?q=place_id:${place.place_id}`,
+                cuisine: [formatCuisineLabel(cuisine)],
+                priceLevel: place.price_level || 2,
+                googleRating: place.rating || 0,
+                reviewCount: place.user_ratings_total || 0,
+                imageUrl: place.photos?.[0]?.photo_reference
+                  ? `/api/photo-proxy?ref=${encodeURIComponent(place.photos[0].photo_reference)}&maxwidth=400`
+                  : '/images/restaurant-placeholder.svg',
+                lat: placeLat || 0,
+                lng: placeLng || 0,
+                redditScore: redditData?.mentions || 0,
+                evidence: redditData?.quote ? [{
+                  type: 'reddit_thread' as const,
+                  snippet: redditData.quote,
+                  subreddit: 'food',
+                  score: redditData.mentions,
+                }] : [],
+                reasons: [
+                  ...generateReasons(place, distance, hotel.areaName),
+                  ...(redditData && redditData.mentions > 0 ? [`Mentioned ${redditData.mentions}x on Reddit`] : []),
+                ],
+                bestFor: ['dinner'] as ('lunch' | 'dinner' | 'brunch')[],
+                requiresReservation: (place.price_level || 2) >= 3,
+                bookingDifficulty: booking.difficulty,
+                bookingAdvice: booking.advice,
+                userStatus: 'default' as const,
+                // Custom fields for display
+                nearArea: hotel.areaName,
+                distanceFromHotel: Math.round(distance / 1000 * 10) / 10, // km with 1 decimal
+              });
+            }
           }
         }
       }
@@ -287,31 +301,50 @@ export async function POST(request: NextRequest) {
         return ((a as any).distanceFromHotel || 999) - ((b as any).distanceFromHotel || 999);
       });
 
-      results[cuisine] = allRestaurants.slice(0, 8); // Top 8 per cuisine
-      console.log(`[Restaurants API] Found ${allRestaurants.length} ${cuisine} restaurants, returning top ${results[cuisine].length}`);
+      console.log(`[Restaurants API] Found ${allRestaurants.length} ${cuisine} restaurants`);
+      return { cuisine, restaurants: allRestaurants.slice(0, 8) }; // Top 8 per cuisine
+    }));
+
+    // Collect results and dedupe across cuisines
+    const globalSeenPlaceIds = new Set<string>();
+    for (const { cuisine, restaurants } of cuisineResults) {
+      // Filter out restaurants already seen in previous cuisines
+      const uniqueRestaurants = restaurants.filter(r => {
+        if (globalSeenPlaceIds.has(r.placeId)) return false;
+        globalSeenPlaceIds.add(r.placeId);
+        return true;
+      });
+      results[cuisine] = uniqueRestaurants;
+      console.log(`[Restaurants API] ${cuisine}: returning ${uniqueRestaurants.length} unique restaurants`);
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       restaurantsByCuisine: results,
       totalCount: Object.values(results).reduce((sum, arr) => sum + arr.length, 0),
+      success: true,
     });
+
+    // Add cache headers - restaurants data can be cached for 5 minutes
+    // with stale-while-revalidate for 10 minutes
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (error) {
-    console.error('[Restaurants API] Error:', error);
-    return NextResponse.json({ error: 'Failed to fetch restaurants' }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Restaurants API] Error:', errorMessage, error);
+
+    // Return a graceful degradation response with empty results
+    return NextResponse.json({
+      error: 'FETCH_ERROR',
+      message: 'We had trouble finding restaurants. Please try again.',
+      restaurantsByCuisine: {},
+      totalCount: 0,
+    }, { status: 500 });
   }
 }
 
-// Haversine formula to calculate distance between two points
+// Distance in meters using centralized Haversine utility
 function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000; // Earth's radius in meters
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+  return calculateHaversineDistance(lat1, lng1, lat2, lng2) * 1000; // Convert km to meters
 }
 
 function formatCuisineLabel(cuisine: string): string {

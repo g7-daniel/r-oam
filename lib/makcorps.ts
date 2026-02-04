@@ -6,8 +6,10 @@
  */
 
 import { fetchWithTimeout } from './api-cache';
+import { isConfigured } from './env';
 
-const MAKCORPS_API_KEY = process.env.MAKCORPS_API_KEY;
+// Use lazy evaluation to avoid issues during module load
+const getMakcorpsApiKey = () => process.env.MAKCORPS_API_KEY || '';
 const MAKCORPS_BASE_URL = 'https://api.makcorps.com';
 const MAKCORPS_TIMEOUT = 15000; // 15 second timeout
 
@@ -41,7 +43,7 @@ export interface MakcorpsHotelMapping {
 /**
  * Helper to clean price strings like "US$1,960" or "$325" to numbers
  */
-function cleanPrice(val: any): number {
+function cleanPrice(val: unknown): number {
   if (typeof val === 'number') return val;
   if (typeof val === 'string') {
     // Remove currency symbols, "US", commas, spaces
@@ -49,6 +51,36 @@ function cleanPrice(val: any): number {
     return parseFloat(cleaned) || 0;
   }
   return 0;
+}
+
+// Type for mapping API response items
+interface MappingResponseItem {
+  type?: string;
+  document_id?: string;
+  name?: string;
+}
+
+// Type for city API hotel item - used in parseHotelItem
+type CityHotelItem = {
+  name?: string;
+  hotelId?: number;
+  geocode?: { latitude?: number; longitude?: number };
+  reviews?: { rating?: number; count?: number };
+  telephone?: string;
+  vendor1?: string;
+  price1?: string | number;
+  vendor2?: string;
+  price2?: string | number;
+  vendor3?: string;
+  price3?: string | number;
+  vendor4?: string;
+  price4?: string | number;
+  [key: string]: unknown;
+};
+
+// Type for comparison response
+interface ComparisonItem {
+  [key: string]: string | number | null | undefined;
 }
 
 /**
@@ -59,14 +91,14 @@ export async function mapCityToMakcorps(
   cityName: string,
   country?: string
 ): Promise<string | null> {
-  if (!MAKCORPS_API_KEY) {
-    console.warn('[Makcorps] No API key configured');
+  if (!isConfigured.makcorps()) {
+    console.warn('[Makcorps] No API key configured. Set MAKCORPS_API_KEY in .env.local');
     return null;
   }
 
   try {
     const searchQuery = country ? `${cityName}, ${country}` : cityName;
-    const url = `${MAKCORPS_BASE_URL}/mapping?api_key=${MAKCORPS_API_KEY}&name=${encodeURIComponent(searchQuery)}`;
+    const url = `${MAKCORPS_BASE_URL}/mapping?api_key=${getMakcorpsApiKey()}&name=${encodeURIComponent(searchQuery)}`;
 
     console.log(`[Makcorps] Mapping city: "${searchQuery}"`);
     const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
@@ -79,18 +111,19 @@ export async function mapCityToMakcorps(
 
     // Look for GEO type (city) result
     if (Array.isArray(data) && data.length > 0) {
-      const cityMatch = data.find((item: any) =>
+      const items = data as MappingResponseItem[];
+      const cityMatch = items.find((item) =>
         item.type === 'GEO' && item.document_id
       );
 
-      if (cityMatch) {
+      if (cityMatch?.document_id) {
         console.log(`[Makcorps] Found city: ${cityMatch.name} -> ${cityMatch.document_id}`);
         return cityMatch.document_id;
       }
 
       // Fallback to first result with document_id
-      const firstMatch = data.find((item: any) => item.document_id);
-      if (firstMatch) {
+      const firstMatch = items.find((item) => item.document_id);
+      if (firstMatch?.document_id) {
         console.log(`[Makcorps] Using fallback city mapping: ${firstMatch.document_id}`);
         return firstMatch.document_id;
       }
@@ -111,14 +144,14 @@ export async function mapHotelToMakcorps(
   hotelName: string,
   city: string
 ): Promise<MakcorpsHotelMapping | null> {
-  if (!MAKCORPS_API_KEY) {
-    console.warn('[Makcorps] No API key configured');
+  if (!isConfigured.makcorps()) {
+    console.warn('[Makcorps] No API key configured. Set MAKCORPS_API_KEY in .env.local');
     return null;
   }
 
   try {
     const searchQuery = `${hotelName}, ${city}`;
-    const url = `${MAKCORPS_BASE_URL}/mapping?api_key=${MAKCORPS_API_KEY}&name=${encodeURIComponent(searchQuery)}`;
+    const url = `${MAKCORPS_BASE_URL}/mapping?api_key=${getMakcorpsApiKey()}&name=${encodeURIComponent(searchQuery)}`;
 
     console.log(`[Makcorps] Mapping hotel: "${searchQuery}"`);
     const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
@@ -130,11 +163,12 @@ export async function mapHotelToMakcorps(
     }
 
     if (Array.isArray(data) && data.length > 0) {
-      const hotelMatch = data.find((item: any) =>
+      const items = data as MappingResponseItem[];
+      const hotelMatch = items.find((item) =>
         item.type === 'HOTEL' && item.document_id
       );
 
-      if (hotelMatch) {
+      if (hotelMatch?.document_id) {
         console.log(`[Makcorps] Found hotel: ${hotelMatch.name} -> ${hotelMatch.document_id}`);
         return {
           documentId: hotelMatch.document_id,
@@ -143,8 +177,8 @@ export async function mapHotelToMakcorps(
         };
       }
 
-      const firstMatch = data.find((item: any) => item.document_id);
-      if (firstMatch) {
+      const firstMatch = items.find((item) => item.document_id);
+      if (firstMatch?.document_id) {
         return {
           documentId: firstMatch.document_id,
           hotelName: firstMatch.name || hotelName,
@@ -179,8 +213,8 @@ export async function getHotelsByCity(
   rooms: number = 1,
   pagination: number = 0
 ): Promise<{ hotels: MakcorpsHotel[]; totalCount: number; totalPages: number }> {
-  if (!MAKCORPS_API_KEY) {
-    console.warn('[Makcorps] No API key configured');
+  if (!isConfigured.makcorps()) {
+    console.warn('[Makcorps] No API key configured. Set MAKCORPS_API_KEY in .env.local');
     return { hotels: [], totalCount: 0, totalPages: 0 };
   }
 
@@ -193,7 +227,7 @@ export async function getHotelsByCity(
       `adults=${adults}&` +
       `checkin=${checkIn}&` +
       `checkout=${checkOut}&` +
-      `api_key=${MAKCORPS_API_KEY}`;
+      `api_key=${getMakcorpsApiKey()}`;
 
     console.log(`[Makcorps] Fetching hotels for city: ${cityId}, page ${pagination}`);
     const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
@@ -282,7 +316,7 @@ export async function getHotelPricing(
   adults: number,
   rooms: number = 1
 ): Promise<MakcorpsPrice[]> {
-  if (!MAKCORPS_API_KEY) return [];
+  if (!isConfigured.makcorps()) return [];
 
   try {
     const url = `${MAKCORPS_BASE_URL}/hotel?` +
@@ -292,7 +326,7 @@ export async function getHotelPricing(
       `adults=${adults}&` +
       `rooms=${rooms}&` +
       `cur=USD&` +
-      `api_key=${MAKCORPS_API_KEY}`;
+      `api_key=${getMakcorpsApiKey()}`;
 
     console.log(`[Makcorps] Fetching /hotel prices for: ${hotelId}`);
     const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
@@ -310,8 +344,8 @@ export async function getHotelPricing(
       const rawComparison = data.comparison[0] || [];
 
       // Each vendor is in a SEPARATE object, merge them all
-      const comparison = Array.isArray(rawComparison)
-        ? rawComparison.reduce((acc: any, obj: any) => ({ ...acc, ...obj }), {})
+      const comparison: ComparisonItem = Array.isArray(rawComparison)
+        ? rawComparison.reduce((acc: ComparisonItem, obj: ComparisonItem) => ({ ...acc, ...obj }), {})
         : rawComparison;
 
       // API returns up to 19 vendors!
@@ -327,7 +361,7 @@ export async function getHotelPricing(
           // Skip null prices (some vendors return null)
           if (price > 0) {
             prices.push({
-              vendor,
+              vendor: String(vendor),
               price,
               totalPrice: price + tax,
               tax,
@@ -397,8 +431,8 @@ export async function getBatchPricingByCity(
 ): Promise<Map<string, { price: number; vendor: string; allPrices: MakcorpsPrice[] }>> {
   const results = new Map<string, { price: number; vendor: string; allPrices: MakcorpsPrice[] }>();
 
-  if (!MAKCORPS_API_KEY) {
-    console.warn('[Makcorps] No API key, skipping batch pricing');
+  if (!isConfigured.makcorps()) {
+    console.warn('[Makcorps] No API key, skipping batch pricing. Set MAKCORPS_API_KEY in .env.local');
     return results;
   }
 
@@ -462,8 +496,8 @@ export async function getBatchPricing(
 ): Promise<Map<string, { price: number; vendor: string; allPrices: MakcorpsPrice[] }>> {
   const results = new Map<string, { price: number; vendor: string; allPrices: MakcorpsPrice[] }>();
 
-  if (!MAKCORPS_API_KEY) {
-    console.warn('[Makcorps] No API key, skipping batch pricing');
+  if (!isConfigured.makcorps()) {
+    console.warn('[Makcorps] No API key, skipping batch pricing. Set MAKCORPS_API_KEY in .env.local');
     return results;
   }
 

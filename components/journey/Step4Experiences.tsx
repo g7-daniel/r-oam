@@ -1,11 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import Card from '@/components/ui/Card';
 import {
   Sparkles,
-  MapPin,
   Clock,
   DollarSign,
   Check,
@@ -39,7 +38,7 @@ export default function Step4Experiences() {
     seedExperiencesFromDiscovery,
     selectExperience,
     deselectExperience,
-  } = useTripStoreV2();
+  } = useTripStore();
 
   const { destinations, activeDestinationId } = trip;
   const activeDestination = destinations.find((d) => d.destinationId === activeDestinationId);
@@ -47,16 +46,21 @@ export default function Step4Experiences() {
   // Track which destinations have been seeded to prevent infinite loops
   const seededRef = useRef<Set<string>>(new Set());
 
+  // Track if we've already set the initial destination
+  const hasSetInitialDestination = useRef(false);
+
   // Set first destination as active when entering this step
   useEffect(() => {
+    if (hasSetInitialDestination.current) return;
     if (destinations.length > 0) {
+      hasSetInitialDestination.current = true;
       // Always start with the first destination when entering this step
       const firstDestId = destinations[0].destinationId;
       if (activeDestinationId !== firstDestId) {
         setActiveDestination(firstDestId);
       }
     }
-  }, []); // Only run on mount
+  }, [destinations, activeDestinationId, setActiveDestination]);
 
   // Seed experiences from discovery on first visit (with dedup to prevent infinite loop)
   useEffect(() => {

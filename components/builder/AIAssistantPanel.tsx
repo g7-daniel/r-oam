@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import dynamic from 'next/dynamic';
+import { useTripStore } from '@/stores/tripStore';
 import {
   Send,
   Loader2,
@@ -11,8 +12,22 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import type { Recommendation } from '@/lib/schemas/trip';
-import type { CollectionItem } from '@/stores/tripStoreV2';
-import PlaceDetailModal from './PlaceDetailModal';
+import type { CollectionItem } from '@/stores/tripStore';
+
+// Dynamic import for PlaceDetailModal - reduces initial bundle size
+const PlaceDetailModal = dynamic(
+  () => import('./PlaceDetailModal'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-8">
+          <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+        </div>
+      </div>
+    ),
+  }
+);
 
 interface AIAssistantPanelProps {
   onCollapse?: () => void;
@@ -26,8 +41,10 @@ interface Message {
   isStreaming?: boolean;
 }
 
-export default function AIAssistantPanel({ onCollapse }: AIAssistantPanelProps) {
-  const { trip, addToCollection } = useTripStoreV2();
+export default function AIAssistantPanel({ onCollapse: _onCollapse }: AIAssistantPanelProps) {
+  // Note: onCollapse is passed but not yet used - available for future collapse functionality
+  void _onCollapse;
+  const { trip, addToCollection } = useTripStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);

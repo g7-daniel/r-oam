@@ -14,18 +14,54 @@ import type {
   BudgetStyle,
   Pace,
 } from '@/lib/schemas/trip';
-import type { CollectionItem } from '@/stores/tripStoreV2';
+import type { CollectionItem } from '@/stores/tripStore';
 import type {
   OrchestratorState,
   TripPreferences,
   AreaCandidate,
   HotelCandidate,
   RestaurantCandidate,
+  VerifiedActivity,
+  ItineraryStop,
+  QuickPlanItinerary,
+  QuickPlanDay,
+  DayBlock,
 } from '@/types/quick-plan';
 
 // ============================================================================
 // MAIN TRANSFORMER
 // ============================================================================
+
+// Extended experience with location data from Google Places enrichment
+interface EnrichedExperience extends VerifiedActivity {
+  lat?: number;
+  lng?: number;
+  nearArea?: string;
+  imageUrl?: string;
+  address?: string;
+  googleRating?: number;
+  reviewCount?: number;
+  placeId?: string;
+  reasons?: string[];
+  durationMinutes?: number;
+}
+
+// Itinerary day structure for generated itineraries
+export interface ItineraryDaySlot {
+  activity?: string;
+  experience?: VerifiedActivity;
+  restaurant?: RestaurantCandidate;
+  time?: string;
+}
+
+export interface ItineraryDay {
+  dayIndex: number;
+  date?: string;
+  morning?: ItineraryDaySlot;
+  afternoon?: ItineraryDaySlot;
+  evening?: ItineraryDaySlot;
+  dinner?: ItineraryDaySlot;
+}
 
 export interface QuickPlanData {
   preferences: TripPreferences;
@@ -33,12 +69,9 @@ export interface QuickPlanData {
     areas: AreaCandidate[];
     hotels: Map<string, HotelCandidate[]>;
     restaurants: Map<string, RestaurantCandidate[]>;
-    experiences?: Map<string, any[]>;
+    experiences?: Map<string, VerifiedActivity[]>;
   };
-  itinerary?: {
-    days: any[];
-    stops: any[];
-  };
+  itinerary?: QuickPlanItinerary | null;
 }
 
 export interface TransformedTripData {
@@ -106,9 +139,9 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
   const prefs = data.preferences;
   const selectedAreas = prefs.selectedAreas || [];
   const selectedSplit = prefs.selectedSplit;
-  const selectedHotels = (prefs as any).selectedHotels || {};
-  const selectedRestaurants = (prefs as any).selectedRestaurants || {};
-  const selectedExperiences = (prefs as any).selectedExperiences || {};
+  const selectedHotels = prefs.selectedHotels || {};
+  const selectedRestaurants = prefs.selectedRestaurants || {};
+  const selectedExperiences = prefs.selectedExperiences || {};
   const pace = prefs.pace || 'balanced';
 
   // Build trip basics
@@ -135,7 +168,7 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
 
   for (const area of selectedAreas) {
     // Find nights for this area from split
-    const stopInfo = splitStops.find((s: any) => s.areaId === area.id);
+    const stopInfo = splitStops.find((s) => s.areaId === area.id);
     const nights = stopInfo?.nights || Math.floor((prefs.tripLength || 7) / selectedAreas.length);
 
     // Get selected hotel for this area
@@ -156,7 +189,7 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
 
   // Add experiences to collection (unscheduled)
   for (const [activityType, experiences] of Object.entries(selectedExperiences)) {
-    for (const exp of experiences as any[]) {
+    for (const exp of experiences as EnrichedExperience[]) {
       const item = transformExperienceToCollectionItem(exp, activityType, destinations);
       experiencesCollection.push(item);
     }
@@ -164,7 +197,7 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
 
   // Add restaurants to collection (unscheduled)
   for (const [cuisine, restaurants] of Object.entries(selectedRestaurants)) {
-    for (const rest of restaurants as any[]) {
+    for (const rest of restaurants as RestaurantCandidate[]) {
       const item = transformRestaurantToCollectionItem(rest, cuisine, destinations);
       restaurantsCollection.push(item);
     }
@@ -196,32 +229,32 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
     let dayIndex = 0;
     for (const day of data.itinerary.days) {
       // Schedule morning activity (only if not already covered by experiences)
-      if (day.morning?.activity && day.morning.activity !== 'Free time') {
+      if (day.morning?.title && day.morning.type !== 'free') {
         const existingMorning = scheduledItems.find(
           item => item.scheduledDayIndex === dayIndex && item.order === 0
         );
         if (!existingMorning) {
-          const item = createScheduledItemFromItinerary(day.morning, dayIndex, 0, destinations);
+          const item = createScheduledItemFromDayBlock(day.morning, dayIndex, 0, destinations);
           if (item) scheduledItems.push(item);
         }
       }
       // Schedule afternoon activity (only if not already covered)
-      if (day.afternoon?.activity && day.afternoon.activity !== 'Free time') {
+      if (day.afternoon?.title && day.afternoon.type !== 'free') {
         const existingAfternoon = scheduledItems.find(
           item => item.scheduledDayIndex === dayIndex && item.order === 1
         );
         if (!existingAfternoon) {
-          const item = createScheduledItemFromItinerary(day.afternoon, dayIndex, 1, destinations);
+          const item = createScheduledItemFromDayBlock(day.afternoon, dayIndex, 1, destinations);
           if (item) scheduledItems.push(item);
         }
       }
       // Schedule evening/dinner (only if not already covered by restaurants)
-      if (day.evening?.activity && day.evening.activity !== 'Free time') {
+      if (day.evening?.title && day.evening.type !== 'free') {
         const existingEvening = scheduledItems.find(
           item => item.scheduledDayIndex === dayIndex && (item.order ?? 0) >= 10
         );
         if (!existingEvening) {
-          const item = createScheduledItemFromItinerary(day.evening, dayIndex, 2, destinations);
+          const item = createScheduledItemFromDayBlock(day.evening, dayIndex, 2, destinations);
           if (item) scheduledItems.push(item);
         }
       }
@@ -358,6 +391,11 @@ function scheduleRestaurants(
   return scheduled;
 }
 
+// Extended restaurant with nearArea property
+interface RestaurantWithNearArea extends RestaurantCandidate {
+  nearArea?: string;
+}
+
 /**
  * Find destination ID for a restaurant based on nearArea or coordinates
  */
@@ -366,10 +404,11 @@ function findDestinationForRestaurant(
   destinations: Destination[]
 ): string {
   // First try to match by nearArea
-  if ((rest as any).nearArea) {
+  const restWithArea = rest as RestaurantWithNearArea;
+  if (restWithArea.nearArea) {
     const destByArea = destinations.find(d =>
-      d.place.name.toLowerCase().includes((rest as any).nearArea.toLowerCase()) ||
-      (rest as any).nearArea.toLowerCase().includes(d.place.name.toLowerCase())
+      d.place.name.toLowerCase().includes(restWithArea.nearArea!.toLowerCase()) ||
+      restWithArea.nearArea!.toLowerCase().includes(d.place.name.toLowerCase())
     );
     if (destByArea) return destByArea.destinationId;
   }
@@ -402,7 +441,7 @@ function findDestinationForRestaurant(
  * Schedule selected experiences to morning/afternoon slots based on pace
  */
 function scheduleExperiences(
-  selectedExperiences: Record<string, any[]>,
+  selectedExperiences: Record<string, EnrichedExperience[]>,
   dayMapping: DayMapping[],
   destinations: Destination[],
   pace: 'chill' | 'balanced' | 'packed'
@@ -469,14 +508,14 @@ function scheduleExperiences(
  * Find destination ID for an experience based on nearArea or coordinates
  */
 function findDestinationForExperience(
-  exp: any,
+  exp: EnrichedExperience,
   destinations: Destination[]
 ): string {
   // First try to match by nearArea
   if (exp.nearArea) {
     const destByArea = destinations.find(d =>
-      d.place.name.toLowerCase().includes(exp.nearArea.toLowerCase()) ||
-      exp.nearArea.toLowerCase().includes(d.place.name.toLowerCase())
+      d.place.name.toLowerCase().includes(exp.nearArea!.toLowerCase()) ||
+      exp.nearArea!.toLowerCase().includes(d.place.name.toLowerCase())
     );
     if (destByArea) return destByArea.destinationId;
   }
@@ -688,7 +727,7 @@ function createDestination(
 }
 
 function transformExperienceToCollectionItem(
-  exp: any,
+  exp: EnrichedExperience,
   activityType: string,
   destinations: Destination[]
 ): CollectionItem {
@@ -720,7 +759,8 @@ function transformRestaurantToCollectionItem(
   cuisine: string,
   destinations: Destination[]
 ): CollectionItem {
-  const destId = findDestinationIdByArea((rest as any).nearArea, destinations);
+  const restWithArea = rest as RestaurantWithNearArea;
+  const destId = findDestinationIdByArea(restWithArea.nearArea, destinations);
 
   return {
     id: rest.id || rest.placeId || `rest_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -746,8 +786,19 @@ function transformRestaurantToCollectionItem(
   };
 }
 
+// Slot structure from itinerary generation
+interface ItinerarySlot {
+  activity?: string;
+  description?: string;
+  areaId?: string;
+  reason?: string;
+  durationMinutes?: number;
+  lat?: number;
+  lng?: number;
+}
+
 function createScheduledItemFromItinerary(
-  slot: any,
+  slot: ItinerarySlot | undefined,
   dayIndex: number,
   order: number,
   destinations: Destination[]
@@ -779,6 +830,53 @@ function createScheduledItemFromItinerary(
       type: 'ai' as const,
     },
   };
+}
+
+function createScheduledItemFromDayBlock(
+  block: DayBlock,
+  dayIndex: number,
+  order: number,
+  destinations: Destination[]
+): CollectionItem | null {
+  if (!block || !block.title || block.type === 'free') return null;
+
+  // Try to match with a destination by location
+  let destId: string | undefined;
+  if (block.location?.name) {
+    destId = findDestinationIdByArea(block.location.name, destinations);
+  }
+
+  return {
+    id: block.id || `sched_${dayIndex}_${order}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+    name: block.title,
+    category: mapBlockTypeToCategory(block.type, order),
+    description: block.description || block.title,
+    whyMatch: '',
+    destinationId: destId,
+    scheduledDayIndex: dayIndex,
+    order,
+    durationMinutes: block.duration || (order === 2 ? 90 : 120),
+    lat: block.location?.lat,
+    lng: block.location?.lng,
+    source: {
+      type: 'ai' as const,
+    },
+  };
+}
+
+function mapBlockTypeToCategory(type: DayBlock['type'], order: number): string {
+  switch (type) {
+    case 'meal':
+      return 'dining';
+    case 'activity':
+      return order === 0 ? 'experience' : 'experience';
+    case 'transit':
+      return 'transit';
+    case 'rest':
+      return 'wellness';
+    default:
+      return 'experience';
+  }
 }
 
 function findDestinationIdByArea(areaName: string | undefined, destinations: Destination[]): string | undefined {
@@ -888,7 +986,7 @@ export function finalizeQuickPlanTrip(orchestratorState: OrchestratorState): str
       areas: orchestratorState.discoveredData.areas,
       hotels: orchestratorState.discoveredData.hotels,
       restaurants: orchestratorState.discoveredData.restaurants,
-      experiences: (orchestratorState.discoveredData as any).experiences,
+      experiences: orchestratorState.discoveredData.experiences as Map<string, VerifiedActivity[]>,
     },
     itinerary: orchestratorState.itinerary || undefined,
   };

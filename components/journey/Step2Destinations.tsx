@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import Card from '@/components/ui/Card';
 import {
   MapPin,
@@ -12,10 +12,10 @@ import {
   X,
   Moon,
   Minus,
-  Image as ImageIcon,
   Globe,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { handleImageError, getPlaceholderImage } from '@/lib/utils';
 import type { Place } from '@/lib/schemas/trip';
 import {
   searchDestinations,
@@ -24,7 +24,7 @@ import {
 } from '@/lib/data/destinations';
 
 export default function Step2Destinations() {
-  const { trip, addDestination, removeDestination, updateDestinationNights, reorderDestinations, setActiveDestination, setDestinationHeroImage } = useTripStoreV2();
+  const { trip, addDestination, removeDestination, updateDestinationNights, reorderDestinations, setDestinationHeroImage } = useTripStore();
   const { destinations, basics } = trip;
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -34,8 +34,18 @@ export default function Step2Destinations() {
   const [pendingDestination, setPendingDestination] = useState<DestinationData | null>(null);
   const [pendingNights, setPendingNights] = useState(3);
   const inputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const lastScrollRef = useRef<number>(0);
+  // Track timeout for scroll cleanup
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Calculate total nights
   const totalNights = destinations.reduce((sum, d) => sum + d.nights, 0);
@@ -133,8 +143,11 @@ export default function Step2Destinations() {
     setDestinationHeroImage(destId, pendingDestination.imageUrl);
     setPendingDestination(null);
 
-    // Scroll to the newly added destination
-    setTimeout(() => {
+    // Scroll to the newly added destination with cleanup tracking
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollTimeoutRef.current = setTimeout(() => {
       const newCard = document.querySelector(`[data-destination-id="${destId}"]`);
       if (newCard) {
         newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -224,21 +237,12 @@ export default function Step2Destinations() {
 
                 {/* Hero image */}
                 <div className="w-24 h-20 rounded-lg overflow-hidden bg-slate-100 flex-shrink-0">
-                  {dest.heroImageUrl ? (
-                    <img
-                      src={dest.heroImageUrl}
-                      alt={dest.place.name}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        // Fallback on error
-                        (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop`;
-                      }}
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <ImageIcon className="w-8 h-8 text-slate-300" />
-                    </div>
-                  )}
+                  <img
+                    src={dest.heroImageUrl || getPlaceholderImage('map')}
+                    alt={dest.place.name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => handleImageError(e, 'map')}
+                  />
                 </div>
 
                 {/* Destination info */}
@@ -359,12 +363,10 @@ export default function Step2Destinations() {
                   className="relative group overflow-hidden rounded-xl aspect-[4/3]"
                 >
                   <img
-                    src={dest.imageUrl}
+                    src={dest.imageUrl || getPlaceholderImage('map')}
                     alt={dest.name}
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=400&h=300&fit=crop`;
-                    }}
+                    onError={(e) => handleImageError(e, 'map')}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-3 text-left">
@@ -433,12 +435,10 @@ export default function Step2Destinations() {
             <div className="flex items-center gap-4 mb-6">
               <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
                 <img
-                  src={pendingDestination.imageUrl}
+                  src={pendingDestination.imageUrl || getPlaceholderImage('map')}
                   alt={pendingDestination.name}
                   className="w-full h-full object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=200&h=200&fit=crop`;
-                  }}
+                  onError={(e) => handleImageError(e, 'map')}
                 />
               </div>
               <div>

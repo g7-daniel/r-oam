@@ -5,6 +5,25 @@ import { fetchWithTimeout } from './api-cache';
 const REDDIT_BASE_URL = 'https://www.reddit.com';
 const REDDIT_TIMEOUT = 10000; // 10 second timeout for Reddit API
 
+// Reddit API rate limiting - minimum 1 second between requests to comply with terms
+const REDDIT_RATE_LIMIT_MS = 200; // Reduced from 1000ms for faster searches
+// User-Agent must be descriptive per Reddit API terms
+const REDDIT_USER_AGENT = 'web:r-oam-travel-planner:v1.0 (https://roam.travel)';
+
+// Type for Reddit API post child data
+interface RedditPostData {
+  data: {
+    id: string;
+    title: string;
+    selftext?: string;
+    subreddit: string;
+    score: number;
+    num_comments: number;
+    created_utc: number;
+    permalink: string;
+  };
+}
+
 export function getSubredditsForBudget(budgetPerPerson: number): string[] {
   if (budgetPerPerson >= 5000) {
     return ['fattravel', 'luxurytravel', 'travel'];
@@ -31,7 +50,7 @@ export async function searchReddit(
           )}&sort=relevance&limit=${limit}&restrict_sr=true`,
           {
             headers: {
-              'User-Agent': 'r-oam/1.0 (Reddit-Powered Travel Planner)',
+              'User-Agent': REDDIT_USER_AGENT,
             },
           },
           REDDIT_TIMEOUT
@@ -39,7 +58,8 @@ export async function searchReddit(
 
         if (response.ok) {
           const data = await response.json();
-          const posts = data.data?.children?.map((child: any) => ({
+          const children = data.data?.children as RedditPostData[] | undefined;
+          const posts: RedditPost[] = children?.map((child) => ({
             id: child.data.id,
             title: child.data.title,
             selftext: child.data.selftext || '',
@@ -56,7 +76,7 @@ export async function searchReddit(
       }
 
       // Small delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, REDDIT_RATE_LIMIT_MS));
     }
 
     return allPosts.sort((a, b) => b.score - a.score);
@@ -76,7 +96,7 @@ export async function getPostComments(
       `${REDDIT_BASE_URL}/r/${subreddit}/comments/${postId}.json?limit=${limit}&depth=1`,
       {
         headers: {
-          'User-Agent': 'r-oam/1.0 (Reddit-Powered Travel Planner)',
+          'User-Agent': REDDIT_USER_AGENT,
         },
       },
       REDDIT_TIMEOUT
@@ -109,6 +129,35 @@ export async function getPostComments(
   }
 }
 
+// Negation words that flip sentiment
+const NEGATION_WORDS = [
+  'not', "n't", 'never', 'no', 'neither', 'nobody', 'nothing',
+  'nowhere', 'hardly', 'barely', 'scarcely', "don't", "doesn't",
+  "didn't", "won't", "wouldn't", "couldn't", "shouldn't", "wasn't", "weren't"
+];
+
+/**
+ * Check if a word is preceded by a negation within a certain window
+ */
+function isNegated(text: string, wordIndex: number, windowSize: number = 4): boolean {
+  // Get the text before the word (up to windowSize words back)
+  const textBefore = text.substring(Math.max(0, wordIndex - 50), wordIndex).toLowerCase();
+  const wordsBefore = textBefore.split(/\s+/).slice(-windowSize);
+
+  return wordsBefore.some(word =>
+    NEGATION_WORDS.some(neg => word.includes(neg))
+  );
+}
+
+/**
+ * Find word with word boundary matching to avoid partial matches
+ */
+function findWordWithBoundary(text: string, word: string): number {
+  const regex = new RegExp(`\\b${word}\\b`, 'gi');
+  const match = regex.exec(text);
+  return match ? match.index : -1;
+}
+
 export function analyzeSentiment(text: string): number {
   const positiveWords = [
     'amazing', 'beautiful', 'excellent', 'fantastic', 'great', 'incredible',
@@ -128,17 +177,31 @@ export function analyzeSentiment(text: string): number {
   let score = 0;
   let matches = 0;
 
+  // Check positive words with negation detection
   for (const word of positiveWords) {
-    if (lowerText.includes(word)) {
-      score += 1;
+    const index = findWordWithBoundary(lowerText, word);
+    if (index !== -1) {
       matches++;
+      // If negated, treat as negative; otherwise positive
+      if (isNegated(lowerText, index)) {
+        score -= 1; // "not amazing" = negative
+      } else {
+        score += 1;
+      }
     }
   }
 
+  // Check negative words with negation detection
   for (const word of negativeWords) {
-    if (lowerText.includes(word)) {
-      score -= 1;
+    const index = findWordWithBoundary(lowerText, word);
+    if (index !== -1) {
       matches++;
+      // If negated, treat as positive; otherwise negative
+      if (isNegated(lowerText, index)) {
+        score += 0.5; // "not bad" = slightly positive (double negatives are weaker)
+      } else {
+        score -= 1;
+      }
     }
   }
 
@@ -173,7 +236,7 @@ export async function getDestinationSentiment(
     const comments = await getPostComments(post.subreddit, post.id, 3);
     topComments.push(...comments);
     // Small delay between requests
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise(resolve => setTimeout(resolve, REDDIT_RATE_LIMIT_MS));
   }
 
   topComments.sort((a, b) => b.score - a.score);
@@ -350,7 +413,7 @@ export async function searchHotelRecommendations(
   for (const query of searchQueries) {
     const posts = await searchReddit(query, subreddits, 15);
     allPosts.push(...posts);
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise(resolve => setTimeout(resolve, REDDIT_RATE_LIMIT_MS));
   }
 
   // Extract hotel names from posts
@@ -648,17 +711,15 @@ export async function searchAreaRecommendations(
     ? customSubreddits
     : ['travel', 'solotravel', 'TravelHacks', 'backpacking'];
 
-  // Search queries for areas
+  // Search queries for areas - limited to 3 for speed
   const searchQueries = [
-    `${destination} best areas`,
-    `${destination} where to stay region`,
-    `${destination} itinerary`,
-    `${destination} must visit`,
+    `${destination} best areas where to stay`,
+    `${destination} itinerary must visit`,
   ];
 
-  // Add activity-specific searches
-  for (const activity of activities.slice(0, 2)) {
-    searchQueries.push(`${destination} ${activity}`);
+  // Add ONE activity-specific search if activities provided
+  if (activities.length > 0) {
+    searchQueries.push(`${destination} ${activities[0]}`);
   }
 
   const allPosts: RedditPost[] = [];
@@ -666,7 +727,7 @@ export async function searchAreaRecommendations(
   for (const query of searchQueries) {
     const posts = await searchReddit(query, subreddits, 15);
     allPosts.push(...posts);
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise(resolve => setTimeout(resolve, REDDIT_RATE_LIMIT_MS));
   }
 
   // Extract area mentions
@@ -842,7 +903,7 @@ export async function searchRestaurantRecommendations(
   for (const query of searchQueries) {
     const posts = await searchReddit(query, subreddits, 15);
     allPosts.push(...posts);
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise(resolve => setTimeout(resolve, REDDIT_RATE_LIMIT_MS));
   }
 
   const restaurantMentions = new Map<string, {

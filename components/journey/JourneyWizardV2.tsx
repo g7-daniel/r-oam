@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useMemo, useState } from 'react';
+import { useTripStore } from '@/stores/tripStore';
 import TripSummary from './TripSummary';
 import Step1TripBasics from './Step1TripBasics';
 import Step2Destinations from './Step2Destinations';
@@ -32,6 +32,33 @@ const STEPS = [
   { number: 4, title: 'Review', shortTitle: 'Review', icon: ClipboardCheck },
 ];
 
+function CompleteTripButton() {
+  const [isCompleting, setIsCompleting] = useState(false);
+
+  const handleComplete = async () => {
+    setIsCompleting(true);
+    try {
+      // Final step - export or complete
+      // TODO: Add actual completion logic here
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } finally {
+      setIsCompleting(false);
+    }
+  };
+
+  return (
+    <Button
+      variant="accent"
+      onClick={handleComplete}
+      disabled={isCompleting}
+      isLoading={isCompleting}
+    >
+      {isCompleting ? 'Completing...' : 'Complete Trip'}
+      {!isCompleting && <Check className="w-4 h-4 ml-2" />}
+    </Button>
+  );
+}
+
 export default function JourneyWizardV2() {
   const {
     trip,
@@ -39,7 +66,7 @@ export default function JourneyWizardV2() {
     nextStep,
     prevStep,
     resetTrip,
-  } = useTripStoreV2();
+  } = useTripStore();
 
   const { currentStep, destinations } = trip;
 
@@ -73,7 +100,7 @@ export default function JourneyWizardV2() {
     if (currentStep === 3) {
       destinations.forEach(d => {
         if (!d.discovery.isComplete) {
-          useTripStoreV2.getState().completeDiscovery(d.destinationId);
+          useTripStore.getState().completeDiscovery(d.destinationId);
         }
       });
     }
@@ -213,16 +240,16 @@ export default function JourneyWizardV2() {
                       onClick={() => handleStepClick(step.number)}
                       disabled={step.number > currentStep}
                       className={clsx(
-                        'w-8 h-8 rounded-full flex items-center justify-center transition-all',
+                        'w-11 h-11 rounded-full flex items-center justify-center transition-all',
                         isComplete && 'bg-green-500 text-white',
                         isCurrent && 'bg-reddit text-white',
                         step.number > currentStep && 'bg-reddit-gray-100 text-reddit-gray-400'
                       )}
                     >
                       {isComplete ? (
-                        <Check className="w-4 h-4" />
+                        <Check className="w-5 h-5" />
                       ) : (
-                        <Icon className="w-4 h-4" />
+                        <Icon className="w-5 h-5" />
                       )}
                     </button>
                   );
@@ -271,15 +298,7 @@ export default function JourneyWizardV2() {
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
               ) : (
-                <Button
-                  variant="accent"
-                  onClick={() => {
-                    // Final step - export or complete
-                  }}
-                >
-                  Complete Trip
-                  <Check className="w-4 h-4 ml-2" />
-                </Button>
+                <CompleteTripButton />
               )}
             </div>
           </div>

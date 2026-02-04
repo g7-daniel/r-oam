@@ -7,7 +7,7 @@ import {
   isGroqConfigured,
   type ChatMessage,
 } from '@/lib/groq';
-import { searchReddit, analyzeSentiment } from '@/lib/reddit';
+import { searchReddit } from '@/lib/reddit';
 
 export const runtime = 'nodejs';
 

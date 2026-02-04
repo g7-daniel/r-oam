@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import DateRangePicker from '@/components/ui/DateRangePicker';
-import DetailDrawer, { ExperienceItem } from '@/components/quick-plan/DetailDrawer';
+import Image from 'next/image';
+import { Loader2 as LoaderIcon } from 'lucide-react';
+import type { ExperienceItem } from '@/components/quick-plan/DetailDrawer';
 import {
   Search,
   MapPin,
@@ -13,32 +15,82 @@ import {
   Plus,
   Check,
   ChevronRight,
-  ChevronDown,
   Star,
   AlertCircle,
   Loader2,
   X,
   ExternalLink,
   Info,
-  SlidersHorizontal,
   ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   MessageCircle,
 } from 'lucide-react';
 import type {
   ReplyCardType,
   ReplyCardConfig,
-  ChipOption,
-  AreaCandidate,
   HotelCandidate,
   RestaurantCandidate,
   VerifiedActivity,
-  ItinerarySplit,
-  Tradeoff,
   DissatisfactionReason,
 } from '@/types/quick-plan';
 import { estimateInterAreaTransit, getInterAreaTransportIcon } from '@/lib/utils/travelTime';
+// getPlaceholderImage available but FallbackImage handles placeholders internally
+import FallbackImage from '@/components/ui/FallbackImage';
 import AreasMapPreview from '@/components/quick-plan/AreasMapPreview';
 import GooglePlacesAutocomplete from '@/components/quick-plan/GooglePlacesAutocomplete';
+import {
+  SkeletonHotelCard,
+  SkeletonRestaurantCard,
+  SkeletonExperienceCard,
+  SkeletonAreaCard,
+} from '@/components/ui/Skeleton';
+import { parseAPIErrorResponse, getUserFriendlyMessage } from '@/lib/errors';
+import { dedupedFetch } from '@/lib/request-dedup';
+
+// ============================================================================
+// DYNAMIC IMPORTS FOR CODE SPLITTING
+// Heavy components loaded only when needed to reduce initial bundle size
+// ============================================================================
+
+// Loading spinner component for dynamic imports
+const DynamicLoadingSpinner = () => (
+  <div className="flex items-center justify-center p-8">
+    <LoaderIcon className="w-6 h-6 animate-spin text-orange-500" />
+  </div>
+);
+
+// DateRangePicker - loaded when date selection is needed
+const DateRangePicker = dynamic(
+  () => import('@/components/ui/DateRangePicker'),
+  { ssr: false, loading: DynamicLoadingSpinner }
+);
+
+// DetailDrawer - heavy modal for viewing item details
+const DetailDrawer = dynamic(
+  () => import('@/components/quick-plan/DetailDrawer'),
+  { ssr: false, loading: DynamicLoadingSpinner }
+);
+
+// HotelBrowserModal - large modal with filtering, sorting, and hotel display
+const HotelBrowserModal = dynamic(
+  () => import('@/components/quick-plan/HotelBrowserModal'),
+  { ssr: false, loading: DynamicLoadingSpinner }
+);
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Format activity/tag strings for display
+ * Converts snake_case to Title Case (e.g., "maldivian_cuisine" -> "Maldivian Cuisine")
+ */
+function formatTag(tag: string): string {
+  return tag
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 // ============================================================================
 // MAIN REPLY CARD COMPONENT
@@ -80,10 +132,10 @@ export default function ReplyCard({ type, config, onSubmit, onAddNote, disabled 
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      initial={{ opacity: 0, y: 12, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -10, scale: 0.98 }}
-      transition={{ duration: 0.2 }}
+      exit={{ opacity: 0, y: -10, scale: 0.97 }}
+      transition={{ duration: 0.25, ease: "easeOut" }}
       className="w-full"
     >
       <CardComponent config={config} onSubmit={onSubmit} onAddNote={onAddNote} disabled={disabled} />
@@ -238,17 +290,17 @@ function ChipsCard({ config, onSubmit, disabled }: CardProps) {
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
-      <div className="flex flex-wrap gap-2">
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 space-y-4 shadow-sm">
+      <div className="flex flex-wrap gap-2.5">
         {config.options?.map((option) => (
           <button
             key={option.id}
             onClick={() => handleSelect(option.id)}
             disabled={disabled}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
               selected === option.id
-                ? 'bg-orange-500 text-white'
-                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/20'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 hover:shadow-sm'
             } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {option.icon && <span className="mr-2">{option.icon}</span>}
@@ -306,16 +358,44 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [customText, setCustomText] = useState('');
   const [customItems, setCustomItems] = useState<string[]>([]);
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const field = config.field || 'general';
   const notePlaceholder = NOTE_PLACEHOLDERS[field] || NOTE_PLACEHOLDERS.default;
+  const minSelection = (config as any).minSelection || 1;
+  const maxSelection = (config as any).maxSelection || undefined;
+  const required = (config as any).required !== false; // Default to required
 
   const toggleOption = (optionId: string) => {
     if (disabled) return;
+
+    // Clear error when user makes a selection
+    setError(null);
+
+    // Auto-advance if selecting "none" option (e.g., "No accessibility needs")
+    if (optionId === 'none') {
+      const noneOption = config.options?.find(o => o.id === 'none');
+      if (noneOption) {
+        onSubmit([{ id: 'none', label: noneOption.label }]);
+        return;
+      }
+    }
+
     const newSelected = new Set(selected);
+    // If selecting another option, remove "none" if it was selected
+    if (optionId !== 'none') {
+      newSelected.delete('none');
+    }
+
     if (newSelected.has(optionId)) {
       newSelected.delete(optionId);
     } else {
+      // Check max selection
+      if (maxSelection && newSelected.size >= maxSelection) {
+        setError(`You can select up to ${maxSelection} options`);
+        return;
+      }
       newSelected.add(optionId);
     }
     setSelected(newSelected);
@@ -323,16 +403,39 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
 
   const addCustomItem = () => {
     if (customText.trim() && !customItems.includes(customText.trim())) {
+      // Check max selection
+      if (maxSelection && selected.size + customItems.length >= maxSelection) {
+        setError(`You can select up to ${maxSelection} options`);
+        return;
+      }
       setCustomItems([...customItems, customText.trim()]);
       setCustomText('');
+      setError(null);
     }
   };
 
   const removeCustomItem = (item: string) => {
     setCustomItems(customItems.filter(i => i !== item));
+    setError(null);
+  };
+
+  const totalSelected = selected.size + customItems.length;
+  const hasSelection = totalSelected > 0;
+
+  // Validate selection
+  const validate = (): boolean => {
+    if (required && totalSelected < minSelection) {
+      setError(`Please select at least ${minSelection === 1 ? 'one option' : `${minSelection} options`}`);
+      return false;
+    }
+    setError(null);
+    return true;
   };
 
   const handleSubmit = () => {
+    setTouched(true);
+    if (!validate()) return;
+
     const selectedOptions = config.options?.filter(o => selected.has(o.id)) || [];
     const allSelected = [
       ...selectedOptions.map(o => ({ id: o.id, label: o.label })),
@@ -341,23 +444,21 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
     onSubmit(allSelected);
   };
 
-  const hasSelection = selected.size > 0 || customItems.length > 0;
-
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
-      <div className="flex flex-wrap gap-2">
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 space-y-4 shadow-sm">
+      <div className="flex flex-wrap gap-2.5">
         {config.options?.map((option) => (
           <button
             key={option.id}
             onClick={() => toggleOption(option.id)}
             disabled={disabled}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
               selected.has(option.id)
-                ? 'bg-orange-500 text-white'
-                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/20'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 hover:shadow-sm'
             } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            {selected.has(option.id) && <Check className="w-3 h-3 mr-1 inline" />}
+            {selected.has(option.id) && <Check className="w-3.5 h-3.5 mr-1.5 inline" />}
             {option.icon && <span className="mr-2">{option.icon}</span>}
             {option.label}
           </button>
@@ -366,15 +467,20 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
 
       {/* Custom items */}
       {customItems.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" role="list" aria-label="Selected custom items">
           {customItems.map((item) => (
             <span
               key={item}
+              role="listitem"
               className="px-3 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-sm flex items-center gap-1"
             >
               {item}
-              <button onClick={() => removeCustomItem(item)} className="hover:text-orange-900">
-                <X className="w-3 h-3" />
+              <button
+                onClick={() => removeCustomItem(item)}
+                className="hover:text-orange-900 focus:outline-none focus:ring-2 focus:ring-orange-500 rounded-full p-0.5"
+                aria-label={`Remove ${item}`}
+              >
+                <X className="w-3 h-3" aria-hidden="true" />
               </button>
             </span>
           ))}
@@ -384,7 +490,9 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
       {/* Custom input */}
       {config.allowCustomText && (
         <div className="flex gap-2">
+          <label className="sr-only" htmlFor="custom-item-input">Add custom item</label>
           <input
+            id="custom-item-input"
             type="text"
             value={customText}
             onChange={(e) => setCustomText(e.target.value)}
@@ -395,9 +503,10 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
           <button
             onClick={addCustomItem}
             disabled={!customText.trim()}
-            className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-sm hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50"
+            className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-sm hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
+            aria-label="Add custom item"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
       )}
@@ -412,14 +521,29 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
         />
       )}
 
+      {/* Inline error message */}
+      {touched && error && (
+        <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Selection count indicator */}
+      {maxSelection && totalSelected > 0 && (
+        <p className="text-xs text-slate-500 dark:text-slate-400 text-center">
+          {totalSelected} of {maxSelection} selected
+        </p>
+      )}
+
       {/* Submit button */}
       <button
         onClick={handleSubmit}
-        disabled={disabled || !hasSelection}
-        className="w-full py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        disabled={disabled || (touched && !hasSelection && required)}
+        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
       >
         Continue
-        <ChevronRight className="w-4 h-4 inline ml-1" />
+        <ChevronRight className="w-4 h-4 inline ml-1.5" aria-hidden="true" />
       </button>
     </div>
   );
@@ -433,7 +557,9 @@ function SliderCard({ config, onSubmit, disabled }: CardProps) {
   const min = config.min ?? 1;
   const max = config.max ?? 10;
   const step = config.step ?? 1;
-  const [value, setValue] = useState(Math.floor((max - min) / 2) + min);
+  // PHASE 5 FIX: Use config.defaultValue if provided, otherwise calculate midpoint
+  const defaultValue = config.defaultValue ?? Math.floor((max - min) / 2) + min;
+  const [value, setValue] = useState(defaultValue);
 
   // Detect if this is a budget/money slider (values > 25 with step >= 25)
   const isBudgetSlider = min >= 25 && step >= 25;
@@ -465,41 +591,66 @@ function SliderCard({ config, onSubmit, disabled }: CardProps) {
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 space-y-5 shadow-sm">
       {/* Value display */}
       <div className="text-center">
-        <span className="text-3xl font-bold text-orange-500">{formatValue(value)}</span>
-        {isBudgetSlider && <span className="text-lg text-slate-500 dark:text-slate-400">/night</span>}
+        <span className="text-3xl sm:text-4xl font-bold text-orange-500">{formatValue(value)}</span>
+        {isBudgetSlider && <span className="text-lg text-slate-500 dark:text-slate-400 ml-1">/night</span>}
         {getClosestLabel() && (
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1.5 font-medium">
             {getClosestLabel()}
           </p>
         )}
         {isBudgetSlider && value >= max && (
-          <p className="text-xs text-orange-500 mt-1">
+          <p className="text-xs text-orange-500 mt-1.5 font-medium">
             No upper limit
           </p>
         )}
       </div>
 
-      {/* Slider */}
+      {/* Slider with gradient track */}
       <div className="px-2">
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(e) => setValue(Number(e.target.value))}
-          disabled={disabled}
-          className="w-full h-3 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer
-            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6
-            [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-orange-500
-            [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-pointer
-            [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white
-            [&::-moz-range-thumb]:w-6 [&::-moz-range-thumb]:h-6 [&::-moz-range-thumb]:rounded-full
-            [&::-moz-range-thumb]:bg-orange-500 [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white"
-        />
+        <div className="relative">
+          {/* Gradient track background */}
+          <div
+            className="absolute inset-0 h-3 rounded-lg pointer-events-none"
+            style={{
+              background: isBudgetSlider
+                ? 'linear-gradient(to right, #3b82f6, #f97316, #eab308)'
+                : '#e2e8f0'
+            }}
+          />
+          {/* Unfilled portion overlay */}
+          <div
+            className="absolute top-0 right-0 h-3 bg-slate-200 dark:bg-slate-600 rounded-r-lg pointer-events-none"
+            style={{
+              width: `${100 - ((value - min) / (max - min)) * 100}%`
+            }}
+          />
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={(e) => setValue(Number(e.target.value))}
+            disabled={disabled}
+            aria-valuemin={min}
+            aria-valuemax={max}
+            aria-valuenow={value}
+            aria-valuetext={formatValue(value)}
+            aria-label={isBudgetSlider ? 'Budget per night' : 'Value selection'}
+            className="relative w-full h-3 bg-transparent rounded-lg appearance-none cursor-pointer z-10
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-7 [&::-webkit-slider-thumb]:h-7
+              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
+              [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:cursor-pointer
+              [&::-webkit-slider-thumb]:border-4 [&::-webkit-slider-thumb]:border-orange-500
+              [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:hover:scale-110
+              [&::-moz-range-thumb]:w-7 [&::-moz-range-thumb]:h-7 [&::-moz-range-thumb]:rounded-full
+              [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-4 [&::-moz-range-thumb]:border-orange-500
+              [&::-moz-range-thumb]:shadow-lg"
+          />
+        </div>
         <div className="flex justify-between mt-2 text-xs text-slate-400">
           <span>{formatValue(min)}</span>
           <span>{formatValue(max)}{isBudgetSlider ? '+' : ''}</span>
@@ -522,10 +673,10 @@ function SliderCard({ config, onSubmit, disabled }: CardProps) {
       <button
         onClick={handleSubmit}
         disabled={disabled}
-        className="w-full py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
       >
         Continue
-        <ChevronRight className="w-4 h-4 inline ml-1" />
+        <ChevronRight className="w-4 h-4 inline ml-1.5" aria-hidden="true" />
       </button>
     </div>
   );
@@ -539,10 +690,16 @@ function DateRangeCard({ config, onSubmit, disabled }: CardProps) {
   const [startDate, setStartDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
   const [flexibleDates, setFlexibleDates] = useState(false);
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleDateChange = (start: string | null, end: string | null) => {
     setStartDate(start);
     setEndDate(end);
+    // Clear error when user makes a selection
+    if (start && end) {
+      setError(null);
+    }
   };
 
   // Parse YYYY-MM-DD without timezone conversion
@@ -558,20 +715,46 @@ function DateRangeCard({ config, onSubmit, disabled }: CardProps) {
     return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
   };
 
+  // Validate dates
+  const validate = (): boolean => {
+    if (!startDate) {
+      setError('Please select a start date for your trip');
+      return false;
+    }
+    if (!endDate) {
+      setError('Please select an end date for your trip');
+      return false;
+    }
+    const nights = calculateNights();
+    if (nights <= 0) {
+      setError('End date must be after start date');
+      return false;
+    }
+    if (nights > 60) {
+      setError('Trip cannot exceed 60 nights');
+      return false;
+    }
+    setError(null);
+    return true;
+  };
+
   const handleSubmit = () => {
-    if (!startDate || !endDate) return;
+    setTouched(true);
+    if (!validate()) return;
+
     onSubmit({
-      startDate: parseLocalDate(startDate),
-      endDate: parseLocalDate(endDate),
+      startDate: parseLocalDate(startDate!),
+      endDate: parseLocalDate(endDate!),
       nights: calculateNights(),
       isFlexible: flexibleDates,
     });
   };
 
   const nights = calculateNights();
+  const isValid = startDate && endDate && nights > 0 && nights <= 60;
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 space-y-4 shadow-sm">
       {/* Visual date range picker */}
       <DateRangePicker
         startDate={startDate}
@@ -580,6 +763,21 @@ function DateRangeCard({ config, onSubmit, disabled }: CardProps) {
         minDate={new Date().toISOString().split('T')[0]}
       />
 
+      {/* Inline error message */}
+      {touched && error && (
+        <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Helpful hint when no dates selected */}
+      {!startDate && !endDate && !touched && (
+        <p className="text-sm text-slate-500 dark:text-slate-400 text-center">
+          Click above to select your travel dates
+        </p>
+      )}
+
       {/* Flexible checkbox */}
       <label className="flex items-center gap-2 cursor-pointer">
         <input
@@ -587,16 +785,18 @@ function DateRangeCard({ config, onSubmit, disabled }: CardProps) {
           checked={flexibleDates}
           onChange={(e) => setFlexibleDates(e.target.checked)}
           className="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-500"
+          aria-describedby="flexible-dates-description"
         />
-        <span className="text-sm text-slate-600 dark:text-slate-400">My dates are flexible (+/- a few days)</span>
+        <span id="flexible-dates-description" className="text-sm text-slate-600 dark:text-slate-400">My dates are flexible (+/- a few days)</span>
       </label>
 
       <button
         onClick={handleSubmit}
-        disabled={disabled || !startDate || !endDate || nights <= 0}
-        className="w-full py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        disabled={disabled || (touched && !isValid)}
+        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
       >
         Continue
+        <ChevronRight className="w-4 h-4 inline ml-1.5" aria-hidden="true" />
       </button>
     </div>
   );
@@ -627,14 +827,18 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Popular destinations for quick selection
+  // PHASE 7 FIX: Popular destinations with curated Unsplash images (high quality, free)
   const popularDestinations = [
-    { name: 'Bali, Indonesia', country: 'Indonesia' },
-    { name: 'Tokyo, Japan', country: 'Japan' },
-    { name: 'Paris, France', country: 'France' },
-    { name: 'Barcelona, Spain', country: 'Spain' },
-    { name: 'Costa Rica', country: 'Costa Rica' },
-    { name: 'Thailand', country: 'Thailand' },
+    { name: 'Bali', country: 'Indonesia', countryCode: 'ID', imageUrl: 'https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=400&h=300&fit=crop', lat: -8.4095, lng: 115.1889 },
+    { name: 'Tokyo', country: 'Japan', countryCode: 'JP', imageUrl: 'https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=400&h=300&fit=crop', lat: 35.6762, lng: 139.6503 },
+    { name: 'Paris', country: 'France', countryCode: 'FR', imageUrl: 'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=400&h=300&fit=crop', lat: 48.8566, lng: 2.3522 },
+    { name: 'Barcelona', country: 'Spain', countryCode: 'ES', imageUrl: 'https://images.unsplash.com/photo-1583422409516-2895a77efded?w=400&h=300&fit=crop', lat: 41.3874, lng: 2.1686 },
+    { name: 'London', country: 'United Kingdom', countryCode: 'GB', imageUrl: 'https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=400&h=300&fit=crop', lat: 51.5074, lng: -0.1278 },
+    { name: 'New York', country: 'United States', countryCode: 'US', imageUrl: 'https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=400&h=300&fit=crop', lat: 40.7128, lng: -74.0060 },
+    { name: 'Dubai', country: 'UAE', countryCode: 'AE', imageUrl: 'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=400&h=300&fit=crop', lat: 25.2048, lng: 55.2708 },
+    { name: 'Maldives', country: 'Maldives', countryCode: 'MV', imageUrl: 'https://images.unsplash.com/photo-1514282401047-d79a71a590e8?w=400&h=300&fit=crop', lat: 3.2028, lng: 73.2207 },
+    { name: 'Thailand', country: 'Thailand', countryCode: 'TH', imageUrl: 'https://images.unsplash.com/photo-1528181304800-259b08848526?w=400&h=300&fit=crop', lat: 15.8700, lng: 100.9925 },
+    { name: 'Costa Rica', country: 'Costa Rica', countryCode: 'CR', imageUrl: 'https://images.unsplash.com/photo-1518259102261-b40117eabbc9?w=400&h=300&fit=crop', lat: 9.7489, lng: -83.7534 },
   ];
 
   // Handle Google Places selection
@@ -655,19 +859,29 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
   };
 
   // Fallback search for when Google Places isn't available
+  const [searchError, setSearchError] = useState<string | null>(null);
+
   const searchDestinations = useCallback(async (searchQuery: string) => {
     if (searchQuery.length < 2) {
       setResults([]);
+      setSearchError(null);
       return;
     }
 
     setIsLoading(true);
+    setSearchError(null);
     try {
-      const response = await fetch(`/api/destinations/search?q=${encodeURIComponent(searchQuery)}`);
-      const data = await response.json();
+      // Use deduplicated fetch with caching for repeated searches
+      const data = await dedupedFetch<{ destinations?: DestinationResult[] }>(
+        `/api/destinations/search?q=${encodeURIComponent(searchQuery)}`,
+        undefined,
+        { cacheTTL: 5 * 60 * 1000 } // Cache search results for 5 minutes
+      );
       setResults(data.destinations || []);
     } catch (error) {
-      console.error('Destination search failed:', error);
+      console.error('[DestinationCard] Search failed:', error);
+      const friendlyMessage = getUserFriendlyMessage(error);
+      setSearchError(friendlyMessage);
       setResults([]);
     } finally {
       setIsLoading(false);
@@ -710,24 +924,33 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
     });
   };
 
-  const handleQuickPick = (dest: { name: string; country: string }) => {
-    if (useGooglePlaces) {
-      // For Google Places, just set the query to trigger autocomplete
-      setQuery(dest.name);
-    } else {
-      setQuery(dest.name);
-    }
+  const handleQuickPick = (dest: { name: string; country: string; countryCode: string; lat: number; lng: number }) => {
+    // Submit directly with known coordinates - no need for autocomplete
+    setSelected({ name: dest.name, country: dest.country });
+    onSubmit({
+      rawInput: dest.name === dest.country ? dest.name : `${dest.name}, ${dest.country}`,
+      canonicalName: dest.name,
+      type: dest.name === dest.country ? 'country' : 'city',
+      countryCode: dest.countryCode,
+      countryName: dest.country,
+      centerLat: dest.lat,
+      centerLng: dest.lng,
+      timezone: '',
+      suggestedAreas: [],
+      googlePlaceId: '',
+    });
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 space-y-5 shadow-sm">
       {/* Google Places Autocomplete (primary) */}
+      {/* Fix: Use (regions) instead of (cities) to allow countries like "Dominican Republic" */}
       {useGooglePlaces ? (
         <GooglePlacesAutocomplete
           onSelect={handleGooglePlaceSelect}
           placeholder="Where do you want to go?"
           disabled={disabled}
-          types={['(cities)']}
+          types={['(regions)']}
         />
       ) : (
         /* Fallback search input */
@@ -747,6 +970,14 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
         </div>
       )}
 
+      {/* Fallback search error message */}
+      {!useGooglePlaces && searchError && (
+        <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{searchError}</span>
+        </div>
+      )}
+
       {/* Fallback search results */}
       {!useGooglePlaces && results.length > 0 && (
         <div className="border border-slate-200 dark:border-slate-600 rounded-xl divide-y divide-slate-100 dark:divide-slate-700 overflow-hidden max-h-64 overflow-y-auto">
@@ -758,12 +989,15 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
               className="w-full p-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left transition-colors"
             >
               {destination.imageUrl && (
-                <img
-                  src={destination.imageUrl}
-                  alt={destination.name}
-                  loading="lazy"
-                  className="w-12 h-12 rounded-lg object-cover"
-                />
+                <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
+                  <FallbackImage
+                    src={destination.imageUrl}
+                    alt={destination.name}
+                    fill
+                    fallbackType="map"
+                    sizes="48px"
+                  />
+                </div>
               )}
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-slate-900 dark:text-white truncate">
@@ -779,21 +1013,32 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
         </div>
       )}
 
-      {/* Popular destinations */}
+      {/* PHASE 7 FIX: Popular destinations with beautiful image cards */}
       {!selected && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">
             Popular destinations
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
             {popularDestinations.map((dest) => (
               <button
                 key={dest.name}
                 onClick={() => handleQuickPick(dest)}
                 disabled={disabled}
-                className="px-4 py-2 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                className="group relative h-20 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {dest.name}
+                <Image
+                  src={dest.imageUrl}
+                  alt={dest.name}
+                  fill
+                  className="object-cover transition-transform duration-300 group-hover:scale-110"
+                  unoptimized
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                <div className="absolute bottom-0 left-0 right-0 p-2">
+                  <p className="text-white font-medium text-sm drop-shadow-lg">{dest.name}</p>
+                  <p className="text-white/80 text-xs drop-shadow">{dest.country}</p>
+                </div>
               </button>
             ))}
           </div>
@@ -822,16 +1067,19 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
 
 const MAX_ADULTS = 20;
 const MAX_CHILDREN = 10;
+const MAX_TOTAL_TRAVELERS = 30;
 
 function PartyCard({ config, onSubmit, disabled }: CardProps) {
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
   const [childAges, setChildAges] = useState<number[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const addChild = () => {
-    if (children < MAX_CHILDREN) {
+    if (children < MAX_CHILDREN && adults + children < MAX_TOTAL_TRAVELERS) {
       setChildren(children + 1);
       setChildAges([...childAges, 5]); // Default age
+      setError(null);
     }
   };
 
@@ -839,6 +1087,16 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
     if (children > 0) {
       setChildren(children - 1);
       setChildAges(childAges.slice(0, -1));
+      setError(null);
+    }
+  };
+
+  const updateAdults = (newAdults: number) => {
+    if (newAdults >= 1 && newAdults <= MAX_ADULTS && newAdults + children <= MAX_TOTAL_TRAVELERS) {
+      setAdults(newAdults);
+      setError(null);
+    } else if (newAdults + children > MAX_TOTAL_TRAVELERS) {
+      setError(`Maximum ${MAX_TOTAL_TRAVELERS} travelers allowed`);
     }
   };
 
@@ -861,7 +1119,23 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
 
   const isLargeGroup = totalPeople > 4;
 
+  // Validate before submit
+  const validate = (): boolean => {
+    if (adults < 1) {
+      setError('At least one adult is required');
+      return false;
+    }
+    if (totalPeople > MAX_TOTAL_TRAVELERS) {
+      setError(`Maximum ${MAX_TOTAL_TRAVELERS} travelers allowed`);
+      return false;
+    }
+    setError(null);
+    return true;
+  };
+
   const handleSubmit = () => {
+    if (!validate()) return;
+
     onSubmit({
       adults,
       children,
@@ -870,42 +1144,50 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
     });
   };
 
+  const isValid = adults >= 1 && totalPeople <= MAX_TOTAL_TRAVELERS;
+
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 space-y-5 shadow-sm">
       {/* Adults */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Users className="w-5 h-5 text-slate-400" />
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+            <Users className="w-5 h-5 text-slate-500 dark:text-slate-400" aria-hidden="true" />
+          </div>
           <div>
-            <p className="font-medium text-slate-900 dark:text-white">Adults</p>
+            <p className="font-semibold text-slate-900 dark:text-white">Adults</p>
             <p className="text-xs text-slate-500">Age 18+</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => adults > 1 && setAdults(adults - 1)}
+            onClick={() => updateAdults(adults - 1)}
             disabled={disabled || adults <= 1}
-            className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Decrease adults"
+            className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <Minus className="w-4 h-4" />
+            <Minus className="w-4 h-4" aria-hidden="true" />
           </button>
-          <span className="w-8 text-center font-semibold text-slate-900 dark:text-white">{adults}</span>
+          <span className="w-8 text-center font-semibold text-slate-900 dark:text-white" aria-live="polite">{adults}</span>
           <button
-            onClick={() => adults < MAX_ADULTS && setAdults(adults + 1)}
-            disabled={disabled || adults >= MAX_ADULTS}
-            className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => updateAdults(adults + 1)}
+            disabled={disabled || adults >= MAX_ADULTS || totalPeople >= MAX_TOTAL_TRAVELERS}
+            aria-label="Increase adults"
+            className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
       </div>
 
       {/* Children */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Users className="w-5 h-5 text-slate-400" />
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+            <Users className="w-5 h-5 text-slate-500 dark:text-slate-400" aria-hidden="true" />
+          </div>
           <div>
-            <p className="font-medium text-slate-900 dark:text-white">Children</p>
+            <p className="font-semibold text-slate-900 dark:text-white">Children</p>
             <p className="text-xs text-slate-500">Age 0-17</p>
           </div>
         </div>
@@ -913,17 +1195,19 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
           <button
             onClick={removeChild}
             disabled={disabled || children <= 0}
-            className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Decrease children"
+            className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <Minus className="w-4 h-4" />
+            <Minus className="w-4 h-4" aria-hidden="true" />
           </button>
-          <span className="w-8 text-center font-semibold text-slate-900 dark:text-white">{children}</span>
+          <span className="w-8 text-center font-semibold text-slate-900 dark:text-white" aria-live="polite">{children}</span>
           <button
             onClick={addChild}
-            disabled={disabled || children >= MAX_CHILDREN}
-            className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={disabled || children >= MAX_CHILDREN || totalPeople >= MAX_TOTAL_TRAVELERS}
+            aria-label="Increase children"
+            className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -932,7 +1216,7 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
       {children > 0 && (
         <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-700">
           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-            Children&apos;s ages
+            Children&apos;s ages (helps us find family-friendly options)
           </p>
           <div className="flex flex-wrap gap-2">
             {childAges.map((age, index) => (
@@ -941,7 +1225,8 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
                 value={age}
                 onChange={(e) => updateChildAge(index, Number(e.target.value))}
                 disabled={disabled}
-                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"
+                aria-label={`Age of child ${index + 1}`}
+                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent"
               >
                 {Array.from({ length: 18 }, (_, i) => (
                   <option key={i} value={i}>
@@ -954,11 +1239,19 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
         </div>
       )}
 
+      {/* Inline error message */}
+      {error && (
+        <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      )}
+
       {/* Room estimate for large groups */}
-      {isLargeGroup && (
+      {isLargeGroup && !error && (
         <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
           <div className="flex items-start gap-2">
-            <span className="text-lg">🏨</span>
+            <span className="text-lg" aria-hidden="true">🏨</span>
             <div>
               <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
                 Large group ({totalPeople} travelers)
@@ -974,106 +1267,77 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
 
       <button
         onClick={handleSubmit}
-        disabled={disabled}
-        className="w-full py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        disabled={disabled || !isValid}
+        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
       >
         Continue
-        <ChevronRight className="w-4 h-4 inline ml-1" />
+        <ChevronRight className="w-4 h-4 inline ml-1.5" aria-hidden="true" />
       </button>
     </div>
   );
 }
 
 // ============================================================================
-// HOTELS CARD
+// HOTELS CARD - AMEX Travel-inspired full-screen browser
 // ============================================================================
-
-type HotelSortOption = 'rating' | 'price-low' | 'price-high' | 'stars';
-type HotelAmenityFilter = 'pool' | 'gym' | 'wifi' | 'parking' | 'restaurant' | 'spa';
-
-const HOTEL_AMENITY_OPTIONS: { key: HotelAmenityFilter; label: string; icon: string }[] = [
-  { key: 'pool', label: 'Pool', icon: '🏊' },
-  { key: 'gym', label: 'Gym', icon: '💪' },
-  { key: 'wifi', label: 'WiFi', icon: '📶' },
-  { key: 'parking', label: 'Parking', icon: '🅿️' },
-  { key: 'restaurant', label: 'Restaurant', icon: '🍽️' },
-  { key: 'spa', label: 'Spa', icon: '💆' },
-];
 
 function HotelsCard({ config, onSubmit, disabled }: CardProps) {
   const hotels = (config.candidates || []) as HotelCandidate[];
   const areaName = (config as any).areaName || '';
   const [selected, setSelected] = useState<string | null>(null);
-  const [detailHotel, setDetailHotel] = useState<HotelCandidate | null>(null);
-  const [sortBy, setSortBy] = useState<HotelSortOption>('rating');
-  const [amenityFilters, setAmenityFilters] = useState<Set<HotelAmenityFilter>>(new Set());
-  const [showFilters, setShowFilters] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
 
-  // Sort and filter hotels
-  const sortedFilteredHotels = useMemo(() => {
-    let result = [...hotels];
+  // Get top 3 hotels for preview
+  const topHotels = useMemo(() => {
+    return [...hotels]
+      .sort((a, b) => {
+        // Sort by Reddit score + stars + rating
+        const aScore = (a.redditScore || 0) * 10 + (a.stars || 0) * 5 + (a.googleRating || 0) * 2;
+        const bScore = (b.redditScore || 0) * 10 + (b.stars || 0) * 5 + (b.googleRating || 0) * 2;
+        return bScore - aScore;
+      })
+      .slice(0, 3);
+  }, [hotels]);
 
-    // Apply amenity filters (if hotel has amenities array)
-    if (amenityFilters.size > 0) {
-      result = result.filter(hotel => {
-        const hotelAmenities = (hotel as any).amenities || [];
-        const amenityText = hotelAmenities.join(' ').toLowerCase();
-        return Array.from(amenityFilters).every(filter => {
-          switch (filter) {
-            case 'pool': return amenityText.includes('pool') || amenityText.includes('swimming');
-            case 'gym': return amenityText.includes('gym') || amenityText.includes('fitness');
-            case 'wifi': return amenityText.includes('wifi') || amenityText.includes('internet');
-            case 'parking': return amenityText.includes('parking') || amenityText.includes('valet');
-            case 'restaurant': return amenityText.includes('restaurant') || amenityText.includes('dining');
-            case 'spa': return amenityText.includes('spa') || amenityText.includes('massage');
-            default: return true;
-          }
-        });
-      });
-    }
+  // Calculate price range
+  const priceRange = useMemo(() => {
+    const prices = hotels.filter(h => h.pricePerNight).map(h => h.pricePerNight!);
+    if (prices.length === 0) return null;
+    return {
+      min: Math.min(...prices),
+      max: Math.max(...prices),
+    };
+  }, [hotels]);
 
-    // Sort
-    result.sort((a, b) => {
-      switch (sortBy) {
-        case 'rating':
-          return (b.googleRating || 0) - (a.googleRating || 0);
-        case 'price-low':
-          return (a.pricePerNight || 999999) - (b.pricePerNight || 999999);
-        case 'price-high':
-          return (b.pricePerNight || 0) - (a.pricePerNight || 0);
-        case 'stars':
-          return (b.stars || 0) - (a.stars || 0);
-        default:
-          return 0;
-      }
-    });
-
-    return result;
-  }, [hotels, sortBy, amenityFilters]);
-
-  const handleSelect = (hotelId: string) => {
+  const handleSelect = (hotel: HotelCandidate) => {
     if (disabled) return;
-    setSelected(hotelId);
-    const hotel = hotels.find(h => h.id === hotelId);
+    setSelected(hotel.id);
     onSubmit(hotel);
+    setShowBrowser(false);
   };
 
-  const openDetail = (hotel: HotelCandidate, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setDetailHotel(hotel);
-  };
+  // Show loading skeleton while hotels are being fetched
+  const isLoading = (config as any).isLoading === true;
 
-  const toggleAmenityFilter = (amenity: HotelAmenityFilter) => {
-    setAmenityFilters(prev => {
-      const next = new Set(prev);
-      if (next.has(amenity)) {
-        next.delete(amenity);
-      } else {
-        next.add(amenity);
-      }
-      return next;
-    });
-  };
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        {/* Header skeleton */}
+        <div className="p-4 bg-gradient-to-r from-orange-500 to-amber-500 text-white">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            <span className="font-semibold">Finding hotels{areaName ? ` in ${areaName}` : ''}...</span>
+          </div>
+          <p className="text-orange-100 text-sm mt-1">Searching for the best options</p>
+        </div>
+        <div className="p-4 space-y-3">
+          {[1, 2, 3].map((i) => (
+            <SkeletonHotelCard key={i} />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (hotels.length === 0) {
     return (
@@ -1086,253 +1350,143 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
 
   return (
     <>
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-        <div className="p-3 bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-600">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+        {/* Header */}
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-orange-500 to-amber-500 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                🏨 Select a hotel{areaName ? ` for ${areaName}` : ''}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                {sortedFilteredHotels.length} of {hotels.length} options · Tap name for details
+              <h3 className="font-bold text-lg sm:text-xl flex items-center gap-2">
+                <span>Select Your Hotel</span>
+                {areaName && <span className="font-normal opacity-90">in {areaName}</span>}
+              </h3>
+              <p className="text-orange-100 text-sm mt-1.5">
+                {hotels.length} hotels available
+                {priceRange && ` · $${priceRange.min} - $${priceRange.max}/night`}
               </p>
             </div>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`p-2 rounded-lg transition-colors ${
-                showFilters || amenityFilters.size > 0
-                  ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
-                  : 'hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500'
-              }`}
-              title="Sort & Filter"
-            >
-              <SlidersHorizontal className="w-4 h-4" />
-              {amenityFilters.size > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 text-white text-xs rounded-full flex items-center justify-center">
-                  {amenityFilters.size}
-                </span>
-              )}
-            </button>
           </div>
-
-          {/* Sort & Filter Controls */}
-          {showFilters && (
-            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600 space-y-3">
-              {/* Sort dropdown */}
-              <div className="flex items-center gap-2">
-                <ArrowUpDown className="w-4 h-4 text-slate-400" />
-                <span className="text-xs text-slate-500 dark:text-slate-400">Sort:</span>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as HotelSortOption)}
-                  className="flex-1 text-sm bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-300"
-                >
-                  <option value="rating">Highest Rated</option>
-                  <option value="price-low">Price: Low to High</option>
-                  <option value="price-high">Price: High to Low</option>
-                  <option value="stars">Star Rating</option>
-                </select>
-              </div>
-
-              {/* Amenity filter chips */}
-              <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Filter by amenities:</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {HOTEL_AMENITY_OPTIONS.map(({ key, label, icon }) => (
-                    <button
-                      key={key}
-                      onClick={() => toggleAmenityFilter(key)}
-                      className={`text-xs px-2 py-1 rounded-full transition-colors ${
-                        amenityFilters.has(key)
-                          ? 'bg-orange-500 text-white'
-                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
-                      }`}
-                    >
-                      {icon} {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Clear filters */}
-              {amenityFilters.size > 0 && (
-                <button
-                  onClick={() => setAmenityFilters(new Set())}
-                  className="text-xs text-orange-600 dark:text-orange-400 hover:underline"
-                >
-                  Clear all filters
-                </button>
-              )}
-            </div>
-          )}
         </div>
-        <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-80 overflow-y-auto">
-          {sortedFilteredHotels.length === 0 ? (
-            <div className="p-4 text-center text-sm text-slate-500 dark:text-slate-400">
-              No hotels match your filters. Try removing some filters.
-            </div>
-          ) : sortedFilteredHotels.slice(0, 5).map((hotel) => (
+
+        {/* Top 3 Preview */}
+        <div className="p-4 sm:p-5 space-y-4">
+          <p className="text-sm font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">
+            Top Recommendations
+          </p>
+          {topHotels.map((hotel) => (
             <div
               key={hotel.id}
-              className={`w-full p-4 flex items-start gap-3 text-left transition-colors ${
+              className={`flex gap-4 p-3.5 rounded-xl border-2 transition-all cursor-pointer ${
                 selected === hotel.id
-                  ? 'bg-orange-50 dark:bg-orange-900/20'
-                  : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20 shadow-md shadow-orange-500/10'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-orange-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:shadow-sm'
               }`}
+              onClick={() => handleSelect(hotel)}
             >
-              <div className="w-20 h-16 rounded-lg flex-shrink-0 overflow-hidden cursor-pointer bg-slate-100 dark:bg-slate-700" onClick={(e) => openDetail(hotel, e)}>
-                {hotel.imageUrl ? (
-                  <img
-                    src={hotel.imageUrl}
-                    alt={hotel.name}
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none';
-                      (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-2xl">🏨</div>';
-                    }}
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-2xl">🏨</div>
-                )}
+              {/* Image */}
+              <div className="relative w-24 h-20 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-700 flex-shrink-0 shadow-sm">
+                <FallbackImage
+                  src={hotel.imageUrl}
+                  alt={hotel.name}
+                  fill
+                  fallbackType="hotel"
+                  sizes="96px"
+                  fallbackContent={
+                    <div className="w-full h-full flex items-center justify-center text-3xl bg-slate-100 dark:bg-slate-700">🏨</div>
+                  }
+                />
               </div>
+
+              {/* Content */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
-                  <h4
-                    className="font-medium text-slate-900 dark:text-white truncate cursor-pointer hover:text-orange-600"
-                    onClick={(e) => openDetail(hotel, e)}
-                  >
+                  <h4 className="font-semibold text-slate-900 dark:text-white line-clamp-1 text-base">
                     {hotel.name}
                   </h4>
-                  <button
-                    onClick={(e) => openDetail(hotel, e)}
-                    className="p-1 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full transition-colors flex-shrink-0"
-                    title="View details"
-                  >
-                    <Info className="w-4 h-4 text-slate-400" />
-                  </button>
-                </div>
-                <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  {hotel.googleRating && hotel.googleRating > 0 && (
-                    <span className="flex items-center gap-1">
-                      <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                      <span className="text-sm text-slate-600 dark:text-slate-400">
-                        {hotel.googleRating}
-                      </span>
-                      {hotel.reviewCount && hotel.reviewCount > 0 && (
-                        <span className="text-xs text-slate-400">({hotel.reviewCount})</span>
-                      )}
-                    </span>
-                  )}
-                  {hotel.stars && hotel.stars > 0 && (
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                      {'★'.repeat(hotel.stars)}-star
-                    </span>
-                  )}
-                  {hotel.redditScore && hotel.redditScore > 0 && (
-                    <span className="text-xs px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 rounded">
-                      🔥 {hotel.redditScore}x Reddit
-                    </span>
-                  )}
-                </div>
-                {hotel.address && (
-                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 truncate flex items-center gap-1">
-                    <MapPin className="w-3 h-3 flex-shrink-0" />
-                    <span className="truncate">{hotel.address}</span>
-                  </p>
-                )}
-                {(hotel.googleMapsUrl || hotel.placeId) && (
-                  <a
-                    href={hotel.googleMapsUrl || `https://www.google.com/maps/place/?q=place_id:${hotel.placeId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-0.5 inline-flex items-center gap-1"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    View on Maps
-                  </a>
-                )}
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-xs text-slate-500">{hotel.city}</span>
-                  {hotel.pricePerNight && (
-                    <div className="flex flex-col items-end gap-0.5">
-                      <div className="flex items-center gap-1">
-                        {hotel.priceConfidence === 'real' ? (
-                          <>
-                            <span className="text-sm font-semibold text-green-600 dark:text-green-400">
-                              ${hotel.pricePerNight}/night
-                            </span>
-                            <span className="text-xs px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded" title="Live price from booking sites">
-                              live
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">
-                              ~${hotel.pricePerNight}/night
-                            </span>
-                            <span className="text-xs px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded" title="Estimated price - actual may vary">
-                              est.
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      {/* Large group room estimate */}
-                      {hotel.estimatedRoomsNeeded && hotel.estimatedRoomsNeeded > 1 && (
-                        <span className="text-xs text-slate-500 dark:text-slate-400">
-                          {hotel.estimatedRoomsNeeded} rooms = ~${hotel.estimatedTotalPrice || hotel.pricePerNight * hotel.estimatedRoomsNeeded}/night total
-                        </span>
-                      )}
+                  {selected === hotel.id && (
+                    <div className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
+                      <Check className="w-4 h-4 text-white" />
                     </div>
                   )}
                 </div>
-                {/* Large group note */}
-                {hotel.largeGroupNote && (
-                  <p className="text-xs text-blue-600 dark:text-blue-400 mt-1 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
-                    💡 {hotel.largeGroupNote}
-                  </p>
-                )}
-                <button
-                  onClick={() => handleSelect(hotel.id)}
-                  disabled={disabled}
-                  className={`mt-2 w-full py-2 rounded-lg text-sm font-medium transition-colors ${
-                    selected === hotel.id
-                      ? 'bg-green-500 text-white'
-                      : 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50'
-                  }`}
-                >
-                  {selected === hotel.id ? '✓ Selected' : 'Select this hotel'}
-                </button>
+
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  {hotel.stars > 0 && (
+                    <span className="text-xs text-amber-500">{'★'.repeat(hotel.stars)}</span>
+                  )}
+                  {hotel.googleRating > 0 && (
+                    <span className="flex items-center gap-0.5 text-xs text-slate-600 dark:text-slate-400">
+                      <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
+                      {hotel.googleRating}
+                    </span>
+                  )}
+                  {hotel.redditScore && hotel.redditScore > 0 && (
+                    <span className="text-xs px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-600 rounded">
+                      🔥 Reddit Pick
+                    </span>
+                  )}
+                  {hotel.isAllInclusive && (
+                    <span className="text-xs px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 rounded">
+                      All-Inclusive
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
+                    {hotel.city}
+                  </span>
+                  {hotel.pricePerNight && (
+                    <span className={`text-sm font-semibold ${
+                      hotel.priceConfidence === 'real'
+                        ? 'text-green-600'
+                        : 'text-slate-700 dark:text-slate-300'
+                    }`}>
+                      ${hotel.pricePerNight}/night
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Quick Questions - Phase 4 Fix 4.1 */}
-        <div className="px-3 pb-3">
-          <HotelQuestionsInput
-            hotels={sortedFilteredHotels}
-            onAnswer={(answer) => {
-              console.log('[HotelsCard] Quick question answered:', answer.question);
-            }}
-          />
+        {/* Browse All Button */}
+        <div className="px-4 sm:px-5 pb-4 sm:pb-5">
+          <button
+            onClick={() => setShowBrowser(true)}
+            disabled={disabled}
+            className="w-full py-3.5 px-4 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl font-semibold transition-all shadow-md hover:shadow-lg hover:shadow-orange-500/20 flex items-center justify-center gap-2"
+          >
+            <Search className="w-5 h-5" />
+            Browse All {hotels.length} Hotels
+            <ChevronRight className="w-5 h-5" />
+          </button>
+          <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-2.5">
+            Filter by price, star rating, amenities & more
+          </p>
         </div>
 
-        {/* Accessibility Warning - Phase 4 Fix 4.2 */}
-        <div className="px-3 pb-3">
-          <AccessibilityWarning hotels={sortedFilteredHotels} />
-        </div>
+        {/* Selected indicator */}
+        {selected && (
+          <div className="px-4 pb-4 border-t border-slate-200 dark:border-slate-700 pt-3">
+            <div className="flex items-center gap-2 text-orange-600 dark:text-orange-400">
+              <Check className="w-5 h-5" />
+              <span className="font-medium">
+                {hotels.find(h => h.id === selected)?.name}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Detail Drawer */}
-      <DetailDrawer
-        isOpen={!!detailHotel}
-        onClose={() => setDetailHotel(null)}
-        onSelect={() => detailHotel && handleSelect(detailHotel.id)}
-        isSelected={detailHotel?.id === selected}
-        type="hotel"
-        item={detailHotel}
+      {/* Full-screen Hotel Browser Modal */}
+      <HotelBrowserModal
+        isOpen={showBrowser}
+        onClose={() => setShowBrowser(false)}
+        hotels={hotels}
+        areaName={areaName}
+        onSelectHotel={handleSelect}
+        selectedHotelId={selected}
       />
     </>
   );
@@ -1598,6 +1752,29 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
     return `${Math.round(km)}km from ${hotelRef}`;
   };
 
+  // Show loading skeleton while restaurants are being fetched
+  const isLoading = (config as any).isLoading === true;
+
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="p-3 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-b border-slate-200 dark:border-slate-600">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              {emoji} Finding {cuisineLabel} restaurants...
+            </span>
+          </div>
+        </div>
+        <div className="p-3 space-y-2">
+          {[1, 2, 3].map((i) => (
+            <SkeletonRestaurantCard key={i} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (restaurants.length === 0) {
     return (
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center">
@@ -1615,13 +1792,14 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
 
   return (
     <>
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-        <div className="p-3 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-b border-slate-200 dark:border-slate-600">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-            {emoji} {cuisineLabel} restaurants near your hotels
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+        <div className="p-4 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-b border-slate-200 dark:border-slate-600">
+          <p className="text-base font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+            <span className="text-xl">{emoji}</span>
+            <span>{cuisineLabel} restaurants</span>
           </p>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            {restaurants.length} options found · Tap name for details, checkbox to select
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            {restaurants.length} options near your hotels
           </p>
         </div>
         <div className="max-h-80 overflow-y-auto">
@@ -1658,23 +1836,16 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
                     </button>
                     {/* Restaurant thumbnail image */}
                     <div
-                      className="w-16 h-14 rounded-lg flex-shrink-0 overflow-hidden cursor-pointer bg-slate-100 dark:bg-slate-700"
+                      className="relative w-16 h-14 rounded-lg flex-shrink-0 overflow-hidden cursor-pointer bg-slate-100 dark:bg-slate-700"
                       onClick={(e) => openDetail(restaurant, e)}
                     >
-                      {restaurant.imageUrl && !restaurant.imageUrl.includes('placeholder') ? (
-                        <img
-                          src={restaurant.imageUrl}
-                          alt={restaurant.name}
-                          loading="lazy"
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                            (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-xl">🍽️</div>';
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-xl">🍽️</div>
-                      )}
+                      <FallbackImage
+                        src={restaurant.imageUrl}
+                        alt={restaurant.name}
+                        fill
+                        fallbackType="restaurant"
+                        sizes="64px"
+                      />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
@@ -1763,13 +1934,14 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
             </div>
           ))}
         </div>
-        <div className="p-3 border-t border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/50">
+        <div className="p-4 border-t border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/50">
           <button
             onClick={handleSubmit}
             disabled={disabled}
-            className="w-full py-2.5 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20"
           >
             {selected.size > 0 ? `Add ${selected.size} restaurant${selected.size > 1 ? 's' : ''}` : 'Skip this cuisine'}
+            <ChevronRight className="w-4 h-4 inline ml-1.5" />
           </button>
         </div>
       </div>
@@ -2075,6 +2247,29 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
 
   const emoji = activityEmojis[activityType] || '🎯';
 
+  // Show loading skeleton while experiences are being fetched
+  const isLoading = (config as any).isLoading === true;
+
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="p-3 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-b border-slate-200 dark:border-slate-600">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              {emoji} Finding {activityLabel} experiences...
+            </span>
+          </div>
+        </div>
+        <div className="p-3 space-y-2">
+          {[1, 2, 3].map((i) => (
+            <SkeletonExperienceCard key={i} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (experiences.length === 0) {
     return (
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center">
@@ -2135,23 +2330,16 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
                     </button>
                     {/* Experience thumbnail image */}
                     <div
-                      className="w-16 h-14 rounded-lg flex-shrink-0 overflow-hidden cursor-pointer bg-slate-100 dark:bg-slate-700"
+                      className="relative w-16 h-14 rounded-lg flex-shrink-0 overflow-hidden cursor-pointer bg-slate-100 dark:bg-slate-700"
                       onClick={(e) => openDetail(experience, e)}
                     >
-                      {experience.imageUrl && !experience.imageUrl.includes('placeholder') ? (
-                        <img
-                          src={experience.imageUrl}
-                          alt={experience.name}
-                          loading="lazy"
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                            (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-xl">🎯</div>';
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-xl">🎯</div>
-                      )}
+                      <FallbackImage
+                        src={experience.imageUrl}
+                        alt={experience.name}
+                        fill
+                        fallbackType="experience"
+                        sizes="64px"
+                      />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
@@ -2388,21 +2576,52 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
     onSubmit(selectedAreas);
   };
 
+  // Show loading skeleton while areas are being discovered
+  const isLoading = (config as any).isLoading === true;
+
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+        <div className="p-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🗺️</span>
+            <span className="font-medium">Discovering areas...</span>
+            <Loader2 className="w-4 h-4 animate-spin ml-auto" />
+          </div>
+        </div>
+        <div className="p-4 space-y-3">
+          {[1, 2, 3, 4].map((i) => (
+            <SkeletonAreaCard key={i} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (areas.length === 0) {
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center">
-        <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-        <p className="text-slate-500 dark:text-slate-400">No areas discovered</p>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+        <div className="p-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🗺️</span>
+            <span className="font-medium">Areas</span>
+          </div>
+        </div>
+        <div className="p-4 text-center">
+          <AlertCircle className="w-8 h-8 text-blue-400 mx-auto mb-2" />
+          <p className="text-blue-600 dark:text-blue-400">No areas discovered</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-      <div className="p-3 bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-600">
-        <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-          Select up to 3 areas to visit
-        </p>
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+      <div className="p-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">🗺️</span>
+          <span className="font-medium">Select up to 3 areas to visit</span>
+        </div>
       </div>
 
       {/* Map preview of areas */}
@@ -2455,7 +2674,7 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
                       key={tag}
                       className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 text-xs rounded-full"
                     >
-                      {tag}
+                      {formatTag(tag)}
                     </span>
                   ))}
                 </div>
@@ -2495,8 +2714,9 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
   const [showCustom, setShowCustom] = useState(false);
   const [customNights, setCustomNights] = useState<Record<string, number>>({});
   const [customConfirmed, setCustomConfirmed] = useState(false);
+  const [customOrder, setCustomOrder] = useState<string[]>([]); // Track custom area order
 
-  // Initialize customNights when areas or tripLength changes
+  // Initialize customNights and customOrder when areas or tripLength changes
   useEffect(() => {
     if (areas.length > 0) {
       const perArea = Math.floor(tripLength / areas.length);
@@ -2506,9 +2726,42 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
         initial[area.id] = perArea + (idx === areas.length - 1 ? remainder : 0);
       });
       setCustomNights(initial);
+      setCustomOrder(areas.map((a: any) => a.id)); // Initialize order from areas
       console.log('[SplitCard] Initialized customNights:', initial, 'areas:', areas.map((a: any) => a.name), 'tripLength:', tripLength);
     }
   }, [areas, tripLength]);
+
+  // Get areas in custom order
+  const orderedAreas = useMemo(() => {
+    if (customOrder.length === 0) return areas;
+    return customOrder.map(id => areas.find((a: any) => a.id === id)).filter(Boolean);
+  }, [areas, customOrder]);
+
+  // Swap two areas (for 2-area trips)
+  const swapAreas = () => {
+    if (customOrder.length === 2) {
+      setCustomOrder([customOrder[1], customOrder[0]]);
+      setCustomConfirmed(false);
+    }
+  };
+
+  // Move area up in order
+  const moveAreaUp = (index: number) => {
+    if (index <= 0) return;
+    const newOrder = [...customOrder];
+    [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
+    setCustomOrder(newOrder);
+    setCustomConfirmed(false);
+  };
+
+  // Move area down in order
+  const moveAreaDown = (index: number) => {
+    if (index >= customOrder.length - 1) return;
+    const newOrder = [...customOrder];
+    [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
+    setCustomOrder(newOrder);
+    setCustomConfirmed(false);
+  };
 
   const handleSelect = (splitId: string) => {
     if (disabled) return;
@@ -2556,10 +2809,11 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
 
   const handleSubmit = () => {
     if (selected === 'custom') {
+      // Use orderedAreas for custom splits to respect user's order preference
       const customSplit = {
         id: 'user-custom',
-        name: areas.map((a: any) => `${customNights[a.id] ?? defaultNightsPerArea}n ${a.name}`).join(' → '),
-        stops: areas.map((area: any) => ({
+        name: orderedAreas.map((a: any) => `${customNights[a.id] ?? defaultNightsPerArea}n ${a.name}`).join(' → '),
+        stops: orderedAreas.map((area: any) => ({
           areaId: area.id,
           areaName: area.name,
           nights: customNights[area.id] ?? defaultNightsPerArea,
@@ -2623,7 +2877,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
             <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded">Day {tripLength + 1}</span>
           </div>
           <div className="flex gap-1 mt-2">
-            {areas.map((area: any, idx: number) => {
+            {orderedAreas.map((area: any, idx: number) => {
               const nights = customNights[area.id] ?? Math.floor(tripLength / areas.length);
               const width = `${(nights / tripLength) * 100}%`;
               const colors = ['bg-orange-400', 'bg-blue-400', 'bg-green-400', 'bg-purple-400'];
@@ -2638,7 +2892,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
             })}
           </div>
           <div className="flex justify-between mt-1">
-            {areas.map((area: any, idx: number) => {
+            {orderedAreas.map((area: any, idx: number) => {
               const nights = customNights[area.id] ?? Math.floor(tripLength / areas.length);
               const colors = ['text-orange-600', 'text-blue-600', 'text-green-600', 'text-purple-600'];
               return (
@@ -2765,12 +3019,25 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
             animate={{ opacity: 1, height: 'auto' }}
             className="p-4 bg-slate-50 dark:bg-slate-700/30 rounded-xl space-y-4 border-2 border-orange-200 dark:border-orange-800"
           >
-            <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
-              Adjust nights for each area:
-            </p>
-            {areas.map((area: any, idx: number) => {
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-600 dark:text-slate-400 font-medium">
+                Adjust nights and order:
+              </p>
+              {/* Swap button for 2 areas */}
+              {orderedAreas.length === 2 && (
+                <button
+                  onClick={swapAreas}
+                  disabled={disabled}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
+                >
+                  <ArrowUpDown className="w-4 h-4" />
+                  Swap order
+                </button>
+              )}
+            </div>
+            {orderedAreas.map((area: any, idx: number) => {
               const nightsForArea = customNights[area.id] ?? defaultNightsPerArea;
-              const nextArea = areas[idx + 1];
+              const nextArea = orderedAreas[idx + 1];
 
               // Calculate transit to next area
               let transitInfo = null;
@@ -2787,27 +3054,49 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
 
               return (
                 <div key={area.id}>
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center justify-between gap-2">
+                    {/* Reorder controls for 3+ areas */}
+                    {orderedAreas.length > 2 && (
+                      <div className="flex flex-col gap-0.5">
+                        <button
+                          onClick={() => moveAreaUp(idx)}
+                          disabled={disabled || idx === 0}
+                          className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-600 text-slate-500 dark:text-slate-400 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          title="Move up"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => moveAreaDown(idx)}
+                          disabled={disabled || idx === orderedAreas.length - 1}
+                          className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-600 text-slate-500 dark:text-slate-400 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          title="Move down"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    <span className="font-medium text-slate-700 dark:text-slate-300 flex-1">
+                      <span className="text-xs text-slate-400 mr-1">{idx + 1}.</span>
                       {area.name}
                     </span>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                       <button
                         onClick={() => adjustNights(area.id, -1)}
                         disabled={disabled || nightsForArea <= 1}
-                        className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
-                        <Minus className="w-5 h-5" />
+                        <Minus className="w-4 h-4" />
                       </button>
-                      <span className="w-20 text-center font-bold text-lg text-slate-900 dark:text-white">
-                        {nightsForArea} nights
+                      <span className="w-16 text-center font-bold text-slate-900 dark:text-white">
+                        {nightsForArea}n
                       </span>
                       <button
                         onClick={() => adjustNights(area.id, 1)}
                         disabled={disabled || nightsRemaining <= 0}
-                        className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
-                        <Plus className="w-5 h-5" />
+                        <Plus className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -3020,40 +3309,112 @@ function SatisfactionCard({ config, onSubmit, disabled }: CardProps) {
 
 function TextCard({ config, onSubmit, disabled }: CardProps) {
   const [text, setText] = useState('');
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const minLength = (config as any).minLength || 0;
+  const maxLength = (config as any).maxLength || 500;
+  const required = (config as any).required || false;
+
+  // Validate text input
+  const validate = (): boolean => {
+    if (required && !text.trim()) {
+      setError('This field is required');
+      return false;
+    }
+    if (text.trim() && text.trim().length < minLength) {
+      setError(`Please enter at least ${minLength} characters`);
+      return false;
+    }
+    if (text.length > maxLength) {
+      setError(`Please keep your response under ${maxLength} characters`);
+      return false;
+    }
+    setError(null);
+    return true;
+  };
+
+  const handleBlur = () => {
+    setTouched(true);
+    validate();
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(e.target.value);
+    // Clear error when user starts typing
+    if (error) {
+      setError(null);
+    }
+  };
 
   const handleSubmit = () => {
+    setTouched(true);
+    if (!validate()) return;
+
     if (text.trim()) {
       onSubmit(text.trim());
     } else {
-      // Allow skipping text input
+      // Allow skipping text input if not required
       onSubmit('');
     }
   };
 
+  const charCount = text.length;
+  const showCharCount = charCount > maxLength * 0.7;
+  const isOverLimit = charCount > maxLength;
+  const isValid = !required || text.trim().length > 0;
+
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={config.placeholder || config.customTextPlaceholder || 'Type your answer...'}
-        disabled={disabled}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSubmit();
-          }
-        }}
-        className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white resize-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-        rows={config.multiline ? 4 : 3}
-      />
+      <div className="relative">
+        <textarea
+          value={text}
+          onChange={handleChange}
+          onBlur={handleBlur}
+          placeholder={config.placeholder || config.customTextPlaceholder || 'Type your answer...'}
+          disabled={disabled}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+          aria-invalid={touched && !!error}
+          aria-describedby={error ? 'text-error' : undefined}
+          className={`w-full p-3 rounded-lg border bg-white dark:bg-slate-700 text-slate-900 dark:text-white resize-none transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 ${
+            touched && error
+              ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+              : 'border-slate-200 dark:border-slate-600 focus:border-orange-500 focus:ring-orange-500'
+          }`}
+          rows={config.multiline ? 4 : 3}
+        />
+
+        {/* Character count */}
+        {showCharCount && (
+          <div className={`absolute bottom-2 right-2 text-xs ${
+            isOverLimit ? 'text-red-500' : 'text-slate-400'
+          }`}>
+            {charCount}/{maxLength}
+          </div>
+        )}
+      </div>
+
+      {/* Inline error message */}
+      {touched && error && (
+        <div id="text-error" role="alert" className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      )}
+
       <div className="flex gap-2">
         <button
           onClick={handleSubmit}
-          disabled={disabled}
-          className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          disabled={disabled || (touched && !isValid && required)}
+          className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
         >
-          {text.trim() ? 'Continue' : 'Skip'}
-          <ChevronRight className="w-4 h-4 inline ml-1" />
+          {text.trim() ? 'Continue' : (required ? 'Required' : 'Skip')}
+          <ChevronRight className="w-4 h-4 inline ml-1" aria-hidden="true" />
         </button>
       </div>
     </div>

@@ -3,6 +3,8 @@
  * Provides common validation functions for forms across the app
  */
 
+import { toDate, isAfter, getToday, getNights } from './date-utils';
+
 export interface ValidationResult {
   isValid: boolean;
   error?: string;
@@ -65,8 +67,8 @@ export function validateDate(date: Date | string | null, fieldName: string): Val
   if (!date) {
     return { isValid: false, error: `${fieldName} is required` };
   }
-  const d = typeof date === 'string' ? new Date(date) : date;
-  if (isNaN(d.getTime())) {
+  const d = toDate(date);
+  if (!d) {
     return { isValid: false, error: `Please enter a valid ${fieldName.toLowerCase()}` };
   }
   return { isValid: true };
@@ -77,10 +79,12 @@ export function validateFutureDate(date: Date | string | null, fieldName: string
   const dateResult = validateDate(date, fieldName);
   if (!dateResult.isValid) return dateResult;
 
-  const d = typeof date === 'string' ? new Date(date) : date!;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const d = toDate(date);
+  if (!d) {
+    return { isValid: false, error: `Please enter a valid ${fieldName.toLowerCase()}` };
+  }
 
+  const today = getToday();
   if (d < today) {
     return { isValid: false, error: `${fieldName} must be in the future` };
   }
@@ -96,14 +100,14 @@ export function validateDateRange(
     return { isValid: false, error: 'Both start and end dates are required' };
   }
 
-  const start = typeof startDate === 'string' ? new Date(startDate) : startDate;
-  const end = typeof endDate === 'string' ? new Date(endDate) : endDate;
+  const start = toDate(startDate);
+  const end = toDate(endDate);
 
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+  if (!start || !end) {
     return { isValid: false, error: 'Please enter valid dates' };
   }
 
-  if (end <= start) {
+  if (!isAfter(end, start)) {
     return { isValid: false, error: 'End date must be after start date' };
   }
 
@@ -219,4 +223,204 @@ export function validateQuickPlanPreferences(prefs: {
   }
 
   return { isValid: true };
+}
+
+// ============================================================================
+// FORM FIELD STATE TYPES
+// ============================================================================
+
+export interface FieldState {
+  value: unknown;
+  error: string | null;
+  touched: boolean;
+  dirty: boolean;
+  isValidating: boolean;
+}
+
+export interface FormFieldsState {
+  [fieldName: string]: FieldState;
+}
+
+// ============================================================================
+// FIELD-SPECIFIC VALIDATORS FOR QUICK PLAN
+// ============================================================================
+
+export const quickPlanValidators = {
+  destination: (value: unknown): ValidationResult => {
+    if (!value) {
+      return { isValid: false, error: 'Please select where you want to go' };
+    }
+    const dest = value as { canonicalName?: string; rawInput?: string };
+    if (!dest.canonicalName && !dest.rawInput) {
+      return { isValid: false, error: 'Please select a destination from the suggestions' };
+    }
+    return { isValid: true };
+  },
+
+  dateRange: (value: unknown): ValidationResult => {
+    if (!value) {
+      return { isValid: false, error: 'Please select your travel dates' };
+    }
+    const dates = value as { startDate?: Date | string; endDate?: Date | string; nights?: number };
+    if (!dates.startDate) {
+      return { isValid: false, error: 'Please select a start date' };
+    }
+    if (!dates.endDate) {
+      return { isValid: false, error: 'Please select an end date' };
+    }
+    if (dates.nights !== undefined && dates.nights < 1) {
+      return { isValid: false, error: 'Your trip must be at least 1 night' };
+    }
+    if (dates.nights !== undefined && dates.nights > 60) {
+      return { isValid: false, error: 'Trip cannot exceed 60 nights' };
+    }
+    return { isValid: true };
+  },
+
+  party: (value: unknown): ValidationResult => {
+    if (!value) {
+      return { isValid: false, error: 'Please specify your travel party' };
+    }
+    const party = value as { adults?: number; children?: number };
+    if (!party.adults || party.adults < 1) {
+      return { isValid: false, error: 'At least one adult traveler is required' };
+    }
+    if (party.adults > 20) {
+      return { isValid: false, error: 'Maximum 20 adults per booking' };
+    }
+    if (party.children && party.children > 10) {
+      return { isValid: false, error: 'Maximum 10 children per booking' };
+    }
+    return { isValid: true };
+  },
+
+  budget: (value: unknown): ValidationResult => {
+    if (value === undefined || value === null) {
+      return { isValid: false, error: 'Please set your budget preference' };
+    }
+    const budget = value as { value?: number; min?: number; max?: number };
+    const budgetValue = budget.value ?? budget.min ?? 0;
+    if (budgetValue < 25) {
+      return { isValid: false, error: 'Budget must be at least $25 per night' };
+    }
+    return { isValid: true };
+  },
+
+  activities: (value: unknown): ValidationResult => {
+    if (!value || !Array.isArray(value)) {
+      return { isValid: false, error: 'Please select at least one activity' };
+    }
+    if (value.length === 0) {
+      return { isValid: false, error: 'Select at least one activity you\'d like to do' };
+    }
+    return { isValid: true };
+  },
+
+  areas: (value: unknown): ValidationResult => {
+    if (!value || !Array.isArray(value)) {
+      return { isValid: false, error: 'Please select at least one area' };
+    }
+    if (value.length === 0) {
+      return { isValid: false, error: 'Select at least one area to explore' };
+    }
+    if (value.length > 5) {
+      return { isValid: false, error: 'Select up to 5 areas for a balanced trip' };
+    }
+    return { isValid: true };
+  },
+
+  hotel: (value: unknown): ValidationResult => {
+    if (!value) {
+      return { isValid: false, error: 'Please select a hotel' };
+    }
+    return { isValid: true };
+  },
+
+  restaurants: (value: unknown): ValidationResult => {
+    if (!value || !Array.isArray(value)) {
+      return { isValid: true }; // Optional
+    }
+    return { isValid: true };
+  },
+
+  experiences: (value: unknown): ValidationResult => {
+    if (!value || !Array.isArray(value)) {
+      return { isValid: true }; // Optional
+    }
+    return { isValid: true };
+  },
+
+  text: (value: unknown, options?: { minLength?: number; maxLength?: number; required?: boolean }): ValidationResult => {
+    const text = (value as string) || '';
+
+    if (options?.required && text.trim() === '') {
+      return { isValid: false, error: 'This field is required' };
+    }
+
+    if (text && options?.minLength && text.length < options.minLength) {
+      return { isValid: false, error: `Please enter at least ${options.minLength} characters` };
+    }
+
+    if (text && options?.maxLength && text.length > options.maxLength) {
+      return { isValid: false, error: `Please keep under ${options.maxLength} characters` };
+    }
+
+    return { isValid: true };
+  },
+};
+
+// ============================================================================
+// VALIDATION ERROR DISPLAY HELPERS
+// ============================================================================
+
+/**
+ * Gets CSS classes for field validation state
+ */
+export function getValidationClasses(
+  error: string | null,
+  touched: boolean,
+  baseClasses: string = ''
+): string {
+  if (!touched) return baseClasses;
+
+  if (error) {
+    return `${baseClasses} border-red-500 focus:border-red-500 focus:ring-red-500`;
+  }
+
+  return `${baseClasses} border-green-500 focus:border-green-500 focus:ring-green-500`;
+}
+
+/**
+ * Gets inline error classes for displaying error messages
+ */
+export function getErrorMessageClasses(): string {
+  return 'text-sm text-red-600 dark:text-red-400 mt-1 flex items-center gap-1';
+}
+
+/**
+ * Get field label with proper formatting
+ */
+export function getFieldDisplayName(fieldName: string): string {
+  const labels: Record<string, string> = {
+    destination: 'Destination',
+    dates: 'Travel dates',
+    dateRange: 'Travel dates',
+    startDate: 'Start date',
+    endDate: 'End date',
+    party: 'Travel party',
+    adults: 'Number of adults',
+    children: 'Number of children',
+    budget: 'Budget',
+    activities: 'Activities',
+    pace: 'Trip pace',
+    areas: 'Areas to visit',
+    hotels: 'Hotel',
+    restaurants: 'Restaurants',
+    experiences: 'Experiences',
+    cuisinePreferences: 'Cuisine preferences',
+    dining: 'Dining preferences',
+    hotelPreferences: 'Hotel preferences',
+  };
+
+  return labels[fieldName] || fieldName.charAt(0).toUpperCase() + fieldName.slice(1).replace(/([A-Z])/g, ' $1');
 }

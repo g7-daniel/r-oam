@@ -1,39 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchFlights, searchRoundTripFlights } from '@/lib/amadeus';
+import {
+  flightsGetSchema,
+  createValidationErrorResponse,
+} from '@/lib/api-validation';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
-  const origin = searchParams.get('origin');
-  const destination = searchParams.get('destination');
-  const departureDate = searchParams.get('departureDate');
-  const returnDate = searchParams.get('returnDate'); // For round trips
-  const adults = parseInt(searchParams.get('adults') || '1', 10);
-  const children = parseInt(searchParams.get('children') || '0', 10);
-  const maxPrice = searchParams.get('maxPrice')
-    ? parseInt(searchParams.get('maxPrice')!, 10)
-    : undefined;
-  // Cabin class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST
-  const travelClass = searchParams.get('travelClass') || undefined;
+  // Build params object for validation
+  const rawParams = {
+    origin: searchParams.get('origin') || undefined,
+    destination: searchParams.get('destination') || undefined,
+    departureDate: searchParams.get('departureDate') || undefined,
+    returnDate: searchParams.get('returnDate') || undefined,
+    adults: searchParams.get('adults') ? parseInt(searchParams.get('adults')!, 10) : undefined,
+    children: searchParams.get('children') ? parseInt(searchParams.get('children')!, 10) : undefined,
+    maxPrice: searchParams.get('maxPrice') ? parseInt(searchParams.get('maxPrice')!, 10) : undefined,
+    travelClass: searchParams.get('travelClass') || undefined,
+  };
 
-  if (!origin || !destination || !departureDate) {
-    return NextResponse.json(
-      { error: 'Missing required parameters: origin, destination, departureDate' },
-      { status: 400 }
-    );
+  // Validate with Zod schema
+  const validation = flightsGetSchema.safeParse(rawParams);
+  if (!validation.success) {
+    return createValidationErrorResponse(validation.error);
   }
 
-  // Validate dates
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const departure = new Date(departureDate);
-
-  if (departure < today) {
-    return NextResponse.json(
-      { error: `Departure date ${departureDate} is in the past. Please select a future date.` },
-      { status: 400 }
-    );
-  }
+  const {
+    origin,
+    destination,
+    departureDate,
+    returnDate,
+    adults,
+    children,
+    maxPrice,
+    travelClass,
+  } = validation.data;
 
   const isRoundTrip = !!returnDate;
 
@@ -78,10 +80,10 @@ export async function GET(request: NextRequest) {
           flightNumber: rt.outbound.flightNumber,
           departureAirport: rt.outbound.departureAirport,
           departureCity: rt.outbound.departureCity,
-          departureTime: formatTime(rt.outbound.departureTime),
+          departureTime: formatTimeFromISO(rt.outbound.departureTime),
           arrivalAirport: rt.outbound.arrivalAirport,
           arrivalCity: rt.outbound.arrivalCity,
-          arrivalTime: formatTime(rt.outbound.arrivalTime),
+          arrivalTime: formatTimeFromISO(rt.outbound.arrivalTime),
           durationMinutes: parseDuration(rt.outbound.duration),
           stops: rt.outbound.stops,
           cabinClass: formatCabinClass(rt.outbound.cabinClass),
@@ -93,10 +95,10 @@ export async function GET(request: NextRequest) {
           flightNumber: rt.return.flightNumber,
           departureAirport: rt.return.departureAirport,
           departureCity: rt.return.departureCity,
-          departureTime: formatTime(rt.return.departureTime),
+          departureTime: formatTimeFromISO(rt.return.departureTime),
           arrivalAirport: rt.return.arrivalAirport,
           arrivalCity: rt.return.arrivalCity,
-          arrivalTime: formatTime(rt.return.arrivalTime),
+          arrivalTime: formatTimeFromISO(rt.return.arrivalTime),
           durationMinutes: parseDuration(rt.return.duration),
           stops: rt.return.stops,
           cabinClass: formatCabinClass(rt.return.cabinClass),
@@ -128,10 +130,10 @@ export async function GET(request: NextRequest) {
       flightNumber: flight.flightNumber,
       departureAirport: flight.departureAirport,
       departureCity: flight.departureCity,
-      departureTime: formatTime(flight.departureTime),
+      departureTime: formatTimeFromISO(flight.departureTime),
       arrivalAirport: flight.arrivalAirport,
       arrivalCity: flight.arrivalCity,
-      arrivalTime: formatTime(flight.arrivalTime),
+      arrivalTime: formatTimeFromISO(flight.arrivalTime),
       durationMinutes: parseDuration(flight.duration),
       stops: flight.stops,
       priceUsd: flight.price,
@@ -150,14 +152,12 @@ export async function GET(request: NextRequest) {
 }
 
 // Helper to format ISO time to HH:MM
-function formatTime(isoTime: string): string {
+function formatTimeFromISO(isoTime: string): string {
   try {
     const date = new Date(isoTime);
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    });
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
   } catch {
     return isoTime;
   }

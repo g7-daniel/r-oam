@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 
 export default function PlanPage() {
   const router = useRouter();
-  const { trip } = useTripStoreV2();
+  const { trip } = useTripStore();
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {

@@ -18,7 +18,7 @@ interface CitySectionProps {
 }
 
 export default function CitySection({
-  destinationId,
+  destinationId: _destinationId,
   cityName,
   cityIcon,
   nights,
@@ -26,6 +26,8 @@ export default function CitySection({
   isLast,
   children,
 }: CitySectionProps) {
+  // destinationId is available for future use (e.g., linking to destination details)
+  void _destinationId;
   const getTransportIcon = (mode: string) => {
     switch (mode) {
       case 'train':

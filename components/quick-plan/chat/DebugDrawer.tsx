@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bug, ChevronRight, X, Clock, Database, MessageSquare, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Bug, ChevronRight, X, Clock, MessageSquare, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import type { DebugInfo, DebugEntry, EnrichmentStatus } from '@/types/quick-plan';
 
 interface DebugDrawerProps {

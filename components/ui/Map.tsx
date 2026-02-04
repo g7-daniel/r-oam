@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
+import { clientEnv } from '@/lib/env';
 
 interface MapMarker {
   id: string;
@@ -34,16 +35,37 @@ export default function Map({
   const markersRef = useRef<google.maps.Marker[]>([]);
 
   useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const apiKey = clientEnv.GOOGLE_MAPS_API_KEY;
 
     if (!apiKey) {
-      setError('Google Maps API key not configured');
+      setError('Google Maps API key not configured. Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in .env.local');
       return;
     }
 
+    const initializeMap = () => {
+      if (!mapRef.current || !window.google?.maps) return;
+
+      mapInstanceRef.current = new google.maps.Map(mapRef.current, {
+        center,
+        zoom,
+        styles: [
+          {
+            featureType: 'poi',
+            elementType: 'labels',
+            stylers: [{ visibility: 'off' }],
+          },
+        ],
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+      });
+
+      setMapLoaded(true);
+    };
+
     // Check if Google Maps is already loaded
     if (window.google?.maps) {
-      initMap();
+      initializeMap();
       return;
     }
 
@@ -52,7 +74,7 @@ export default function Map({
     script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
     script.async = true;
     script.defer = true;
-    script.onload = initMap;
+    script.onload = initializeMap;
     script.onerror = () => setError('Failed to load Google Maps');
     document.head.appendChild(script);
 
@@ -61,29 +83,7 @@ export default function Map({
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
     };
-  }, []);
-
-  const initMap = () => {
-    if (!mapRef.current || !window.google?.maps) return;
-
-    mapInstanceRef.current = new google.maps.Map(mapRef.current, {
-      center,
-      zoom,
-      styles: [
-        {
-          featureType: 'poi',
-          elementType: 'labels',
-          stylers: [{ visibility: 'off' }],
-        },
-      ],
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: false,
-    });
-
-    setMapLoaded(true);
-    updateMarkers();
-  };
+  }, [center, zoom]);
 
   const updateMarkers = () => {
     if (!mapInstanceRef.current || !window.google?.maps) return;
@@ -139,7 +139,8 @@ export default function Map({
     if (mapLoaded) {
       updateMarkers();
     }
-  }, [markers, mapLoaded]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markers, mapLoaded, onMarkerClick]);
 
   useEffect(() => {
     if (mapInstanceRef.current) {
@@ -156,10 +157,10 @@ export default function Map({
         )}
       >
         <div className="text-center p-8">
-          <div className="text-4xl mb-4">🗺️</div>
+          <div className="text-4xl mb-4">Map</div>
           <p className="text-gray-500">{error}</p>
           <p className="text-sm text-gray-400 mt-2">
-            Add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to enable maps
+            Add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to .env.local to enable maps
           </p>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { sanitizeDestination, sanitizeUserInput } from '@/lib/prompt-sanitizer';
 
 // Use OpenAI SDK with Groq endpoint (same pattern as discovery route)
 const groq = new OpenAI({
@@ -30,11 +31,22 @@ interface HotelRecommendation {
 
 export async function POST(request: NextRequest) {
   try {
-    const { query, destination } = await request.json();
+    const body = await request.json();
+
+    if (!body.query || !body.destination) {
+      return NextResponse.json(
+        { error: 'Query and destination are required' },
+        { status: 400 }
+      );
+    }
+
+    // Sanitize inputs to prevent prompt injection
+    const query = sanitizeUserInput(body.query);
+    const destination = sanitizeDestination(body.destination);
 
     if (!query || !destination) {
       return NextResponse.json(
-        { error: 'Query and destination are required' },
+        { error: 'Invalid query or destination after sanitization' },
         { status: 400 }
       );
     }
@@ -43,9 +55,11 @@ export async function POST(request: NextRequest) {
     const priceMatch = query.match(/\$(\d+)/);
     const budgetAmount = priceMatch ? parseInt(priceMatch[1]) : null;
 
-    // Detect specific subreddit mentions
-    const subredditMatch = query.match(/r\/(\w+)/i);
-    const mentionedSubreddit = subredditMatch ? subredditMatch[1] : null;
+    // Detect specific subreddit mentions - only allow valid subreddit names
+    const subredditMatch = query.match(/r\/(\w{3,21})/i);
+    const mentionedSubreddit = subredditMatch
+      ? subredditMatch[1].replace(/[^\w]/g, '').slice(0, 21)
+      : null;
 
     // Determine which subreddits to emphasize based on query
     let prioritySubreddits = HOTEL_SUBREDDITS;

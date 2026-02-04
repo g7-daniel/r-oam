@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/api-cache';
+import { serverEnv, isConfigured } from '@/lib/env';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 const GOOGLE_API_TIMEOUT = 10000; // 10 second timeout
@@ -12,12 +13,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ destinations: [] });
   }
 
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
-    console.warn('Google Maps API key not configured');
+  if (!isConfigured.googleMaps()) {
+    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return NextResponse.json({ destinations: [], error: 'API not configured' });
   }
+  const apiKey = serverEnv.GOOGLE_MAPS_API_KEY;
 
   try {
     // Use Google Places Autocomplete API for destination search
@@ -85,10 +85,10 @@ export async function GET(request: NextRequest) {
           const mainName = prediction.structured_formatting?.main_text ||
             prediction.description.split(',')[0];
 
-          // Get photo URL if available - use Google Places photo or reliable Unsplash static image
+          // Get photo URL if available - use proxy to hide API key
           let imageUrl = '';
           if (result.photos?.[0]?.photo_reference) {
-            imageUrl = `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=400&photo_reference=${result.photos[0].photo_reference}&key=${apiKey}`;
+            imageUrl = `/api/photo-proxy?ref=${encodeURIComponent(result.photos[0].photo_reference)}&maxwidth=400`;
           } else {
             // Use a reliable static Unsplash travel image as fallback
             const fallbackImages = [

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import LeftSidebar from './LeftSidebar';
 import MainItinerary from './MainItinerary';
@@ -20,7 +20,7 @@ export default function ItineraryBuilder() {
     unscheduleItem,
     reorderScheduledItem,
     moveItemBetweenDays,
-  } = useTripStoreV2();
+  } = useTripStore();
 
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [mapView, setMapView] = useState<'day' | 'all' | 'saved'>('day');
@@ -102,7 +102,7 @@ export default function ItineraryBuilder() {
   // Desktop three-column layout - use fixed positioning to escape parent layout
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
-      <div className="fixed inset-0 flex flex-col bg-slate-50 dark:bg-slate-900 overflow-hidden transition-colors duration-300 z-40">
+      <div className="fixed inset-0 flex flex-col bg-slate-50 dark:bg-slate-900 overflow-hidden transition-colors duration-300 z-30">
         {/* Header */}
         <TripHeader />
 
@@ -155,11 +155,12 @@ export default function ItineraryBuilder() {
               </div>
             </div>
           ) : (
-            <div className="w-12 flex-shrink-0 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col items-center py-3">
+            <div className="w-14 flex-shrink-0 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col items-center py-3">
               <button
                 onClick={() => setIsMapExpanded(true)}
-                className="p-2 text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors"
                 title="Show Map"
+                aria-label="Show Map"
               >
                 <Map className="w-5 h-5" />
               </button>

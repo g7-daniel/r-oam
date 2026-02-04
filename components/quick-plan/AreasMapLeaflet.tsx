@@ -67,7 +67,11 @@ export default function AreasMapLeaflet({ areas, selectedAreaIds, onAreaClick }:
     : [0, 0];
 
   return (
-    <div className="h-40 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600 mb-3">
+    <div
+      className="h-40 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600 mb-3"
+      role="application"
+      aria-label={`Interactive map showing ${areas.length} areas. ${selectedAreaIds.size} selected.`}
+    >
       <MapContainer
         center={center}
         zoom={10}
@@ -101,6 +105,7 @@ export default function AreasMapLeaflet({ areas, selectedAreaIds, onAreaClick }:
                 <button
                   onClick={() => onAreaClick?.(area.id)}
                   className="mt-2 text-xs text-orange-600 hover:text-orange-800 font-medium"
+                  aria-label={selectedAreaIds.has(area.id) ? `Deselect ${area.name}` : `Select ${area.name}`}
                 >
                   {selectedAreaIds.has(area.id) ? 'Deselect' : 'Select this area'}
                 </button>

@@ -75,6 +75,252 @@ import type {
   ItineraryStop,
 } from '@/types/quick-plan';
 
+// ============================================================================
+// PHASE 3 & 4 FIX: AI-based activity and subreddit suggestions cache
+// ============================================================================
+const activitySuggestionsCache = new Map<string, { id: string; label: string; icon: string }[]>();
+const activitySuggestionsPending = new Map<string, Promise<any>>();
+
+const subredditSuggestionsCache = new Map<string, { id: string; label: string; icon: string; description: string }[]>();
+const subredditSuggestionsPending = new Map<string, Promise<any>>();
+
+// Helper to get the API base URL
+function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return 'http://localhost:3000';
+}
+
+/**
+ * PHASE 4 FIX: Get AI-suggested subreddits for a destination
+ * Uses LLM to find relevant subreddits for any destination worldwide
+ */
+async function fetchDestinationSubreddits(
+  destination: string
+): Promise<{ id: string; label: string; icon: string; description: string }[]> {
+  // Only run in browser
+  if (typeof window === 'undefined') {
+    console.log('[Subreddits] Skipping - not in browser');
+    return [];
+  }
+
+  const cacheKey = destination.toLowerCase();
+  console.log(`[Subreddits] fetchDestinationSubreddits called for: ${destination}`);
+
+  // Return cached if available
+  if (subredditSuggestionsCache.has(cacheKey)) {
+    console.log(`[Subreddits] Returning cached results for ${destination}`);
+    return subredditSuggestionsCache.get(cacheKey)!;
+  }
+
+  // Return pending promise if already fetching
+  if (subredditSuggestionsPending.has(cacheKey)) {
+    console.log(`[Subreddits] Returning pending promise for ${destination}`);
+    return subredditSuggestionsPending.get(cacheKey)!;
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      console.log(`[Subreddits] Starting API call for ${destination}`);
+      const prompt = `For a trip to ${destination}, suggest 4-6 relevant Reddit subreddits that would have travel advice.
+
+Include:
+1. The country/region's main subreddit (e.g., r/japan, r/France, r/thailand)
+2. A tourism-specific subreddit if one exists (e.g., r/JapanTravel, r/ThailandTourism)
+3. Any city-specific subreddits for popular destinations
+
+Return ONLY valid JSON array:
+[
+  {"id": "subreddit_name", "label": "r/SubredditName", "icon": "emoji", "description": "short description"},
+  ...
+]
+
+Rules:
+- id should be the subreddit name without r/ prefix (e.g., "japan" not "r/japan")
+- label should include r/ prefix (e.g., "r/japan")
+- icon should be a relevant country flag or travel emoji
+- description should be 2-4 words describing the subreddit
+- Only include real, active subreddits that exist
+- Include 4-6 subreddits max`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+      const apiUrl = `${getApiBaseUrl()}/api/quick-plan/chat`;
+      console.log(`[Subreddits] Calling API: ${apiUrl}`);
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { role: 'system', content: 'You are a Reddit expert who knows travel-related subreddits. Respond only with valid JSON arrays.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.3,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      console.log(`[Subreddits] API response status: ${response.status}`);
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.content || '';
+      console.log(`[Subreddits] API response content length: ${content.length}`);
+
+      // Parse JSON from response
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const subreddits = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(subreddits) && subreddits.length > 0) {
+          console.log(`[Subreddits] SUCCESS! AI suggested ${subreddits.length} subreddits for ${destination}:`, subreddits.map(s => s.id));
+          subredditSuggestionsCache.set(cacheKey, subreddits);
+          return subreddits;
+        }
+      }
+
+      throw new Error('Invalid response format');
+    } catch (error) {
+      console.error(`[Subreddits] FAILED for ${destination}:`, error);
+      // Return empty - the getInputConfig will use its defaults
+      return [];
+    } finally {
+      subredditSuggestionsPending.delete(cacheKey);
+    }
+  })();
+
+  subredditSuggestionsPending.set(cacheKey, fetchPromise);
+  return fetchPromise;
+}
+
+/**
+ * Get AI-suggested activities for a destination
+ * Uses LLM to suggest relevant activities based on destination's unique offerings
+ */
+async function fetchDestinationActivities(
+  destination: string
+): Promise<{ id: string; label: string; icon: string }[]> {
+  // Only run in browser
+  if (typeof window === 'undefined') {
+    console.log('[Activities] Skipping - not in browser');
+    return [];
+  }
+
+  const cacheKey = destination.toLowerCase();
+  console.log(`[Activities] fetchDestinationActivities called for: ${destination}`);
+
+  // Return cached if available
+  if (activitySuggestionsCache.has(cacheKey)) {
+    console.log(`[Activities] Returning cached results for ${destination}`);
+    return activitySuggestionsCache.get(cacheKey)!;
+  }
+
+  // Return pending promise if already fetching
+  if (activitySuggestionsPending.has(cacheKey)) {
+    console.log(`[Activities] Returning pending promise for ${destination}`);
+    return activitySuggestionsPending.get(cacheKey)!;
+  }
+
+  // Default activities (universal fallback)
+  const defaultActivities = [
+    { id: 'beach', label: 'Beach Days', icon: '🏖️' },
+    { id: 'swimming', label: 'Swimming', icon: '🏊' },
+    { id: 'nature', label: 'Nature', icon: '🌿' },
+    { id: 'hiking', label: 'Hiking', icon: '🥾' },
+    { id: 'cultural', label: 'Cultural', icon: '🏛️' },
+    { id: 'food_tour', label: 'Food Tours', icon: '🍽️' },
+    { id: 'adventure', label: 'Adventure', icon: '🧗' },
+    { id: 'spa_wellness', label: 'Spa & Wellness', icon: '💆' },
+    { id: 'photography', label: 'Photography', icon: '📸' },
+    { id: 'nightlife', label: 'Nightlife', icon: '🎉' },
+  ];
+
+  const fetchPromise = (async () => {
+    try {
+      console.log(`[Activities] Starting API call for ${destination}`);
+      const prompt = `For a trip to ${destination}, suggest 10-12 activities that are UNIQUELY relevant to this destination.
+
+Include activities that ${destination} is specifically known for, not generic activities.
+
+For example:
+- Switzerland: skiing, fondue tours, scenic train rides, alpine hiking
+- Japan: temple visits, onsen (hot springs), sake tasting, karaoke
+- Hawaii: surfing, volcano tours, luau, snorkeling
+- Morocco: desert camping, souk shopping, hammam, medina tours
+
+Return ONLY valid JSON array:
+[
+  {"id": "activity_id", "label": "Display Name", "icon": "emoji"},
+  ...
+]
+
+Rules:
+- id should be lowercase with underscores
+- label should be 2-3 words max
+- icon should be a single relevant emoji
+- Include 10-12 activities total
+- Mix unique local experiences with popular universal activities`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+      const apiUrl = `${getApiBaseUrl()}/api/quick-plan/chat`;
+      console.log(`[Activities] Calling API: ${apiUrl}`);
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { role: 'system', content: 'You are a travel expert. Respond only with valid JSON arrays.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.3,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      console.log(`[Activities] API response status: ${response.status}`);
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.content || '';
+      console.log(`[Activities] API response content length: ${content.length}`);
+
+      // Parse JSON from response
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const activities = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(activities) && activities.length > 0) {
+          console.log(`[Activities] SUCCESS! AI suggested ${activities.length} activities for ${destination}:`, activities.map(a => a.id));
+          activitySuggestionsCache.set(cacheKey, activities);
+          return activities;
+        }
+      }
+
+      throw new Error('Invalid response format');
+    } catch (error) {
+      console.error(`[Activities] FAILED for ${destination}:`, error);
+      return defaultActivities;
+    } finally {
+      activitySuggestionsPending.delete(cacheKey);
+    }
+  })();
+
+  activitySuggestionsPending.set(cacheKey, fetchPromise);
+  return fetchPromise;
+}
+
 // Helper to create proper ItinerarySplit objects
 function createItinerarySplit(
   id: string,
@@ -233,11 +479,26 @@ interface MultiCountryInfo {
 function detectMultiCountry(destination: string): MultiCountryInfo {
   const lower = destination.toLowerCase();
 
-  // Common multi-country patterns
+  // List of known countries for validation
+  const knownCountries = new Set([
+    'thailand', 'vietnam', 'cambodia', 'laos', 'myanmar', 'malaysia', 'singapore', 'indonesia', 'philippines',
+    'japan', 'korea', 'china', 'taiwan', 'india', 'nepal', 'sri lanka', 'maldives',
+    'france', 'italy', 'spain', 'portugal', 'germany', 'netherlands', 'belgium', 'switzerland', 'austria',
+    'greece', 'croatia', 'montenegro', 'slovenia', 'czech', 'poland', 'hungary',
+    'uk', 'england', 'scotland', 'ireland', 'iceland', 'norway', 'sweden', 'denmark', 'finland',
+    'morocco', 'egypt', 'south africa', 'kenya', 'tanzania', 'namibia',
+    'usa', 'canada', 'mexico', 'costa rica', 'panama', 'colombia', 'peru', 'chile', 'argentina', 'brazil',
+    'australia', 'new zealand', 'fiji',
+    'uae', 'dubai', 'qatar', 'jordan', 'turkey', 'israel',
+  ]);
+
+  // Common multi-country patterns - only match "X and Y", "X & Y", "X to Y" patterns
+  // Exclude comma patterns to avoid matching "City, Country" format
   const multiCountryPatterns = [
-    /(\w+)\s*(?:and|&|\+|,)\s*(\w+)/i,
-    /(\w+)\s*to\s*(\w+)/i,
-    /(\w+)\s*then\s*(\w+)/i,
+    /^(\w+(?:\s+\w+)?)\s+(?:and|&)\s+(\w+(?:\s+\w+)?)$/i,  // "Thailand and Vietnam"
+    /^(\w+(?:\s+\w+)?)\s+to\s+(\w+(?:\s+\w+)?)$/i,         // "Japan to Korea"
+    /^(\w+(?:\s+\w+)?)\s+then\s+(\w+(?:\s+\w+)?)$/i,       // "France then Italy"
+    /^(\w+(?:\s+\w+)?)\s*\+\s*(\w+(?:\s+\w+)?)$/i,         // "Spain + Portugal"
   ];
 
   // Known multi-country combos
@@ -280,14 +541,22 @@ function detectMultiCountry(destination: string): MultiCountryInfo {
     }
   }
 
-  // Try pattern matching
+  // Try pattern matching - validate that matched items are actually countries
   for (const pattern of multiCountryPatterns) {
     const match = destination.match(pattern);
     if (match) {
-      const countries = [match[1], match[2]].filter(Boolean).map(c =>
-        c.charAt(0).toUpperCase() + c.slice(1).toLowerCase()
+      const potentialCountries = [match[1], match[2]].filter(Boolean).map(c =>
+        c.trim().toLowerCase()
       );
-      if (countries.length === 2 && countries[0] !== countries[1]) {
+
+      // Only consider it multi-country if BOTH matches are known countries
+      if (potentialCountries.length === 2 &&
+          potentialCountries[0] !== potentialCountries[1] &&
+          knownCountries.has(potentialCountries[0]) &&
+          knownCountries.has(potentialCountries[1])) {
+        const countries = potentialCountries.map(c =>
+          c.charAt(0).toUpperCase() + c.slice(1).toLowerCase()
+        );
         return {
           countries,
           isMultiCountry: true,
@@ -411,6 +680,7 @@ interface FieldQuestionConfig {
   required: boolean;
   canInfer: boolean;
   inferFrom?: (state: OrchestratorState) => unknown | null;
+  condition?: (state: OrchestratorState) => boolean; // Only show if condition returns true
 }
 
 const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
@@ -530,28 +800,54 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
   },
   travelingWithPets: {
     field: 'travelingWithPets',
-    snooMessage: "Will you be bringing any furry friends along? 🐕",
+    snooMessage: "Traveling with any pets? 🐕",
     inputType: 'chips',
     getInputConfig: () => ({
       options: [
-        { id: 'no_pets', label: 'No pets', icon: '✓', description: 'Traveling without pets' },
-        { id: 'small_dog', label: 'Small dog', icon: '🐕', description: 'Under 25 lbs' },
-        { id: 'medium_dog', label: 'Medium dog', icon: '🐕', description: '25-50 lbs' },
-        { id: 'large_dog', label: 'Large dog', icon: '🐕', description: 'Over 50 lbs' },
-        { id: 'cat', label: 'Cat', icon: '🐱', description: 'Traveling with a cat' },
-        { id: 'other_pet', label: 'Other pet', icon: '🐾', description: 'Other animal companion' },
+        { id: 'no', label: 'No', icon: '✗' },
+        { id: 'yes', label: 'Yes', icon: '🐾' },
       ],
     }),
     required: false,
     canInfer: false,
   },
+  travelingWithPetsType: {
+    field: 'travelingWithPetsType',
+    snooMessage: "What kind of pet? 🐾",
+    inputType: 'chips',
+    getInputConfig: () => ({
+      options: [
+        { id: 'small_dog', label: 'Small dog', icon: '🐕', description: 'Under 25 lbs' },
+        { id: 'medium_dog', label: 'Medium dog', icon: '🐕', description: '25-50 lbs' },
+        { id: 'large_dog', label: 'Large dog', icon: '🐕', description: 'Over 50 lbs' },
+        { id: 'cat', label: 'Cat', icon: '🐱' },
+        { id: 'other_pet', label: 'Other', icon: '🐾' },
+      ],
+    }),
+    required: false,
+    canInfer: false,
+    // Only show if user said yes to pets
+    condition: (state: OrchestratorState) => state.preferences?.hasPets === true,
+  },
   accessibility: {
     field: 'accessibility',
-    snooMessage: "Do you have any accessibility needs I should consider for accommodations?",
+    snooMessage: "Any accessibility needs?",
+    inputType: 'chips',
+    getInputConfig: () => ({
+      options: [
+        { id: 'no', label: 'No', icon: '✗' },
+        { id: 'yes', label: 'Yes', icon: '♿' },
+      ],
+    }),
+    required: false,
+    canInfer: false,
+  },
+  accessibilityType: {
+    field: 'accessibilityType',
+    snooMessage: "What accessibility features do you need?",
     inputType: 'chips-multi',
     getInputConfig: () => ({
       options: [
-        { id: 'none', label: 'No accessibility needs', icon: '✓' },
         { id: 'wheelchair', label: 'Wheelchair accessible', icon: '♿' },
         { id: 'ground_floor', label: 'Ground floor room', icon: '1️⃣' },
         { id: 'elevator', label: 'Elevator required', icon: '🛗' },
@@ -563,24 +859,23 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       allowCustomText: true,
       customTextPlaceholder: 'Other accessibility needs...',
     }),
-    required: false, // Optional question
+    required: false,
     canInfer: false,
+    // Only show if user said yes to accessibility
+    condition: (state: OrchestratorState) => state.preferences?.hasAccessibilityNeeds === true,
   },
   budget: {
     field: 'budget',
-    snooMessage: "What's your budget per night for accommodation? This helps me find the right hotels.",
+    snooMessage: "What's your hotel budget **per night**?",
     inputType: 'slider',
-    getInputConfig: () => ({
+    getInputConfig: (state) => ({
       min: 50,
-      max: 2500,
-      step: 50,
-      labels: {
-        50: 'Budget',
-        200: 'Mid-range',
-        500: 'Luxury',
-        1000: 'Ultra-luxury',
-        2500: '$2.5K+',
-      },
+      max: 1000,
+      step: 25,
+      defaultValue: 175,
+      // Clean slider - no tier labels, just min/max
+      showMinMax: true,
+      formatValue: (val: number) => val >= 1000 ? '$1K+' : `$${val}`,
       // Special handling: values at max are treated as "X or more"
       maxMeansUnlimited: true,
     }),
@@ -640,11 +935,14 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     inferFrom: (state) => {
       const budget = state.preferences.budgetPerNight?.max || 200;
       const tripOccasion = (state.preferences as any).tripOccasion;
+      const suggestedType = (state.preferences as any).suggestedAccommodationType;
 
       // Infer hostel for very budget travelers
       if (budget <= 70) return { id: 'hostel' };
       // Infer resort for honeymoons with high budget
       if (tripOccasion === 'honeymoon' && budget >= 400) return { id: 'resort' };
+      // Use suggested type for large groups (but only as inference, user can change)
+      if (suggestedType) return { id: suggestedType };
 
       return null;
     },
@@ -671,60 +969,71 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
   },
   subreddits: {
     field: 'subreddits',
-    snooMessage: "Which Reddit communities should I search? I've picked some based on your budget and trip style.",
+    snooMessage: "Which Reddit communities should I search? I've picked some based on your destination and trip style.",
     inputType: 'chips-multi',
     getInputConfig: (state) => {
-      // Suggest subreddits based on budget, destination, and party composition
+      // PHASE 4 FIX: Use AI-suggested subreddits instead of hardcoded if-statements
       const budget = state.preferences.budgetPerNight?.max || 200;
-      const destination = (state.preferences.destinationContext?.canonicalName || state.preferences.destinationContext?.rawInput || '').toLowerCase();
+      const destination = state.preferences.destinationContext?.canonicalName ||
+                          state.preferences.destinationContext?.rawInput || '';
       const hasChildren = (state.preferences.children || 0) > 0;
       const isSolo = state.preferences.adults === 1 && !hasChildren;
 
       console.log('[subreddits getInputConfig] Budget:', budget, 'HasChildren:', hasChildren, 'IsSolo:', isSolo);
 
-      // Start with recommended options based on context
+      // Get AI-suggested destination-specific subreddits from cache
+      const cacheKey = destination.toLowerCase();
+      const cachedSubreddits = subredditSuggestionsCache.get(cacheKey);
+
+      // Start with AI-suggested destination subreddits (highest priority)
       const options: { id: string; label: string; icon: string; description: string }[] = [];
 
-      // 1. Add destination-specific subreddits first (highest priority)
-      if (destination.includes('dominican') || destination.includes('caribbean')) {
-        options.push({ id: 'caribbean', label: 'r/caribbean', icon: '🏝️', description: 'Caribbean travelers' });
-        options.push({ id: 'dominicanrepublic', label: 'r/DominicanRepublic', icon: '🇩🇴', description: 'DR specific advice' });
-      }
-      if (destination.includes('mexico')) {
-        options.push({ id: 'mexico', label: 'r/mexico', icon: '🇲🇽', description: 'Mexico specific' });
-        options.push({ id: 'rivieramaya', label: 'r/RivieraMaya', icon: '🏖️', description: 'Cancun/Tulum area' });
-      }
-      if (destination.includes('costa rica')) {
-        options.push({ id: 'costarica', label: 'r/costarica', icon: '🦜', description: 'Costa Rica specific' });
-      }
-      if (destination.includes('thailand')) {
-        options.push({ id: 'thailand', label: 'r/thailand', icon: '🇹🇭', description: 'Thailand specific' });
-        options.push({ id: 'thailandtourism', label: 'r/ThailandTourism', icon: '🏝️', description: 'Thailand travel tips' });
+      if (cachedSubreddits && cachedSubreddits.length > 0) {
+        console.log(`[subreddits] Using ${cachedSubreddits.length} AI-suggested subreddits for ${destination}`);
+        options.push(...cachedSubreddits);
+      } else {
+        console.log(`[subreddits] No AI suggestions cached for ${destination}, using general subreddits`);
       }
 
-      // 2. Add party composition subreddits
+      // Add party composition subreddits
       if (hasChildren) {
-        options.push({ id: 'familytravel', label: 'r/familytravel', icon: '👨‍👩‍👧', description: 'Family trip tips' });
-        options.push({ id: 'travelwithkids', label: 'r/travelwithkids', icon: '🧒', description: 'Traveling with children' });
+        if (!options.some(o => o.id === 'familytravel')) {
+          options.push({ id: 'familytravel', label: 'r/familytravel', icon: '👨‍👩‍👧', description: 'Family trip tips' });
+        }
+        if (!options.some(o => o.id === 'travelwithkids')) {
+          options.push({ id: 'travelwithkids', label: 'r/travelwithkids', icon: '🧒', description: 'Traveling with children' });
+        }
       }
-      if (isSolo) {
+      if (isSolo && !options.some(o => o.id === 'solotravel')) {
         options.push({ id: 'solotravel', label: 'r/solotravel', icon: '🎒', description: 'Solo traveler tips' });
       }
 
-      // 3. Add budget-specific options (only if NOT family to avoid clutter)
-      if (budget >= 400 && !hasChildren) {
-        options.push({ id: 'luxurytravel', label: 'r/luxurytravel', icon: '💎', description: 'High-end experiences' });
-        options.push({ id: 'fattravel', label: 'r/fattravel', icon: '🥂', description: 'No budget limits' });
+      // Add budget-specific options (only if NOT family to avoid clutter)
+      if (budget >= 1000 && !hasChildren) {
+        // Ultra-luxury: r/fattravel for $1K+/night travelers
+        if (!options.some(o => o.id === 'fattravel')) {
+          options.push({ id: 'fattravel', label: 'r/fattravel', icon: '👑', description: 'Ultra-luxury travel' });
+        }
+        if (!options.some(o => o.id === 'luxurytravel')) {
+          options.push({ id: 'luxurytravel', label: 'r/luxurytravel', icon: '💎', description: 'High-end experiences' });
+        }
+      } else if (budget >= 400 && !hasChildren) {
+        if (!options.some(o => o.id === 'luxurytravel')) {
+          options.push({ id: 'luxurytravel', label: 'r/luxurytravel', icon: '💎', description: 'High-end experiences' });
+        }
       } else if (budget <= 150) {
-        options.push({ id: 'budgettravel', label: 'r/budgettravel', icon: '💰', description: 'Money-saving tips' });
-        options.push({ id: 'shoestring', label: 'r/shoestring', icon: '🎫', description: 'Ultra-budget travel' });
+        if (!options.some(o => o.id === 'budgettravel')) {
+          options.push({ id: 'budgettravel', label: 'r/budgettravel', icon: '💰', description: 'Money-saving tips' });
+        }
       }
 
-      // 4. Always include general travel
+      // Always include general travel if not already present
       if (!options.some(o => o.id === 'travel')) {
         options.push({ id: 'travel', label: 'r/travel', icon: '✈️', description: 'General travel advice' });
       }
-      options.push({ id: 'TravelHacks', label: 'r/TravelHacks', icon: '💡', description: 'Travel tips & tricks' });
+      if (!options.some(o => o.id === 'TravelHacks')) {
+        options.push({ id: 'TravelHacks', label: 'r/TravelHacks', icon: '💡', description: 'Travel tips & tricks' });
+      }
 
       return { options: options.slice(0, 8) }; // Limit to 8 options
     },
@@ -737,9 +1046,9 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     inputType: 'chips',
     getInputConfig: () => ({
       options: [
-        { id: 'chill', label: 'Chill', description: 'Lots of downtime, few planned activities' },
-        { id: 'balanced', label: 'Balanced', description: 'Mix of activities and relaxation' },
-        { id: 'packed', label: 'Action-packed', description: 'Something every day, make the most of it' },
+        { id: 'chill', label: 'Chill', icon: '🧘', description: 'Lots of downtime, few planned activities' },
+        { id: 'balanced', label: 'Balanced', icon: '⚖️', description: 'Mix of activities and relaxation' },
+        { id: 'packed', label: 'Action-packed', icon: '🚀', description: 'Something every day, make the most of it' },
       ],
     }),
     required: true,
@@ -755,24 +1064,38 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       const youngestChildAge = childAges.length > 0 ? Math.min(...childAges) : 0;
       console.log('[activities getInputConfig] Children detected:', hasChildren, 'Ages:', childAges, 'Youngest:', youngestChildAge);
 
-      // Base activity options with age recommendations
-      // Note: We don't filter out adult activities - parents may do things separately!
-      let options: { id: string; label: string; icon: string; description?: string }[] = [
-        { id: 'beach', label: 'Beach Days', icon: '🏖️' },
-        { id: 'swimming', label: 'Swimming', icon: '🏊' },
-        { id: 'snorkel', label: 'Snorkeling', icon: '🤿' },
-        { id: 'wildlife', label: 'Wildlife', icon: '🐋' },
-        { id: 'nature', label: 'Nature', icon: '🌿' },
-        { id: 'hiking', label: 'Hiking', icon: '🥾' },
-        { id: 'cultural', label: 'Cultural', icon: '🏛️' },
-        { id: 'food_tour', label: 'Food Tours', icon: '🍽️' },
-        { id: 'adventure', label: 'Adventure', icon: '🧗' },
-        { id: 'spa_wellness', label: 'Spa & Wellness', icon: '💆' },
-        { id: 'surf', label: 'Surfing', icon: '🏄' },
-        { id: 'dive', label: 'Scuba Diving', icon: '🐠' },
-        { id: 'golf', label: 'Golf', icon: '⛳' },
-        { id: 'photography', label: 'Photography', icon: '📸' },
-      ];
+      // PHASE 3 FIX: Use AI-suggested activities if available (cached from destination confirmation)
+      const destName = state.preferences.destinationContext?.canonicalName ||
+                       state.preferences.destinationContext?.rawInput || '';
+      const cacheKey = destName.toLowerCase();
+      const cachedActivities = activitySuggestionsCache.get(cacheKey);
+
+      // Use AI-suggested activities if available, otherwise fall back to universal defaults
+      let options: { id: string; label: string; icon: string; description?: string }[] = cachedActivities
+        ? cachedActivities.map(a => ({ ...a })) // Clone to avoid mutations
+        : [
+            // Universal fallback activities
+            { id: 'beach', label: 'Beach Days', icon: '🏖️' },
+            { id: 'swimming', label: 'Swimming', icon: '🏊' },
+            { id: 'snorkel', label: 'Snorkeling', icon: '🤿' },
+            { id: 'wildlife', label: 'Wildlife', icon: '🐋' },
+            { id: 'nature', label: 'Nature', icon: '🌿' },
+            { id: 'hiking', label: 'Hiking', icon: '🥾' },
+            { id: 'cultural', label: 'Cultural', icon: '🏛️' },
+            { id: 'food_tour', label: 'Food Tours', icon: '🍽️' },
+            { id: 'adventure', label: 'Adventure', icon: '🧗' },
+            { id: 'spa_wellness', label: 'Spa & Wellness', icon: '💆' },
+            { id: 'surf', label: 'Surfing', icon: '🏄' },
+            { id: 'dive', label: 'Scuba Diving', icon: '🐠' },
+            { id: 'golf', label: 'Golf', icon: '⛳' },
+            { id: 'photography', label: 'Photography', icon: '📸' },
+          ];
+
+      if (cachedActivities) {
+        console.log(`[activities] Using ${cachedActivities.length} AI-suggested activities for ${destName}`);
+      } else {
+        console.log(`[activities] Using default activities (AI suggestions not yet cached for ${destName})`);
+      }
 
       // For families with young children, add descriptions noting age requirements
       // but DON'T filter out - parents may do these while kids have other activities
@@ -806,10 +1129,9 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         // Put kids options first, then all other options
         options = [...kidsOptions, ...options];
 
-        // For family trips, move nightlife to end with a note (not removed)
+        // For family trips, add nightlife at end with a note (not removed)
         // Parents might want a night out while kids have a babysitter/kids club
-        const nightlifeIdx = options.findIndex(o => o.id === 'nightlife');
-        if (nightlifeIdx === -1) {
+        if (!options.some(o => o.id === 'nightlife')) {
           options.push({
             id: 'nightlife',
             label: 'Nightlife',
@@ -818,8 +1140,10 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
           });
         }
       } else {
-        // Add nightlife for adult trips
-        options.push({ id: 'nightlife', label: 'Nightlife', icon: '🎉' });
+        // Add nightlife for adult trips if not already present from AI
+        if (!options.some(o => o.id === 'nightlife')) {
+          options.push({ id: 'nightlife', label: 'Nightlife', icon: '🎉' });
+        }
       }
 
       return {
@@ -846,24 +1170,35 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
   },
   activitySkillLevel: {
     field: 'activitySkillLevel',
-    snooMessage: "For some of your chosen activities, it helps to know your experience level so I can find the right options.",
+    // Dynamic message set in getInputConfig based on which activities need skill level
+    snooMessage: "What's your experience level?",
     inputType: 'chips',
     getInputConfig: (state) => {
       // Check which skill-based activities were selected
-      const SKILL_ACTIVITIES_LIST = ['surf', 'dive', 'snorkel', 'hiking', 'adventure', 'golf'];
+      // Only truly skill-dependent activities
+      const SKILL_ACTIVITIES_MAP: Record<string, string> = {
+        'surf': 'Surfing',
+        'dive': 'Scuba Diving',
+        'golf': 'Golf'
+      };
       const activities = state.preferences.selectedActivities || [];
-      const skillActivities = activities.filter(a => SKILL_ACTIVITIES_LIST.includes(a.type));
+      const skillActivities = activities.filter(a => SKILL_ACTIVITIES_MAP[a.type]);
 
       if (skillActivities.length === 0) {
         return { options: [] };
       }
 
-      // Get the activity names for the message
-      const activityNames = skillActivities.map(a => a.type).join(', ');
+      // Get the activity names for display
+      const activityNames = skillActivities.map(a => SKILL_ACTIVITIES_MAP[a.type]).join(', ');
+
+      // Create a more specific message
+      const specificMessage = skillActivities.length === 1
+        ? `What's your ${activityNames} experience level?`
+        : `For ${activityNames} - what's your overall experience level?`;
 
       return {
         options: [
-          { id: 'beginner', label: `Beginner`, icon: '🌱', description: 'First time or just learning' },
+          { id: 'beginner', label: `Beginner`, icon: '🌱', description: `New to ${skillActivities.length === 1 ? activityNames.toLowerCase() : 'these activities'}` },
           { id: 'intermediate', label: `Intermediate`, icon: '🌿', description: 'Comfortable with the basics' },
           { id: 'advanced', label: `Advanced`, icon: '🌲', description: 'Looking for a challenge' },
         ],
@@ -970,32 +1305,46 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         ));
 
         // Option with more time in first area
-        if (tripLength >= areas.length * 2) {
+        // Bug fix: ensure no area gets 0 nights - need at least 3*areas nights to redistribute
+        if (tripLength >= areas.length * 3) {
           const focusStops = areas.map((area, idx) => ({
             areaId: area.id,
             areaName: area.name,
-            nights: idx === 0 ? baseNights + 2 : (idx === areas.length - 1 ? baseNights + extraNights - 2 : baseNights),
+            // Give first area +2 nights, last area -1, redistribute remaining from middle
+            nights: idx === 0
+              ? baseNights + 2
+              : (idx === areas.length - 1
+                  ? Math.max(1, baseNights + extraNights - 1)
+                  : Math.max(1, baseNights - Math.ceil(1 / (areas.length - 2)))),
             area,
           }));
-          splitOptions.push(createItinerarySplit(
-            'focus-first',
-            focusStops.map(s => `${s.nights}n ${s.areaName}`).join(' → '),
-            focusStops,
-            0.85,
-            areas
-          ));
+          // Verify all stops have at least 1 night
+          const allValid = focusStops.every(s => s.nights >= 1);
+          if (allValid && focusStops.reduce((sum, s) => sum + s.nights, 0) === tripLength) {
+            splitOptions.push(createItinerarySplit(
+              'focus-first',
+              focusStops.map(s => `${s.nights}n ${s.areaName}`).join(' → '),
+              focusStops,
+              0.85,
+              areas
+            ));
+          }
         }
       }
 
       // If no options generated (shouldn't happen), create a default
       if (splitOptions.length === 0 && areas.length > 0) {
         console.warn('[Split getInputConfig] No options generated, creating default');
-        const nightsPerArea = Math.floor(tripLength / areas.length);
-        const remainder = tripLength % areas.length;
-        const defaultStops = areas.map((area, idx) => ({
+        // Bug fix: ensure minimum 1 night per area - limit areas if needed
+        const maxAreas = Math.min(areas.length, tripLength);
+        const limitedAreas = areas.slice(0, maxAreas);
+        const nightsPerArea = Math.max(1, Math.floor(tripLength / limitedAreas.length));
+        const remainder = tripLength - (nightsPerArea * limitedAreas.length);
+        const defaultStops = limitedAreas.map((area, idx) => ({
           areaId: area.id,
           areaName: area.name,
-          nights: nightsPerArea + (idx === areas.length - 1 ? remainder : 0),
+          // Give remainder nights to last area, ensure at least 1 night each
+          nights: Math.max(1, nightsPerArea + (idx === limitedAreas.length - 1 ? remainder : 0)),
           area,
         }));
         splitOptions.push(createItinerarySplit(
@@ -1003,7 +1352,7 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
           defaultStops.map(s => `${s.nights}n ${s.areaName}`).join(' → '),
           defaultStops,
           0.8,
-          areas
+          limitedAreas
         ));
       }
 
@@ -1106,7 +1455,8 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         if (msg.type === 'user') {
           const lower = msg.content.toLowerCase();
           if (lower.includes('find food') || lower.includes('wing it') || lower.includes('figure out food')) {
-            return { mode: 'none' };
+            // Bug fix: response handler expects { id: ... } not { mode: ... }
+            return { id: 'none' };
           }
         }
       }
@@ -1777,19 +2127,30 @@ export class QuickPlanOrchestrator {
       missing.push('tripOccasion');
     }
 
-    // Pet question asked after trip occasion (optional)
-    // FIX 1.6: Check for undefined specifically, not truthy (object {hasPet:false} is truthy)
+    // Pet question asked after trip occasion (yes/no first)
     if (this.state.confidence.party !== 'unknown' &&
         (this.state.preferences as any).tripOccasion &&
-        (this.state.preferences as any).travelingWithPets === undefined) {
+        (this.state.preferences as any).hasPets === undefined) {
       missing.push('travelingWithPets');
     }
 
-    // Accessibility is asked after pet question (optional but asked once)
+    // Pet type follow-up (only if user said yes to pets)
+    if ((this.state.preferences as any).hasPets === true &&
+        (this.state.preferences as any).travelingWithPets?.petType === undefined) {
+      missing.push('travelingWithPetsType');
+    }
+
+    // Accessibility question (yes/no first) - asked after pets question is answered
     if (this.state.confidence.party !== 'unknown' &&
-        (this.state.preferences as any).travelingWithPets &&
-        this.state.confidence.accessibility === 'unknown') {
+        (this.state.preferences as any).hasPets !== undefined &&
+        (this.state.preferences as any).hasAccessibilityNeeds === undefined) {
       missing.push('accessibility');
+    }
+
+    // Accessibility type follow-up (only if user said yes to accessibility needs)
+    if ((this.state.preferences as any).hasAccessibilityNeeds === true &&
+        this.state.preferences.accessibilityNeeds === undefined) {
+      missing.push('accessibilityType');
     }
 
     if (this.state.confidence.budget === 'unknown') missing.push('budget');
@@ -1818,13 +2179,17 @@ export class QuickPlanOrchestrator {
       missing.push('pace');
     }
 
-    if (this.state.preferences.pace &&
-        !(this.state.preferences as any).vibe) {
+    // Bug fix: check if vibe has been answered (undefined means not answered, empty string means skipped)
+    // We use confidence.vibe to track if the question was answered, not the value itself
+    if (this.state.confidence.pace !== 'unknown' &&
+        this.state.preferences.pace &&
+        this.state.confidence.vibe === 'unknown') {
       missing.push('vibe');
     }
 
-    // Ask skill level after activities if user selected skill-based activities
-    const SKILL_ACTIVITY_TYPES = ['surf', 'dive', 'snorkel', 'hiking', 'adventure', 'golf'];
+    // Ask skill level ONLY for truly skill-dependent activities (surfing, scuba diving, golf)
+    // Don't ask for hiking, snorkeling, adventure as these are accessible to all levels
+    const SKILL_ACTIVITY_TYPES = ['surf', 'dive', 'golf'];
     const userActivities = this.state.preferences.selectedActivities || [];
     const hasSkillActivities = userActivities.some(a => SKILL_ACTIVITY_TYPES.includes(a.type));
     if (this.state.confidence.activities !== 'unknown' &&
@@ -1840,13 +2205,25 @@ export class QuickPlanOrchestrator {
     }
 
     // Areas required after initial gathering
-    if (this.state.phase !== 'gathering' && this.state.confidence.areas === 'unknown') {
+    // Only ask for areas if we actually have some to show
+    if (this.state.phase !== 'gathering' &&
+        this.state.confidence.areas === 'unknown' &&
+        this.state.discoveredData.areas.length > 0) {
       missing.push('areas');
+    } else if (this.state.phase !== 'gathering' &&
+               this.state.confidence.areas === 'unknown' &&
+               this.state.discoveredData.areas.length === 0 &&
+               this.state.enrichmentStatus.areas === 'error') {
+      // If enrichment failed and no areas, skip areas question and mark as partial
+      console.log('[getMissingRequiredFields] Areas enrichment failed with no areas, marking as partial');
+      this.setConfidence('areas', 'partial');
     }
 
     // Split required after areas selected (how many nights in each area)
     // CRITICAL: Must check for valid split with actual stops, not just truthy value
+    // FIX: Skip split question if only ONE area selected - no split needed
     const areasComplete = this.state.confidence.areas === 'complete';
+    const selectedAreasCount = this.state.preferences.selectedAreas?.length || 0;
     const split = this.state.preferences.selectedSplit;
     const hasValidUserSelectedSplit = split &&
       split.id !== 'auto-split' &&  // Not auto-generated
@@ -1860,13 +2237,33 @@ export class QuickPlanOrchestrator {
       splitId: split?.id,
       hasStops: split?.stops?.length,
       hasValidUserSelectedSplit,
-      selectedAreasCount: this.state.preferences.selectedAreas?.length || 0,
+      selectedAreasCount,
     });
 
-    // Only skip split question if user has explicitly selected a split (not auto-generated)
-    if (areasComplete && !hasValidUserSelectedSplit) {
+    // Only ask about split if:
+    // 1. Areas are complete AND
+    // 2. User hasn't already selected a split AND
+    // 3. There are 2+ areas (no need to split with just one area!)
+    if (areasComplete && !hasValidUserSelectedSplit && selectedAreasCount >= 2) {
       console.log('[getMissingRequiredFields] >>> ADDING SPLIT TO MISSING FIELDS <<<');
       missing.push('split');
+    } else if (areasComplete && selectedAreasCount === 1) {
+      // Auto-create a single-area split so downstream logic works
+      if (!hasValidUserSelectedSplit) {
+        const singleArea = this.state.preferences.selectedAreas![0];
+        // Use any cast since the simpler stop format is used throughout the codebase
+        (this.state.preferences as any).selectedSplit = {
+          id: 'single-area',
+          name: `All nights in ${singleArea.name}`,
+          stops: [{
+            areaId: singleArea.id,
+            areaName: singleArea.name,
+            nights: this.state.preferences.tripLength || 7,
+          }],
+          fitScore: 1.0,
+        };
+        console.log('[getMissingRequiredFields] Auto-created single-area split');
+      }
     } else if (areasComplete && hasValidUserSelectedSplit) {
       console.log('[getMissingRequiredFields] User already selected split:', split?.name);
     }
@@ -2225,7 +2622,7 @@ export class QuickPlanOrchestrator {
       if (this.state.phase === 'generating') {
         // Itinerary generated, go to review
         this.state.phase = 'reviewing';
-        return FIELD_QUESTIONS.satisfaction ? this.createQuestionConfig('satisfaction') : null;
+        return FIELD_QUESTIONS.satisfaction ? await this.createQuestionConfig('satisfaction') : null;
       }
 
       return null; // All done
@@ -2240,7 +2637,7 @@ export class QuickPlanOrchestrator {
       console.error('[selectNextQuestion] WARNING: split is in missing but was not selected! Selected:', nextField);
     }
 
-    const config = this.createQuestionConfig(nextField);
+    const config = await this.createQuestionConfig(nextField);
     console.log('[selectNextQuestion] Returning question for:', config.field, 'inputType:', config.inputType, 'config:', {
       hasOptions: !!(config.inputConfig as any).options?.length,
       hasSplitOptions: !!(config.inputConfig as any).splitOptions?.length,
@@ -2264,7 +2661,9 @@ export class QuickPlanOrchestrator {
       'tripOccasion',            // After party - helps personalize everything
       'workationNeeds',          // SMART FOLLOW-UP: After tripOccasion if workation
       'travelingWithPets',       // After occasion - affects hotel filtering
+      'travelingWithPetsType',   // CONDITIONAL: Only if user has pets
       'accessibility',           // After pets - affects hotel filtering
+      'accessibilityType',       // CONDITIONAL: Only if user has accessibility needs
       'budget',
       'accommodationType',       // After budget - hostel/hotel/resort/villa
       'sustainabilityPreference', // After accommodation - eco preferences
@@ -2330,12 +2729,63 @@ Respond with just the field name.`;
     return lines.length > 0 ? lines.join('\n') : '- Nothing yet';
   }
 
-  private createQuestionConfig(field: string): QuestionConfig {
+  private async createQuestionConfig(field: string): Promise<QuestionConfig> {
     console.log('[createQuestionConfig] Creating question for field:', field);
 
     const config = FIELD_QUESTIONS[field];
     if (!config) {
       throw new Error(`Unknown field: ${field}`);
+    }
+
+    // For activities or subreddits field, wait for AI suggestions to complete
+    if (field === 'activities' || field === 'subreddits') {
+      const destination = this.state.preferences.destinationContext?.canonicalName ||
+                          this.state.preferences.destinationContext?.rawInput || '';
+      const cacheKey = destination.toLowerCase();
+
+      if (field === 'activities') {
+        // Wait for pending activity fetch if exists
+        if (activitySuggestionsPending.has(cacheKey)) {
+          console.log('[createQuestionConfig] Waiting for activity suggestions...');
+          try {
+            await activitySuggestionsPending.get(cacheKey);
+          } catch (e) {
+            console.warn('[createQuestionConfig] Activity suggestions failed:', e);
+          }
+        }
+
+        // If still no cache, try fetching now
+        if (!activitySuggestionsCache.has(cacheKey) && destination) {
+          console.log('[createQuestionConfig] No cached activities, fetching now...');
+          try {
+            await fetchDestinationActivities(destination);
+          } catch (e) {
+            console.warn('[createQuestionConfig] Activity fetch failed:', e);
+          }
+        }
+      }
+
+      if (field === 'subreddits') {
+        // Wait for pending subreddit fetch if exists
+        if (subredditSuggestionsPending.has(cacheKey)) {
+          console.log('[createQuestionConfig] Waiting for subreddit suggestions...');
+          try {
+            await subredditSuggestionsPending.get(cacheKey);
+          } catch (e) {
+            console.warn('[createQuestionConfig] Subreddit suggestions failed:', e);
+          }
+        }
+
+        // If still no cache, try fetching now
+        if (!subredditSuggestionsCache.has(cacheKey) && destination) {
+          console.log('[createQuestionConfig] No cached subreddits, fetching now...');
+          try {
+            await fetchDestinationSubreddits(destination);
+          } catch (e) {
+            console.warn('[createQuestionConfig] Subreddit fetch failed:', e);
+          }
+        }
+      }
     }
 
     const inputConfig = config.getInputConfig(this.state);
@@ -2374,6 +2824,25 @@ Respond with just the field name.`;
         snooMessage = `Here are the best ${cuisineLabel} restaurants near your hotels (${selectedCount + 1} of ${totalCuisines} cuisine types). Pick your favorites!`;
       } else {
         snooMessage = `Here are the best ${cuisineLabel} restaurants near your hotels. Pick the ones you'd like to try!`;
+      }
+    }
+
+    // Handle dynamic snooMessage for activitySkillLevel (specify which activities)
+    if (field === 'activitySkillLevel') {
+      // Only truly skill-dependent activities
+      const SKILL_ACTIVITIES_MAP: Record<string, string> = {
+        'surf': 'Surfing',
+        'dive': 'Scuba Diving',
+        'golf': 'Golf'
+      };
+      const activities = this.state.preferences.selectedActivities || [];
+      const skillActivities = activities.filter(a => SKILL_ACTIVITIES_MAP[a.type]);
+      const activityNames = skillActivities.map(a => SKILL_ACTIVITIES_MAP[a.type]);
+
+      if (activityNames.length === 1) {
+        snooMessage = `What's your ${activityNames[0]} experience level? This helps me find the right spots for you.`;
+      } else if (activityNames.length > 1) {
+        snooMessage = `For ${activityNames.join(' and ')} - what's your overall experience level?`;
       }
     }
 
@@ -2512,13 +2981,27 @@ Respond with just the field name.`;
       case 'destination':
         this.state.preferences.destinationContext = response as TripPreferences['destinationContext'];
         this.setConfidence('destination', 'complete');
+
+        // PHASE 3 & 4 FIX: Pre-fetch AI-based activity and subreddit suggestions for this destination
+        const destForSuggestions = (response as TripPreferences['destinationContext'])?.canonicalName ||
+                                   (response as TripPreferences['destinationContext'])?.rawInput;
+        if (destForSuggestions) {
+          // Fire-and-forget - suggestions will be ready by the time we need them
+          fetchDestinationActivities(destForSuggestions).catch(() => {});
+          fetchDestinationSubreddits(destForSuggestions).catch(() => {});
+        }
         break;
 
       case 'dates':
         const dates = response as { startDate: Date; endDate: Date; nights: number; isFlexible: boolean };
+        // Bug fix: validate trip length is at least 1 night and cap at 365
+        const validatedNights = Math.max(1, Math.min(365, dates.nights || 1));
+        if (dates.nights !== validatedNights) {
+          console.warn(`[Orchestrator] Trip length ${dates.nights} adjusted to ${validatedNights}`);
+        }
         this.state.preferences.startDate = dates.startDate;
         this.state.preferences.endDate = dates.endDate;
-        this.state.preferences.tripLength = dates.nights;
+        this.state.preferences.tripLength = validatedNights;
         this.state.preferences.isFlexibleDates = dates.isFlexible;
         this.setConfidence('dates', 'complete');
 
@@ -2566,11 +3049,12 @@ Respond with just the field name.`;
         }
         this.setConfidence('party', 'confirmed');
 
-        // For very large groups (8+), auto-suggest vacation rental as better value
+        // For very large groups (8+), suggest vacation rental but don't auto-set
+        // Bug fix: store as suggestion so user still gets asked and can choose differently
         const totalTravelers = party.adults + party.children;
-        if (totalTravelers >= 8 && !(this.state.preferences as any).accommodationType) {
-          (this.state.preferences as any).accommodationType = 'vacation_rental';
-          console.log(`[Orchestrator] Large group (${totalTravelers} travelers) - auto-suggesting vacation rental`);
+        if (totalTravelers >= 8) {
+          (this.state.preferences as any).suggestedAccommodationType = 'vacation_rental';
+          console.log(`[Orchestrator] Large group (${totalTravelers} travelers) - will suggest vacation rental`);
         }
         break;
 
@@ -2723,56 +3207,65 @@ Respond with just the field name.`;
         break;
 
       case 'travelingWithPets':
-        const petResponse = response as { id: string; label: string };
-        if (petResponse.id === 'no_pets') {
+        // Simple yes/no question
+        const petYesNo = response as { id: string; label: string };
+        (this.state.preferences as any).hasPets = petYesNo.id === 'yes';
+        if (petYesNo.id === 'no') {
           (this.state.preferences as any).travelingWithPets = { hasPet: false };
-        } else {
-          const petSize = petResponse.id.includes('small') ? 'small' :
-                          petResponse.id.includes('medium') ? 'medium' :
-                          petResponse.id.includes('large') ? 'large' : undefined;
-          const petType = petResponse.id.includes('dog') ? 'dog' :
-                          petResponse.id.includes('cat') ? 'cat' : 'other';
-          (this.state.preferences as any).travelingWithPets = {
-            hasPet: true,
-            petType,
-            petSize,
-          };
         }
+        console.log('[Orchestrator] Has pets:', (this.state.preferences as any).hasPets);
+        break;
+
+      case 'travelingWithPetsType':
+        // Follow-up: which pet type
+        const petTypeResponse = response as { id: string; label: string };
+        const petSize = petTypeResponse.id.includes('small') ? 'small' :
+                        petTypeResponse.id.includes('medium') ? 'medium' :
+                        petTypeResponse.id.includes('large') ? 'large' : undefined;
+        const petType = petTypeResponse.id.includes('dog') ? 'dog' :
+                        petTypeResponse.id.includes('cat') ? 'cat' : 'other';
+        (this.state.preferences as any).travelingWithPets = {
+          hasPet: true,
+          petType,
+          petSize,
+        };
         console.log('[Orchestrator] Pet info set:', (this.state.preferences as any).travelingWithPets);
         break;
 
       case 'accessibility':
-        const accessibilityPrefs = response as { id: string; label: string }[];
-        // Filter out 'none' if selected with other options, or keep 'none' if it's the only selection
-        const accessibilityIds = accessibilityPrefs.map(a => a.id);
-        const hasNone = accessibilityIds.includes('none');
-        const otherNeeds = accessibilityIds.filter(id => id !== 'none');
-
-        if (otherNeeds.length > 0) {
-          // User has specific needs - store them
-          this.state.preferences.accessibilityNeeds = {
-            wheelchairAccessible: otherNeeds.includes('wheelchair'),
-            groundFloorRequired: otherNeeds.includes('ground_floor'),
-            elevatorRequired: otherNeeds.includes('elevator'),
-            noStairs: otherNeeds.includes('no_stairs'),
-            // Store any custom needs
-          };
-          console.log('[Orchestrator] Accessibility needs set:', this.state.preferences.accessibilityNeeds);
-        } else {
-          // User selected 'none' or no specific needs
+        // Simple yes/no question
+        const accessYesNo = response as { id: string; label: string };
+        (this.state.preferences as any).hasAccessibilityNeeds = accessYesNo.id === 'yes';
+        if (accessYesNo.id === 'no') {
           this.state.preferences.accessibilityNeeds = undefined;
-          console.log('[Orchestrator] No accessibility needs');
         }
+        console.log('[Orchestrator] Has accessibility needs:', (this.state.preferences as any).hasAccessibilityNeeds);
         this.setConfidence('accessibility', 'complete');
+        break;
+
+      case 'accessibilityType':
+        // Follow-up: which accessibility needs
+        const accessibilityPrefs = response as { id: string; label: string }[];
+        const accessibilityIds = accessibilityPrefs.map(a => a.id);
+        this.state.preferences.accessibilityNeeds = {
+          wheelchairAccessible: accessibilityIds.includes('wheelchair'),
+          groundFloorRequired: accessibilityIds.includes('ground_floor'),
+          elevatorRequired: accessibilityIds.includes('elevator'),
+          noStairs: accessibilityIds.includes('no_stairs'),
+        };
+        console.log('[Orchestrator] Accessibility needs set:', this.state.preferences.accessibilityNeeds);
         break;
 
       case 'budget':
         const budget = response as { value: number; label: string };
         // If user selected max value (2500), treat as unlimited (no upper bound in search)
         const isUnlimited = budget.value >= 2500;
+        // Bug fix: use percentage-based range (±25%) instead of fixed ±100
+        // This scales better for different budget levels
+        const budgetRange = Math.round(budget.value * 0.25);
         this.state.preferences.budgetPerNight = {
-          min: Math.max(50, budget.value - 100),
-          max: isUnlimited ? 999999 : budget.value + 100,
+          min: Math.max(50, budget.value - budgetRange),
+          max: isUnlimited ? 999999 : budget.value + budgetRange,
         };
         (this.state.preferences as any).budgetUnlimited = isUnlimited;
         this.setConfidence('budget', 'complete');
@@ -2959,18 +3452,19 @@ Respond with just the field name.`;
 
       case 'vibe':
         const vibe = response as string;
+        // BUG FIX: Store the vibe text itself so the field is marked as answered
+        (this.state.preferences as any).vibe = vibe || '';
+
         // Parse must-dos and hard-nos from free text
         this.state.preferences.mustDos = [];
         this.state.preferences.hardNos = [];
         if (vibe) {
-          // Simple parsing - could be enhanced with LLM
-          if (vibe.toLowerCase().includes('must')) {
-            this.state.preferences.mustDos.push(vibe);
-          } else if (vibe.toLowerCase().includes('no ') || vibe.toLowerCase().includes("don't")) {
-            this.state.preferences.hardNos.push(vibe);
-          }
+          // Store the raw text as a must-do/wish list item
+          // This captures things like "horse riding in water, surfing lessons, whale watching"
+          this.state.preferences.mustDos.push(vibe);
         }
         this.setConfidence('vibe', 'complete');
+        console.log('[Orchestrator] Vibe/must-dos set:', vibe);
         break;
 
       case 'activitySkillLevel':
@@ -2994,10 +3488,19 @@ Respond with just the field name.`;
         this.state.preferences.hotelVibePreferences = hotelPrefs
           .filter(p => ['boutique', 'quiet', 'family'].includes(p.id))
           .map(p => p.id);
+        // Bug fix: add logging for debugging
+        console.log('[Orchestrator] Hotel preferences set:', hotelPrefs.map(p => p.id));
         break;
 
       case 'split':
-        this.state.preferences.selectedSplit = response as TripPreferences['selectedSplit'];
+        const splitResponse = response as TripPreferences['selectedSplit'];
+        // Bug fix: validate split has valid stops and set state properly
+        if (splitResponse && splitResponse.stops && splitResponse.stops.length > 0) {
+          this.state.preferences.selectedSplit = splitResponse;
+          console.log('[Orchestrator] Split selected:', splitResponse.id, 'with', splitResponse.stops.length, 'stops');
+        } else {
+          console.warn('[Orchestrator] Invalid split response, missing stops');
+        }
         break;
 
       case 'hotels':
@@ -3079,16 +3582,23 @@ Respond with just the field name.`;
       case 'restaurants':
         const restaurants = response as RestaurantCandidate[];
         // Get the current cuisine type from the question config
-        const currentCuisineType = (this.state.currentQuestion?.inputConfig as any)?.cuisineType;
+        let currentCuisineType = (this.state.currentQuestion?.inputConfig as any)?.cuisineType;
 
         console.log(`[Orchestrator] Restaurant response received:`, {
           restaurantCount: restaurants?.length,
           cuisineType: currentCuisineType,
         });
 
+        // Bug fix: fallback to find first cuisine type without selections
         if (!currentCuisineType) {
-          console.error('[Orchestrator] No cuisineType in restaurant question config');
-        } else if (restaurants && restaurants.length > 0) {
+          console.warn('[Orchestrator] No cuisineType in restaurant question config - finding fallback');
+          const allCuisines = (this.state.preferences as any).cuisinePreferences || [];
+          const selectedRests = (this.state.preferences as any).selectedRestaurants || {};
+          currentCuisineType = allCuisines.find((c: string) => !selectedRests[c]) || 'general';
+          console.log(`[Orchestrator] Using fallback cuisineType: ${currentCuisineType}`);
+        }
+
+        if (restaurants && restaurants.length > 0) {
           // Initialize selectedRestaurants if needed
           if (!(this.state.preferences as any).selectedRestaurants) {
             (this.state.preferences as any).selectedRestaurants = {};
@@ -3120,16 +3630,23 @@ Respond with just the field name.`;
 
       case 'experiences':
         const experiences = response as any[];
-        const currentActivityType = (this.state.currentQuestion?.inputConfig as any)?.activityType;
+        let currentActivityType = (this.state.currentQuestion?.inputConfig as any)?.activityType;
 
         console.log(`[Orchestrator] Experience response received:`, {
           experienceCount: experiences?.length,
           activityType: currentActivityType,
         });
 
+        // Bug fix: fallback to find first activity type without selections
         if (!currentActivityType) {
-          console.error('[Orchestrator] No activityType in experience question config');
-        } else if (experiences && experiences.length > 0) {
+          console.warn('[Orchestrator] No activityType in experience question config - finding fallback');
+          const allActivities = (this.state.preferences.selectedActivities || []).map(a => a.type);
+          const selectedExps = (this.state.preferences as any).selectedExperiences || {};
+          currentActivityType = allActivities.find((a: string) => !selectedExps[a]) || 'general';
+          console.log(`[Orchestrator] Using fallback activityType: ${currentActivityType}`);
+        }
+
+        if (experiences && experiences.length > 0) {
           if (!(this.state.preferences as any).selectedExperiences) {
             (this.state.preferences as any).selectedExperiences = {};
           }

@@ -10,8 +10,12 @@ import type {
 import { filterByDistance, calculateHaversineDistance } from '@/lib/utils/geo';
 import { DestinationConfig } from '@/lib/configs/destinations';
 import { fetchWithTimeout } from './api-cache';
+import { withRetry } from './retry';
+import { getExchangeRatesSync } from './exchange-rates';
+import { serverEnv, isConfigured } from './env';
 
-const AMADEUS_BASE_URL = 'https://test.api.amadeus.com';
+// PRODUCTION URL - do not use test.api.amadeus.com in production
+const AMADEUS_BASE_URL = 'https://api.amadeus.com';
 const AMADEUS_TIMEOUT = 15000; // 15 second timeout
 
 // Hotel chain image mappings for fallback when Amadeus doesn't provide images
@@ -74,24 +78,37 @@ async function getAccessToken(): Promise<string> {
     return cachedToken.token;
   }
 
-  const clientId = process.env.AMADEUS_CLIENT_ID;
-  const clientSecret = process.env.AMADEUS_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error('Amadeus credentials not configured');
+  if (!isConfigured.amadeus()) {
+    throw new Error(
+      'Amadeus credentials not configured. ' +
+      'Please set AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET in your .env.local file.'
+    );
   }
 
-  const response = await fetchWithTimeout(`${AMADEUS_BASE_URL}/v1/security/oauth2/token`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-    }),
-  }, AMADEUS_TIMEOUT);
+  const clientId = serverEnv.AMADEUS_CLIENT_ID;
+  const clientSecret = serverEnv.AMADEUS_CLIENT_SECRET;
+
+  // Use retry logic for token requests
+  const response = await withRetry(
+    () => fetchWithTimeout(`${AMADEUS_BASE_URL}/v1/security/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+    }, AMADEUS_TIMEOUT),
+    {
+      maxRetries: 3,
+      initialDelayMs: 1000,
+      onRetry: (attempt, delay) => {
+        console.log(`Amadeus token retry attempt ${attempt} after ${delay}ms`);
+      },
+    }
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to get Amadeus token: ${response.statusText}`);
@@ -99,9 +116,12 @@ async function getAccessToken(): Promise<string> {
 
   const data: AmadeusTokenResponse = await response.json();
 
+  // Use 5 minute buffer before expiry to avoid edge-case 401 errors
+  // Tokens typically last 30 minutes, so 5 min buffer is safe
+  const TOKEN_EXPIRY_BUFFER_SECONDS = 300;
   cachedToken = {
     token: data.access_token,
-    expiresAt: Date.now() + (data.expires_in - 60) * 1000,
+    expiresAt: Date.now() + (data.expires_in - TOKEN_EXPIRY_BUFFER_SECONDS) * 1000,
   };
 
   return cachedToken.token;
@@ -284,7 +304,21 @@ export async function searchRoundTripFlights(
       const exchangeRate = exchangeRates[currency] || 1;
       const totalPriceUSD = rawPrice * exchangeRate;
 
-      const mapItinerary = (itinerary: any, dictionaries: any) => {
+      // Define itinerary types locally
+      interface FlightItinerary {
+        segments: Array<{
+          carrierCode: string;
+          number: string;
+          departure: { iataCode: string; at: string };
+          arrival: { iataCode: string; at: string };
+        }>;
+        duration: string;
+      }
+      interface FlightDictionaries {
+        carriers?: Record<string, string>;
+      }
+
+      const mapItinerary = (itinerary: FlightItinerary, dictionaries: FlightDictionaries | undefined) => {
         const firstSegment = itinerary.segments[0];
         const lastSegment = itinerary.segments[itinerary.segments.length - 1];
         const carrierCode = firstSegment.carrierCode;
@@ -356,7 +390,8 @@ export async function searchHotels(
   const hotelListData = await hotelListResponse.json();
   const totalHotelsInCity = hotelListData.data?.length || 0;
   // Get more hotel IDs to increase chances of finding available offers
-  const hotelIds = hotelListData.data?.slice(0, 50).map((h: any) => h.hotelId) || [];
+  interface HotelListItem { hotelId: string }
+  const hotelIds = (hotelListData.data as HotelListItem[] | undefined)?.slice(0, 50).map((h) => h.hotelId) || [];
 
   console.log(`Amadeus hotel list: ${totalHotelsInCity} hotels found in ${params.cityCode}, checking ${hotelIds.length} for availability`);
 
@@ -404,20 +439,8 @@ export async function searchHotels(
       (1000 * 60 * 60 * 24)
   );
 
-  // Approximate exchange rates to USD (for display purposes)
-  const exchangeRates: Record<string, number> = {
-    USD: 1,
-    EUR: 1.08,
-    GBP: 1.27,
-    JPY: 0.0067,  // 1 JPY = ~0.0067 USD
-    CNY: 0.14,
-    KRW: 0.00075,
-    THB: 0.028,
-    AUD: 0.65,
-    CAD: 0.74,
-    SGD: 0.74,
-    HKD: 0.13,
-  };
+  // Get exchange rates from centralized service (with API fetch and caching)
+  const exchangeRates = getExchangeRatesSync();
 
   let hotels = offersData.data.map((offer) => {
     const hotel = offer.hotel;
@@ -425,10 +448,20 @@ export async function searchHotels(
     const currency = offer.offers[0]?.price.currency || 'USD';
 
     // Convert to USD for consistent filtering/display
-    const exchangeRate = exchangeRates[currency] || 1;
-    const priceInUSD = rawPrice * exchangeRate;
+    const exchangeRate = exchangeRates[currency];
+    if (!exchangeRate && currency !== 'USD') {
+      console.warn(`Unknown currency "${currency}" - using raw value without conversion`);
+    }
+    const priceInUSD = rawPrice * (exchangeRate || 1);
 
     console.log(`Hotel ${hotel.name}: ${currency} ${rawPrice} = USD ${priceInUSD.toFixed(2)} (${nights} nights)`);
+
+    // Calculate actual distance to destination center
+    const hotelLat = hotel.latitude || 0;
+    const hotelLng = hotel.longitude || 0;
+    const distanceToCenter = (params.destinationLat && params.destinationLng && hotelLat && hotelLng)
+      ? calculateHaversineDistance(params.destinationLat, params.destinationLng, hotelLat, hotelLng)
+      : 0;
 
     return {
       id: hotel.hotelId,
@@ -441,9 +474,9 @@ export async function searchHotels(
       currency: 'USD', // Always return USD after conversion
       imageUrl: hotel.media?.[0]?.uri || getHotelFallbackImage(hotel.name),
       amenities: hotel.amenities || [],
-      distanceToCenter: Math.random() * 5,
-      latitude: hotel.latitude || 0,
-      longitude: hotel.longitude || 0,
+      distanceToCenter,
+      latitude: hotelLat,
+      longitude: hotelLng,
     };
   });
 
@@ -488,8 +521,14 @@ export async function getHotelListByCity(cityCode: string): Promise<
     return [];
   }
 
+  interface HotelData {
+    hotelId: string;
+    name: string;
+    geoCode?: { latitude?: number; longitude?: number };
+  }
+
   const data = await response.json();
-  return (data.data || []).map((h: any) => ({
+  return ((data.data || []) as HotelData[]).map((h) => ({
     hotelId: h.hotelId,
     name: h.name,
     latitude: h.geoCode?.latitude,
@@ -524,9 +563,15 @@ export async function getHotelListByGeocode(lat: number, lng: number, radiusKm: 
     return [];
   }
 
+  interface HotelGeoData {
+    hotelId: string;
+    name: string;
+    geoCode?: { latitude?: number; longitude?: number };
+  }
+
   const data = await response.json();
   console.log(`Amadeus: Found ${data.data?.length || 0} hotels near (${lat}, ${lng})`);
-  return (data.data || []).map((h: any) => ({
+  return ((data.data || []) as HotelGeoData[]).map((h) => ({
     hotelId: h.hotelId,
     name: h.name,
     latitude: h.geoCode?.latitude,
@@ -980,11 +1025,17 @@ export async function getAirportAutocomplete(query: string): Promise<
     return [];
   }
 
+  interface LocationData {
+    iataCode: string;
+    name: string;
+    address?: { cityName?: string };
+  }
+
   const data = await response.json();
 
-  return data.data?.map((loc: any) => ({
+  return ((data.data || []) as LocationData[]).map((loc) => ({
     iataCode: loc.iataCode,
     name: loc.name,
     cityName: loc.address?.cityName || loc.name,
-  })) || [];
+  }));
 }

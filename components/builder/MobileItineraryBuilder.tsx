@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import LeftSidebar from './LeftSidebar';
 import MainItinerary from './MainItinerary';
 import RightMapPanel from './RightMapPanel';
@@ -40,7 +40,7 @@ export default function MobileItineraryBuilder({
     unscheduleItem,
     reorderScheduledItem,
     moveItemBetweenDays,
-  } = useTripStoreV2();
+  } = useTripStore();
 
   const [activeTab, setActiveTab] = useState<MobileTab>('itinerary');
   const [showAISheet, setShowAISheet] = useState(false);
@@ -89,7 +89,7 @@ export default function MobileItineraryBuilder({
 
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
-      <div className="fixed inset-0 flex flex-col bg-slate-50 dark:bg-slate-900 z-40">
+      <div className="fixed inset-0 flex flex-col bg-slate-50 dark:bg-slate-900 z-30">
         {/* Compact header for mobile */}
         <TripHeader />
 
@@ -126,52 +126,62 @@ export default function MobileItineraryBuilder({
 
         {/* Bottom tab bar - compact design */}
         <div className="flex-shrink-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 safe-area-bottom">
-          <div className="flex h-12">
+          <div className="flex min-h-[56px]" role="tablist" aria-label="Main navigation">
             <button
               onClick={() => setActiveTab('browse')}
+              role="tab"
+              aria-selected={activeTab === 'browse'}
+              aria-controls="panel-browse"
               className={clsx(
-                'flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors',
+                'flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors',
                 activeTab === 'browse'
                   ? 'text-primary-600 dark:text-primary-400'
                   : 'text-slate-400 dark:text-slate-500'
               )}
             >
-              <Compass className="w-4 h-4" />
+              <Compass className="w-5 h-5" aria-hidden="true" />
               <span className="text-[10px] font-medium">Browse</span>
             </button>
 
             <button
               onClick={() => setActiveTab('itinerary')}
+              role="tab"
+              aria-selected={activeTab === 'itinerary'}
+              aria-controls="panel-itinerary"
               className={clsx(
-                'flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors',
+                'flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors',
                 activeTab === 'itinerary'
                   ? 'text-primary-600 dark:text-primary-400'
                   : 'text-slate-400 dark:text-slate-500'
               )}
             >
-              <Calendar className="w-4 h-4" />
+              <Calendar className="w-5 h-5" aria-hidden="true" />
               <span className="text-[10px] font-medium">Itinerary</span>
             </button>
 
             <button
               onClick={() => setActiveTab('map')}
+              role="tab"
+              aria-selected={activeTab === 'map'}
+              aria-controls="panel-map"
               className={clsx(
-                'flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors',
+                'flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors',
                 activeTab === 'map'
                   ? 'text-primary-600 dark:text-primary-400'
                   : 'text-slate-400 dark:text-slate-500'
               )}
             >
-              <Map className="w-4 h-4" />
+              <Map className="w-5 h-5" aria-hidden="true" />
               <span className="text-[10px] font-medium">Map</span>
             </button>
 
             <button
               onClick={() => setShowAISheet(true)}
-              className="flex-1 flex flex-col items-center justify-center gap-0.5"
+              aria-label="Open Snoo AI assistant"
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[44px]"
             >
-              <div className="w-5 h-5 rounded-full bg-[#FF4500] flex items-center justify-center">
-                <SnooLogo className="w-3 h-3 text-white" />
+              <div className="w-6 h-6 rounded-full bg-[#FF4500] flex items-center justify-center">
+                <SnooLogo className="w-4 h-4 text-white" />
               </div>
               <span className="text-[10px] font-medium text-[#FF4500]">Snoo</span>
             </button>
@@ -188,10 +198,19 @@ export default function MobileItineraryBuilder({
             />
 
             {/* Sheet */}
-            <div className="fixed bottom-0 left-0 right-0 h-[70vh] bg-white dark:bg-slate-800 rounded-t-2xl z-50 flex flex-col shadow-xl">
+            <div
+              className="fixed bottom-0 left-0 right-0 h-[70vh] bg-white dark:bg-slate-800 rounded-t-2xl z-50 flex flex-col shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="ai-sheet-title"
+            >
               {/* Handle */}
-              <div className="flex-shrink-0 py-3 flex justify-center">
-                <div className="w-10 h-1 bg-slate-300 dark:bg-slate-600 rounded-full" />
+              <div
+                className="flex-shrink-0 py-3 flex justify-center cursor-grab"
+                role="presentation"
+                aria-label="Drag handle to resize panel"
+              >
+                <div className="w-10 h-1 bg-slate-300 dark:bg-slate-600 rounded-full" aria-hidden="true" />
               </div>
 
               {/* Header */}
@@ -201,15 +220,16 @@ export default function MobileItineraryBuilder({
                     <SnooLogo className="w-5 h-5 text-white" />
                   </div>
                   <div className="flex flex-col">
-                    <span className="font-semibold text-slate-900 dark:text-white">Ask Snoo</span>
+                    <span id="ai-sheet-title" className="font-semibold text-slate-900 dark:text-white">Ask Snoo</span>
                     <span className="text-[10px] text-orange-600 dark:text-orange-400">Powered by Reddit travelers</span>
                   </div>
                 </div>
                 <button
                   onClick={() => setShowAISheet(false)}
-                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg"
+                  aria-label="Close AI assistant"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-5 h-5" aria-hidden="true" />
                 </button>
               </div>
 

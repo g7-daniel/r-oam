@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDirections, getDistanceMatrix } from '@/lib/google-maps';
+import { getDirections } from '@/lib/google-maps';
 import type { ItineraryDay, ItineraryItem, TransitInfo } from '@/types';
 
 export async function POST(request: NextRequest) {

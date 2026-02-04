@@ -1,15 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Loader2,
-  Hotel,
   X,
-  ArrowUp,
-  DollarSign,
-  Star,
   Sparkles,
-  ChevronRight,
   Check,
 } from 'lucide-react';
 import clsx from 'clsx';

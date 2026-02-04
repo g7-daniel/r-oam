@@ -565,9 +565,9 @@ export async function POST(request: NextRequest) {
         pricePerNight = Math.max(50, Math.min(1500, pricePerNight));
       }
 
-      // Get image URL from Google if available
+      // Get image URL from Google if available - use proxy to hide API key
       const imageUrl = hotel.imageRef
-        ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${hotel.imageRef}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+        ? `/api/photo-proxy?ref=${encodeURIComponent(hotel.imageRef)}&maxwidth=400`
         : undefined;
 
       return {

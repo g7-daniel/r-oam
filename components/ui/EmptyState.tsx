@@ -95,11 +95,15 @@ export function EmptyState({
   const config = variantConfig[variant];
 
   return (
-    <div className={cn(
-      'flex flex-col items-center justify-center text-center py-12 px-4',
-      className
-    )}>
-      <div className="text-slate-300 dark:text-slate-600 mb-4">
+    <div
+      className={cn(
+        'flex flex-col items-center justify-center text-center py-12 px-4',
+        className
+      )}
+      role="status"
+      aria-label={title || config.title}
+    >
+      <div className="text-slate-300 dark:text-slate-600 mb-4" aria-hidden="true">
         {icon || config.icon}
       </div>
       <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">
@@ -111,7 +115,7 @@ export function EmptyState({
       {action && (
         <button
           onClick={action.onClick}
-          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors"
+          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
         >
           {action.label}
         </button>
@@ -131,15 +135,18 @@ export function InlineEmptyState({
   className?: string;
 }) {
   return (
-    <div className={cn(
-      'text-center py-6 px-4 text-slate-500 dark:text-slate-400',
-      className
-    )}>
+    <div
+      className={cn(
+        'text-center py-6 px-4 text-slate-500 dark:text-slate-400',
+        className
+      )}
+      role="status"
+    >
       <p className="text-sm">{message}</p>
       {action && (
         <button
           onClick={action.onClick}
-          className="mt-2 text-sm text-orange-500 hover:text-orange-600 font-medium"
+          className="mt-2 text-sm text-orange-500 hover:text-orange-600 font-medium focus:outline-none focus:ring-2 focus:ring-orange-500 rounded"
         >
           {action.label}
         </button>

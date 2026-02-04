@@ -5,12 +5,7 @@ import {
   X,
   Star,
   MapPin,
-  Clock,
   Check,
-  Wifi,
-  Car,
-  UtensilsCrossed,
-  Waves,
   Loader2,
 } from 'lucide-react';
 import ImageGallery from './ImageGallery';
@@ -95,27 +90,29 @@ export default function HotelDetailModal({
         onClick={onClose}
       />
 
-      {/* Modal */}
-      <div className="absolute inset-4 md:inset-8 lg:inset-12 bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-200">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold text-slate-800">{hotel.name}</h2>
-            <div className="flex items-center gap-1">
+      {/* Modal - full screen on mobile, centered on larger screens */}
+      <div className="absolute inset-0 sm:inset-4 md:inset-8 lg:inset-12 bg-white dark:bg-slate-800 sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+        {/* Header - responsive */}
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-slate-200 dark:border-slate-700 safe-area-inset-top">
+          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+            <h2 className="text-base sm:text-xl font-bold text-slate-800 dark:text-white truncate">{hotel.name}</h2>
+            <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
               {Array.from({ length: hotel.stars }).map((_, i) => (
-                <Star key={i} className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+                <Star key={i} className="w-3 h-3 sm:w-4 sm:h-4 text-yellow-400 fill-yellow-400" />
               ))}
             </div>
             {hotelDetail?.isRedditRecommended && (
-              <RedditBadge
-                variant="compact"
-                mentionCount={hotelDetail.redditMentionCount}
-              />
+              <div className="hidden sm:block">
+                <RedditBadge
+                  variant="compact"
+                  mentionCount={hotelDetail.redditMentionCount}
+                />
+              </div>
             )}
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -128,41 +125,41 @@ export default function HotelDetailModal({
               <Loader2 className="w-8 h-8 animate-spin text-sky-500" />
             </div>
           ) : hotelDetail ? (
-            <div className="p-6">
+            <div className="p-3 sm:p-6">
               {/* Gallery */}
               <ImageGallery
                 images={hotelDetail.gallery}
                 alt={hotelDetail.name}
               />
 
-              {/* Location & Info */}
-              <div className="flex flex-wrap gap-4 mt-4 mb-6">
-                <div className="flex items-center gap-2 text-slate-600">
-                  <MapPin className="w-4 h-4" />
-                  <span>{hotelDetail.address}, {hotelDetail.city}</span>
+              {/* Location & Info - responsive */}
+              <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-4 mt-3 sm:mt-4 mb-4 sm:mb-6">
+                <div className="flex items-center gap-2 text-sm sm:text-base text-slate-600 dark:text-slate-400">
+                  <MapPin className="w-4 h-4 flex-shrink-0" />
+                  <span className="truncate">{hotelDetail.address}, {hotelDetail.city}</span>
                 </div>
-                <div className="flex items-center gap-2 text-slate-600">
-                  <MapPin className="w-4 h-4" />
+                <div className="flex items-center gap-2 text-sm sm:text-base text-slate-600 dark:text-slate-400">
+                  <MapPin className="w-4 h-4 flex-shrink-0" />
                   <span>{hotelDetail.distanceToCenter}km from center</span>
                 </div>
               </div>
 
               {/* Description */}
               {hotelDetail.fullDescription && (
-                <p className="text-slate-600 mb-6">{hotelDetail.fullDescription}</p>
+                <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-4 sm:mb-6">{hotelDetail.fullDescription}</p>
               )}
 
-              {/* Tabs */}
-              <div className="flex gap-4 border-b border-slate-200 mb-6">
+              {/* Tabs - responsive and touch-friendly */}
+              <div className="flex gap-1 sm:gap-4 border-b border-slate-200 dark:border-slate-700 mb-4 sm:mb-6 overflow-x-auto">
                 {(['rooms', 'amenities', 'reviews'] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
                     className={clsx(
-                      'px-4 py-3 font-medium capitalize transition-colors relative',
+                      'min-h-[44px] px-3 sm:px-4 py-3 font-medium capitalize transition-colors relative whitespace-nowrap text-sm sm:text-base',
                       activeTab === tab
-                        ? 'text-sky-600'
-                        : 'text-slate-500 hover:text-slate-700'
+                        ? 'text-sky-600 dark:text-sky-400'
+                        : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
                     )}
                   >
                     {tab}
@@ -274,36 +271,38 @@ export default function HotelDetailModal({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-200 bg-white flex items-center justify-between">
-          <div>
-            {selectedRoom ? (
-              <div>
-                <span className="text-sm text-slate-500">Selected: </span>
-                <span className="font-medium">{selectedRoom.name}</span>
-                <span className="text-xl font-bold text-slate-800 ml-3">
-                  ${selectedRoom.totalPrice.toLocaleString()}
-                </span>
-                <span className="text-sm text-slate-500 ml-1">
-                  for {nights} nights
-                </span>
-              </div>
-            ) : (
-              <span className="text-slate-500">Select a room to continue</span>
-            )}
+        {/* Footer - responsive and touch-friendly */}
+        <div className="p-3 sm:p-4 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 safe-area-inset-bottom">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="text-center sm:text-left">
+              {selectedRoom ? (
+                <div>
+                  <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">Selected: </span>
+                  <span className="font-medium text-sm sm:text-base dark:text-white">{selectedRoom.name}</span>
+                  <span className="text-lg sm:text-xl font-bold text-slate-800 dark:text-white ml-2 sm:ml-3">
+                    ${selectedRoom.totalPrice.toLocaleString()}
+                  </span>
+                  <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 ml-1">
+                    for {nights} nights
+                  </span>
+                </div>
+              ) : (
+                <span className="text-sm text-slate-500 dark:text-slate-400">Select a room to continue</span>
+              )}
+            </div>
+            <button
+              onClick={handleSelectRoom}
+              disabled={!selectedRoom}
+              className={clsx(
+                'w-full sm:w-auto min-h-[48px] sm:min-h-[44px] px-6 py-3 rounded-xl font-medium transition-colors text-base sm:text-sm',
+                selectedRoom
+                  ? 'bg-sky-500 text-white hover:bg-sky-600'
+                  : 'bg-slate-200 dark:bg-slate-600 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+              )}
+            >
+              Select This Room
+            </button>
           </div>
-          <button
-            onClick={handleSelectRoom}
-            disabled={!selectedRoom}
-            className={clsx(
-              'px-6 py-3 rounded-xl font-medium transition-colors',
-              selectedRoom
-                ? 'bg-sky-500 text-white hover:bg-sky-600'
-                : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-            )}
-          >
-            Select This Room
-          </button>
         </div>
       </div>
     </div>

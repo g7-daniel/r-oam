@@ -145,6 +145,30 @@
 }
 
 @layer utilities {
+  /* Screen reader only - for accessibility */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  /* Skip to main content link for keyboard users */
+  .skip-link {
+    @apply absolute -top-10 left-0 bg-reddit text-white px-4 py-2 z-[100] focus:top-0 transition-all;
+  }
+
+  /* Focus visible only (not on click) */
+  .focus-visible-only:focus:not(:focus-visible) {
+    outline: none;
+    box-shadow: none;
+  }
+
   /* Reddit wave pattern */
   .wave-pattern {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 320'%3E%3Cpath fill='%23FF4500' fill-opacity='0.1' d='M0,192L48,197.3C96,203,192,213,288,229.3C384,245,480,267,576,250.7C672,235,768,181,864,181.3C960,181,1056,235,1152,234.7C1248,235,1344,181,1392,154.7L1440,128L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z'%3E%3C/path%3E%3C/svg%3E");
@@ -201,6 +225,15 @@
 
 ::-webkit-scrollbar-thumb {
   @apply bg-reddit-gray-300 dark:bg-slate-600 rounded-full hover:bg-reddit-gray-400 dark:hover:bg-slate-500;
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Date picker customization - Reddit themed */
@@ -261,4 +294,29 @@
 /* Reddit-style focus ring */
 *:focus-visible {
   @apply outline-none ring-2 ring-reddit ring-offset-2 dark:ring-offset-slate-900;
+}
+
+/* Reduced motion preference - disable animations for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .card,
+  .reddit-card {
+    border-width: 2px;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-accent {
+    border: 2px solid currentColor;
+  }
 }

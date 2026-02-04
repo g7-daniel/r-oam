@@ -6,6 +6,8 @@ import clsx from 'clsx';
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   variant?: 'default' | 'interactive' | 'selected';
   padding?: 'none' | 'sm' | 'md' | 'lg';
+  /** For interactive cards, provide an accessible label */
+  'aria-label'?: string;
 }
 
 const Card = forwardRef<HTMLDivElement, CardProps>(
@@ -22,15 +24,35 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
 
     const paddings = {
       none: '',
-      sm: 'p-4',
-      md: 'p-6',
-      lg: 'p-8',
+      sm: 'p-3 sm:p-4',
+      md: 'p-4 sm:p-6',
+      lg: 'p-5 sm:p-8',
     };
+
+    // For interactive cards, add proper keyboard support and role
+    const interactiveProps = variant === 'interactive' ? {
+      role: 'button' as const,
+      tabIndex: 0,
+      onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
+        if ((e.key === 'Enter' || e.key === ' ') && props.onClick) {
+          e.preventDefault();
+          props.onClick(e as unknown as React.MouseEvent<HTMLDivElement>);
+        }
+        props.onKeyDown?.(e);
+      },
+    } : {};
 
     return (
       <div
         ref={ref}
-        className={clsx(baseStyles, variants[variant], paddings[padding], className)}
+        className={clsx(
+          baseStyles,
+          variants[variant],
+          paddings[padding],
+          variant === 'interactive' && 'focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2',
+          className
+        )}
+        {...interactiveProps}
         {...props}
       >
         {children}

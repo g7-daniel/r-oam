@@ -1,8 +1,35 @@
 import type { Experience, ExperienceCategory, PlaceResult, DirectionsResult, TransitInfo } from '@/types';
 import { fetchWithTimeout } from './api-cache';
+import { withRetry } from './retry';
+import { calculateHaversineDistance } from './utils/geo';
+import { isConfigured } from './env';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 const GOOGLE_MAPS_TIMEOUT = 15000; // 15 second timeout
+
+// Lazy getter for API key to avoid issues during module initialization
+const getGoogleMapsApiKey = () => process.env.GOOGLE_MAPS_API_KEY || '';
+
+// Custom error with status for rate limit handling
+interface RateLimitError extends Error {
+  status: number;
+}
+
+function createRateLimitError(): RateLimitError {
+  const error = new Error('Google Places API rate limited') as RateLimitError;
+  error.status = 429;
+  return error;
+}
+
+// Retry options for Google Maps API (handles 429 rate limits)
+const GOOGLE_MAPS_RETRY_OPTIONS = {
+  maxRetries: 3,
+  initialDelayMs: 2000,
+  maxDelayMs: 10000,
+  onRetry: (attempt: number, delay: number) => {
+    console.log(`Google Maps API retry attempt ${attempt} after ${delay}ms`);
+  },
+};
 
 // Google Places result type for hotel searches
 export interface GooglePlaceResult {
@@ -28,11 +55,11 @@ export async function searchHotelsWithPagination(
   query: string,
   maxResults: number = 60
 ): Promise<GooglePlaceResult[]> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    console.warn('Google Maps API key not configured');
+  if (!isConfigured.googleMaps()) {
+    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
+  const apiKey = getGoogleMapsApiKey();
 
   const results: GooglePlaceResult[] = [];
   let pageToken: string | undefined;
@@ -51,12 +78,20 @@ export async function searchHotelsWithPagination(
     }
 
     try {
-      const response = await fetchWithTimeout(
-        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
-        {},
-        GOOGLE_MAPS_TIMEOUT
-      );
-      const data = await response.json();
+      const data = await withRetry(async () => {
+        const response = await fetchWithTimeout(
+          `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+          {},
+          GOOGLE_MAPS_TIMEOUT
+        );
+
+        // Throw on rate limit to trigger retry
+        if (response.status === 429) {
+          throw createRateLimitError();
+        }
+
+        return response.json();
+      }, GOOGLE_MAPS_RETRY_OPTIONS);
 
       if (data.results) {
         results.push(...data.results);
@@ -79,11 +114,11 @@ export async function searchHotelsByGeocode(
   radiusMeters: number = 50000,
   maxResults: number = 60
 ): Promise<GooglePlaceResult[]> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    console.warn('Google Maps API key not configured');
+  if (!isConfigured.googleMaps()) {
+    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
+  const apiKey = getGoogleMapsApiKey();
 
   const results: GooglePlaceResult[] = [];
   let pageToken: string | undefined;
@@ -102,12 +137,20 @@ export async function searchHotelsByGeocode(
     }
 
     try {
-      const response = await fetchWithTimeout(
-        `${GOOGLE_MAPS_BASE_URL}/place/nearbysearch/json?${params}`,
-        {},
-        GOOGLE_MAPS_TIMEOUT
-      );
-      const data = await response.json();
+      const data = await withRetry(async () => {
+        const response = await fetchWithTimeout(
+          `${GOOGLE_MAPS_BASE_URL}/place/nearbysearch/json?${params}`,
+          {},
+          GOOGLE_MAPS_TIMEOUT
+        );
+
+        // Throw on rate limit to trigger retry
+        if (response.status === 429) {
+          throw createRateLimitError();
+        }
+
+        return response.json();
+      }, GOOGLE_MAPS_RETRY_OPTIONS);
 
       if (data.results) {
         results.push(...data.results);
@@ -131,11 +174,11 @@ export async function searchLuxuryHotels(
   destination: string,
   maxResults: number = 20
 ): Promise<GooglePlaceResult[]> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    console.warn('Google Maps API key not configured');
+  if (!isConfigured.googleMaps()) {
+    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
+  const apiKey = getGoogleMapsApiKey();
 
   const results: GooglePlaceResult[] = [];
   const seenPlaceIds = new Set<string>();
@@ -155,14 +198,31 @@ export async function searchLuxuryHotels(
     `aman ${areaName}`,
     `one&only ${areaName}`,
     `six senses ${areaName}`,
+    `waldorf astoria ${areaName}`,
+    `w hotel ${areaName}`,
+    `conrad ${areaName}`,
+    `jw marriott ${areaName}`,
+    // Caribbean/DR/Mexico specific luxury resorts
     `excellence ${areaName}`,
     `secrets ${areaName}`,
     `eden roc ${areaName}`,
     `cap cana ${areaName}`,
+    `sanctuary cap cana ${destination}`,
+    `hyatt zilara ${areaName}`,
+    `hyatt ziva ${areaName}`,
+    `tortuga bay ${areaName}`,
+    `casa de campo ${areaName}`,
+    `zoetry ${areaName}`,
+    `breathless ${areaName}`,
+    `dreams ${areaName}`,
+    `now resorts ${areaName}`,
+    `hard rock hotel ${areaName}`,
+    `grand hyatt ${areaName}`,
     // Generic high-end searches
     `premium resort ${areaName} ${destination}`,
     `5 star beachfront ${areaName}`,
     `adults only luxury ${areaName}`,
+    `all inclusive luxury ${areaName}`,
   ];
 
   for (const query of luxuryQueries) {
@@ -220,11 +280,11 @@ export async function searchLuxuryHotels(
 export async function geocodeLocation(
   locationName: string
 ): Promise<{ lat: number; lng: number } | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    console.warn('Google Maps API key not configured');
+  if (!isConfigured.googleMaps()) {
+    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return null;
   }
+  const apiKey = getGoogleMapsApiKey();
 
   const params = new URLSearchParams({
     address: locationName,
@@ -258,12 +318,11 @@ export async function searchPlaces(
   location?: { lat: number; lng: number },
   radius = 50000
 ): Promise<PlaceResult[]> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
-    console.warn('Google Maps API key not configured');
+  if (!isConfigured.googleMaps()) {
+    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
+  const apiKey = getGoogleMapsApiKey();
 
   const params = new URLSearchParams({
     query,
@@ -291,11 +350,10 @@ export async function searchPlaces(
 }
 
 export async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
+  if (!isConfigured.googleMaps()) {
     return null;
   }
+  const apiKey = getGoogleMapsApiKey();
 
   const params = new URLSearchParams({
     place_id: placeId,
@@ -322,11 +380,10 @@ export async function getDirections(
   destination: { lat: number; lng: number },
   mode: 'driving' | 'walking' | 'transit' = 'transit'
 ): Promise<DirectionsResult | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
+  if (!isConfigured.googleMaps()) {
     return null;
   }
+  const apiKey = getGoogleMapsApiKey();
 
   const params = new URLSearchParams({
     origin: `${origin.lat},${origin.lng}`,
@@ -354,11 +411,10 @@ export async function getDistanceMatrix(
   destinations: { lat: number; lng: number }[],
   mode: 'driving' | 'walking' | 'transit' = 'transit'
 ): Promise<{ distance: string; duration: string }[][]> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
+  if (!isConfigured.googleMaps()) {
     return [];
   }
+  const apiKey = getGoogleMapsApiKey();
 
   const originStr = origins.map((o) => `${o.lat},${o.lng}`).join('|');
   const destStr = destinations.map((d) => `${d.lat},${d.lng}`).join('|');
@@ -382,8 +438,17 @@ export async function getDistanceMatrix(
 
   const data = await response.json();
 
-  return data.rows?.map((row: any) =>
-    row.elements?.map((element: any) => ({
+  interface DistanceMatrixElement {
+    distance?: { text: string; value: number };
+    duration?: { text: string; value: number };
+    status: string;
+  }
+  interface DistanceMatrixRow {
+    elements?: DistanceMatrixElement[];
+  }
+
+  return (data.rows as DistanceMatrixRow[] | undefined)?.map((row) =>
+    row.elements?.map((element) => ({
       distance: element.distance?.text || 'N/A',
       duration: element.duration?.text || 'N/A',
     })) || []
@@ -440,17 +505,8 @@ const CATEGORY_QUERIES: Record<string, string[]> = {
   water_sports: ['surfing', 'diving', 'snorkeling', 'water sports'],
 };
 
-// Calculate distance between two coordinates in km (Haversine formula)
-function getDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371; // Earth's radius in km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLng/2) * Math.sin(dLng/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
-}
+// Use centralized Haversine implementation
+const getDistanceKm = calculateHaversineDistance;
 
 export async function getExperiencesByCategory(
   destination: string,
@@ -495,16 +551,22 @@ export async function getExperiencesByCategory(
 
   const placesWithDetails = await Promise.all(detailsPromises);
 
+  // Extended place details type
+  interface ExtendedPlaceDetails {
+    editorial_summary?: { overview?: string };
+    reviews?: Array<{ text?: string }>;
+  }
+
   return placesWithDetails.map(({ place, details }) => {
     // Get description from editorial_summary or first review
     let description = `Popular ${category.replace('_', ' ')} attraction in ${destination}`;
     if (details) {
-      const detailsAny = details as any;
-      if (detailsAny.editorial_summary?.overview) {
-        description = detailsAny.editorial_summary.overview;
-      } else if (detailsAny.reviews?.[0]?.text) {
+      const extDetails = details as ExtendedPlaceDetails;
+      if (extDetails.editorial_summary?.overview) {
+        description = extDetails.editorial_summary.overview;
+      } else if (extDetails.reviews?.[0]?.text) {
         // Use first review snippet if no editorial summary
-        const reviewText = detailsAny.reviews[0].text;
+        const reviewText = extDetails.reviews[0].text;
         description = reviewText.length > 200 ? reviewText.slice(0, 200) + '...' : reviewText;
       }
     }
@@ -515,7 +577,7 @@ export async function getExperiencesByCategory(
       category,
       description,
       imageUrl: place.photos?.[0]?.photo_reference
-        ? `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=800&photo_reference=${place.photos[0].photo_reference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+        ? getPhotoUrl(place.photos[0].photo_reference, 800)
         : getDefaultImageForCategory(category),
       price: estimatePriceForCategory(category),
       currency: 'USD',
@@ -604,12 +666,26 @@ function estimateDurationForCategory(category: ExperienceCategory): string {
   return durations[category];
 }
 
+/**
+ * Get a photo URL using the proxy endpoint to avoid exposing API key
+ */
 export function getPhotoUrl(photoReference: string, maxWidth = 800): string {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey || !photoReference) {
+  if (!photoReference) {
     return '';
   }
-  return `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=${maxWidth}&photo_reference=${photoReference}&key=${apiKey}`;
+  // Use proxy endpoint to avoid exposing API key in client URLs
+  return `/api/photo-proxy?ref=${encodeURIComponent(photoReference)}&maxwidth=${maxWidth}`;
+}
+
+/**
+ * Get photo URL for server-side use only (where API key is safe)
+ * @internal
+ */
+export function getPhotoUrlServer(photoReference: string, maxWidth = 800): string {
+  if (!isConfigured.googleMaps() || !photoReference) {
+    return '';
+  }
+  return `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=${maxWidth}&photo_reference=${photoReference}&key=${getGoogleMapsApiKey()}`;
 }
 
 // ============================================================================
@@ -639,8 +715,6 @@ export interface VerifiedHotelAmenities {
  * Uses place details and reviews to extract actual amenity information
  */
 export async function getHotelAmenities(placeId: string): Promise<VerifiedHotelAmenities> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-
   const defaultResult: VerifiedHotelAmenities = {
     hasPool: null,
     hasGym: null,
@@ -657,7 +731,7 @@ export async function getHotelAmenities(placeId: string): Promise<VerifiedHotelA
     confidence: 'unknown',
   };
 
-  if (!apiKey) {
+  if (!isConfigured.googleMaps()) {
     return defaultResult;
   }
 
@@ -673,7 +747,7 @@ export async function getHotelAmenities(placeId: string): Promise<VerifiedHotelA
         'reviews',
         'editorial_summary',
       ].join(','),
-      key: apiKey,
+      key: getGoogleMapsApiKey(),
     });
 
     const response = await fetchWithTimeout(
@@ -697,8 +771,9 @@ export async function getHotelAmenities(placeId: string): Promise<VerifiedHotelA
     const types = (result.types || []) as string[];
 
     // Build text corpus from reviews and summary for keyword extraction
-    const reviewTexts = (result.reviews || [])
-      .map((r: any) => r.text || '')
+    interface ReviewItem { text?: string }
+    const reviewTexts = (result.reviews as ReviewItem[] || [])
+      .map((r) => r.text || '')
       .join(' ')
       .toLowerCase();
     const summaryText = (result.editorial_summary?.overview || '').toLowerCase();
@@ -773,12 +848,11 @@ export async function searchHotelsGoogle(
   types: string[];
   isLuxury: boolean;
 }[]> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
-    console.warn('Google Maps API key not configured');
+  if (!isConfigured.googleMaps()) {
+    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
+  const apiKey = getGoogleMapsApiKey();
 
   // Search with multiple queries to find variety of hotels
   // Include specific luxury brand names to ensure top hotels appear
@@ -878,7 +952,7 @@ export async function searchHotelsGoogle(
     if (aLuxury && !bLuxury) return -1;
     if (!aLuxury && bLuxury) return 1;
     // Then by price level (higher = more expensive)
-    const priceDiff = ((b as any).price_level || 0) - ((a as any).price_level || 0);
+    const priceDiff = (b.price_level || 0) - (a.price_level || 0);
     if (priceDiff !== 0) return priceDiff;
     // Then by rating
     return (b.rating || 0) - (a.rating || 0);
@@ -896,7 +970,7 @@ export async function searchHotelsGoogle(
     'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=800',
   ];
 
-  return uniquePlaces.slice(0, 30).map((place: any, idx) => {
+  return uniquePlaces.slice(0, 30).map((place, idx) => {
     const luxury = isLuxuryHotel(place.name);
     const fallbackImages = luxury ? luxuryImages : standardImages;
 
@@ -908,7 +982,7 @@ export async function searchHotelsGoogle(
       reviewCount: place.user_ratings_total || 0,
       priceLevel: place.price_level ?? (luxury ? 4 : 2), // Default luxury to expensive
       imageUrl: place.photos?.[0]?.photo_reference
-        ? `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=800&photo_reference=${place.photos[0].photo_reference}&key=${apiKey}`
+        ? getPhotoUrl(place.photos[0].photo_reference, 800)
         : fallbackImages[idx % fallbackImages.length],
       lat: place.geometry?.location?.lat || 0,
       lng: place.geometry?.location?.lng || 0,

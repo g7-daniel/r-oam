@@ -1,9 +1,9 @@
 'use client';
 
 import { useMemo } from 'react';
-import { X, ArrowRight, Check, Route } from 'lucide-react';
+import { X, Check, Route } from 'lucide-react';
 import clsx from 'clsx';
-import type { CollectionItem } from '@/stores/tripStoreV2';
+import type { CollectionItem } from '@/stores/tripStore';
 import { getOptimizationComparison, isOptimizationWorthwhile } from '@/lib/utils/itineraryOptimizer';
 import { formatDistance } from '@/lib/utils/travelTime';
 

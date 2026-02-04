@@ -3,6 +3,7 @@ import { z } from 'zod';
 import OpenAI from 'openai';
 import { GoogleGenAI } from '@google/genai';
 import { searchReddit } from '@/lib/reddit';
+import { sanitizeDestination, sanitizeUserInput } from '@/lib/prompt-sanitizer';
 
 export const runtime = 'nodejs';
 
@@ -713,12 +714,27 @@ export async function POST(request: NextRequest) {
     }
 
     const {
-      destinationName,
-      countryCode,
-      message,
+      destinationName: rawDestination,
+      countryCode: rawCountryCode,
+      message: rawMessage,
       conversationHistory,
       tripContext,
     } = validatedRequest.data;
+
+    // Sanitize user inputs to prevent prompt injection
+    const destinationName = sanitizeDestination(rawDestination);
+    const countryCode = sanitizeDestination(rawCountryCode); // Country codes are simple, use same sanitizer
+    const message = sanitizeUserInput(rawMessage);
+
+    if (!destinationName) {
+      return new Response(
+        JSON.stringify({
+          type: 'error',
+          message: 'Invalid destination name',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Check Groq configuration
     if (!process.env.GROQ_API_KEY) {
@@ -762,12 +778,13 @@ export async function POST(request: NextRequest) {
       redditContext
     );
 
-    // Build messages
+    // Build messages - sanitize conversation history for safety
     const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
       { role: 'system', content: systemPrompt },
       ...conversationHistory.map(msg => ({
         role: msg.role as 'user' | 'assistant',
-        content: msg.content,
+        // Sanitize user messages in history, pass through assistant messages
+        content: msg.role === 'user' ? sanitizeUserInput(msg.content) : msg.content,
       })),
       { role: 'user', content: message },
     ];

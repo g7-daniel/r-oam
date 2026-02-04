@@ -4,11 +4,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Step6FlightsV2 from '@/components/journey/Step6FlightsV2';
 import { ArrowLeft, Check, MapPin, Plane } from 'lucide-react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 
 export default function FlightsPage() {
   const router = useRouter();
-  const { trip, setOriginAirport, buildFlightLegs } = useTripStoreV2();
+  const { trip, setOriginAirport, buildFlightLegs } = useTripStore();
   const { basics, flights, destinations } = trip;
 
   const [originInput, setOriginInput] = useState('');

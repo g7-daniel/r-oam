@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
+import { calculateHaversineDistance } from '@/lib/utils/geo';
 import Card from '@/components/ui/Card';
 import {
   Map,
@@ -12,7 +13,6 @@ import {
   Hotel,
   Sparkles,
   ChevronRight,
-  ChevronLeft,
   ChevronUp,
   ChevronDown,
   Clock,
@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import type { Recommendation, Destination, FlightLeg, Flight, Hotel as HotelType, Trip } from '@/lib/schemas/trip';
+import { clientEnv } from '@/lib/env';
 
 // Transport mode options
 type TransportMode = 'walk' | 'transit' | 'taxi';
@@ -44,25 +45,7 @@ const TRANSPORT_ICONS: Record<TransportMode, React.ElementType> = {
   taxi: Car,
 };
 
-// Haversine formula to calculate distance between two lat/lng points in km
-function calculateHaversineDistance(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number
-): number {
-  const R = 6371; // Earth's radius in km
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
+// calculateHaversineDistance imported from @/lib/utils/geo
 
 // Estimate travel time based on distance and mode
 function estimateTravelTime(distanceKm: number, mode: TransportMode): number {
@@ -588,7 +571,7 @@ function generateTravelSegments(items: ScheduleItem[]): TravelSegment[] {
 }
 
 export default function Step7Itinerary() {
-  const { trip, setCurrentStep, moveExperienceToDay, updateExperienceTime, itineraryAssignments } = useTripStoreV2();
+  const { trip, setCurrentStep, moveExperienceToDay, updateExperienceTime, itineraryAssignments } = useTripStore();
   const [viewMode, setViewMode] = useState<'schedule' | 'map'>('schedule');
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [modalItem, setModalItem] = useState<ScheduleItem | null>(null);
@@ -994,7 +977,7 @@ export default function Step7Itinerary() {
           <div className="lg:col-span-2">
             <Card className="h-[500px] flex flex-col">
               {/* Google Maps embed */}
-              {process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? (
+              {clientEnv.GOOGLE_MAPS_API_KEY ? (
                 <iframe
                   width="100%"
                   height="100%"
@@ -1002,7 +985,7 @@ export default function Step7Itinerary() {
                   loading="lazy"
                   allowFullScreen
                   referrerPolicy="no-referrer-when-downgrade"
-                  src={`https://www.google.com/maps/embed/v1/directions?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&origin=${mapMarkers[0]?.lat},${mapMarkers[0]?.lng}&destination=${mapMarkers[mapMarkers.length - 1]?.lat},${mapMarkers[mapMarkers.length - 1]?.lng}${mapMarkers.length > 2 ? `&waypoints=${mapMarkers.slice(1, -1).map(m => `${m.lat},${m.lng}`).join('|')}` : ''}&mode=driving`}
+                  src={`https://www.google.com/maps/embed/v1/directions?key=${clientEnv.GOOGLE_MAPS_API_KEY}&origin=${mapMarkers[0]?.lat},${mapMarkers[0]?.lng}&destination=${mapMarkers[mapMarkers.length - 1]?.lat},${mapMarkers[mapMarkers.length - 1]?.lng}${mapMarkers.length > 2 ? `&waypoints=${mapMarkers.slice(1, -1).map(m => `${m.lat},${m.lng}`).join('|')}` : ''}&mode=driving`}
                 />
               ) : (
                 <div className="h-full flex flex-col items-center justify-center bg-slate-100 rounded-xl">

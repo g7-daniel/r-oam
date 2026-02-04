@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import type { CartItem } from '@/lib/schemas/trip';
 import {
   ShoppingCart,
@@ -14,6 +14,8 @@ import {
   Map,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { handleImageError } from '@/lib/utils';
+import { clientEnv } from '@/lib/env';
 
 // Category icons for display
 const CATEGORY_ICONS: Record<string, string> = {
@@ -53,7 +55,7 @@ function StaticMapPreview({ items }: { items: CartItem[] }) {
     return `markers=color:${color}|label:${idx + 1}|${item.recommendation.lat},${item.recommendation.lng}`;
   }).join('&');
 
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const apiKey = clientEnv.GOOGLE_MAPS_API_KEY;
   const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=12&size=600x150&maptype=roadmap&${markers}&key=${apiKey}`;
 
   return (
@@ -61,10 +63,7 @@ function StaticMapPreview({ items }: { items: CartItem[] }) {
       src={mapUrl}
       alt="Map of your experiences"
       className="w-full h-full object-cover"
-      onError={(e) => {
-        // Hide on error
-        (e.target as HTMLImageElement).style.display = 'none';
-      }}
+      onError={(e) => handleImageError(e, 'map')}
     />
   );
 }
@@ -75,7 +74,7 @@ interface ExperienceCartProps {
 }
 
 export default function ExperienceCart({ onContinue, showContinue = true }: ExperienceCartProps) {
-  const { experienceCart, removeFromCart, trip } = useTripStoreV2();
+  const { experienceCart, removeFromCart, trip } = useTripStore();
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Group cart items by destination

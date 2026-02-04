@@ -8,12 +8,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { searchHotelsWithPagination, searchHotelsByGeocode, searchLuxuryHotels, geocodeLocation, GooglePlaceResult } from '@/lib/google-maps';
 import { searchHotelRecommendations } from '@/lib/reddit';
-import { getBatchPricingByCity } from '@/lib/makcorps';
+import { getBatchPricingByCity, mapCityToMakcorps, getHotelsByCity, MakcorpsHotel } from '@/lib/makcorps';
 import { HotelCandidate } from '@/types/quick-plan';
+import { BoundedSet, BoundedMap } from '@/lib/bounded-cache';
+import {
+  hotelsGetSchema,
+  hotelsPostSchema,
+  validateRequestBody,
+  createValidationErrorResponse,
+} from '@/lib/api-validation';
 
-// Track indexing to prevent duplicates
-const indexingInProgress = new Set<string>();
-const indexingTimestamps = new Map<string, number>();
+// Track indexing to prevent duplicates (bounded to prevent memory leaks)
+const indexingInProgress = new BoundedSet<string>(100, 10); // max 100 items, 10 min TTL
+const indexingTimestamps = new BoundedMap<string, number>(200, 60); // max 200 items, 1 hour TTL
 const INDEXING_COOLDOWN_MS = 60000; // 1 minute between indexing runs per area
 
 // Minimum hotels before triggering indexing
@@ -21,34 +28,25 @@ const MIN_HOTELS_THRESHOLD = 5; // Only index if fewer than 5 hotels
 const MAX_PAGES_PER_QUERY = 2; // Reduced for faster indexing
 
 export async function GET(request: NextRequest) {
+  // Validate query parameters using Zod schema
   const params = request.nextUrl.searchParams;
-  const areaName = params.get('area');
-  const destination = params.get('destination');
-  const lat = params.get('lat') ? parseFloat(params.get('lat')!) : null;
-  const lng = params.get('lng') ? parseFloat(params.get('lng')!) : null;
-  const minRating = parseFloat(params.get('minRating') || '4.0');
-  const limit = parseInt(params.get('limit') || '10');
+  const rawParams = {
+    area: params.get('area') || undefined,
+    destination: params.get('destination') || undefined,
+    lat: params.get('lat') ? parseFloat(params.get('lat')!) : undefined,
+    lng: params.get('lng') ? parseFloat(params.get('lng')!) : undefined,
+    minRating: params.get('minRating') ? parseFloat(params.get('minRating')!) : undefined,
+    limit: params.get('limit') ? parseInt(params.get('limit')!) : undefined,
+    budgetMin: params.get('budgetMin') ? parseInt(params.get('budgetMin')!) : undefined,
+    budgetMax: params.get('budgetMax') ? parseInt(params.get('budgetMax')!) : undefined,
+  };
 
-  // FIX 2.1: Proper budget validation
-  const budgetMinRaw = params.get('budgetMin');
-  const budgetMaxRaw = params.get('budgetMax');
-
-  const budgetMin = budgetMinRaw ? Math.max(0, parseInt(budgetMinRaw) || 0) : 0;
-  const budgetMax = budgetMaxRaw ? Math.min(10000, parseInt(budgetMaxRaw) || 10000) : 10000;
-
-  if (budgetMin > budgetMax) {
-    return NextResponse.json(
-      { error: 'budgetMin cannot be greater than budgetMax' },
-      { status: 400 }
-    );
+  const validation = hotelsGetSchema.safeParse(rawParams);
+  if (!validation.success) {
+    return createValidationErrorResponse(validation.error);
   }
 
-  if (!areaName && !destination) {
-    return NextResponse.json(
-      { error: 'Either area or destination parameter is required' },
-      { status: 400 }
-    );
-  }
+  const { area: areaName, destination, lat, lng, minRating, limit, budgetMax = 10000 } = validation.data;
 
   const cacheKey = `${destination}:${areaName}`.toLowerCase();
 
@@ -87,43 +85,22 @@ export async function GET(request: NextRequest) {
       indexingInProgress.add(cacheKey);
       indexingTimestamps.set(cacheKey, Date.now());
 
-      console.log(`Quick Plan Hotels: Triggering auto-index for ${cacheKey}`);
+      console.log(`Quick Plan Hotels GET: Triggering BACKGROUND indexing for ${cacheKey} (non-blocking)`);
 
-      try {
-        const indexedCount = await indexHotelsForArea(
-          areaName || '',
-          destination || '',
-          lat,
-          lng
-        );
-        console.log(`Quick Plan Hotels: Indexed ${indexedCount} new hotels`);
-
-        // Re-query after indexing with same budget filter
-        hotels = await prisma.hotel.findMany({
-          where: {
-            OR: [
-              { region: { contains: areaName || '',  } },
-              { city: { contains: areaName || '',  } },
-              { country: { contains: destination || '',  } },
-            ],
-            googleRating: { gte: minRating },
-            ...(priceLevelRange && !priceLevelRange.isLuxury ? {
-              priceLevel: { gte: priceLevelRange.min, lte: priceLevelRange.max },
-            } : {}),
-          },
-          orderBy: [
-            { googleRating: 'desc' },
-            { reviewCount: 'desc' },
-          ],
-          take: limit * 3,
-        });
-
-        console.log(`Quick Plan Hotels: After indexing, found ${hotels.length}`);
-      } catch (indexError) {
-        console.error('Auto-indexing failed:', indexError);
-      } finally {
+      // Fire-and-forget - DO NOT await, return current results immediately
+      indexHotelsForArea(
+        areaName || '',
+        destination || '',
+        lat ?? null,
+        lng ?? null
+      ).then((indexedCount) => {
+        console.log(`Quick Plan Hotels GET: Background indexing complete: ${indexedCount} hotels`);
+      }).catch((indexError) => {
+        console.error('Quick Plan Hotels GET: Background indexing failed', indexError);
+      }).finally(() => {
         indexingInProgress.delete(cacheKey);
-      }
+      });
+      // NOTE: We return whatever we have now - indexing happens in background
     }
 
     // Step 3: Fetch Reddit recommendations for enrichment
@@ -174,7 +151,7 @@ export async function GET(request: NextRequest) {
                         hotel.name.toLowerCase().includes('all-inclusive'),
         amenities: generateAmenities(hotel.name),
         imageUrl: hotel.photoReference
-          ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${hotel.photoReference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+          ? `/api/photo-proxy?ref=${encodeURIComponent(hotel.photoReference)}&maxwidth=400`
           : '/images/hotel-placeholder.svg',
         redditScore: redditData?.mentions || 0,
         overallScore: calculateOverallScore(hotel, redditData?.mentions || 0),
@@ -189,7 +166,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       hotels: candidates.slice(0, limit),
       totalCount: candidates.length,
       area: areaName,
@@ -201,10 +178,21 @@ export async function GET(request: NextRequest) {
         redditHotelsFound: redditHotels.size,
       },
     });
+
+    // Add cache headers - hotel data can be cached for 3 minutes
+    // with stale-while-revalidate for 5 minutes (prices may change)
+    response.headers.set('Cache-Control', 'public, s-maxage=180, stale-while-revalidate=300');
+    return response;
   } catch (error) {
-    console.error('Hotels fetch error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Hotels GET fetch error:', errorMessage, error);
     return NextResponse.json(
-      { error: 'Failed to fetch hotels' },
+      {
+        error: 'FETCH_ERROR',
+        message: 'We had trouble finding hotels. Please try again.',
+        hotels: [],
+        totalCount: 0,
+      },
       { status: 500 }
     );
   }
@@ -354,7 +342,12 @@ const ECO_KEYWORDS = [
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    // Validate request body using Zod schema
+    const validationResult = await validateRequestBody(request, hotelsPostSchema);
+    if (!validationResult.success) {
+      return validationResult.error;
+    }
+
     const {
       areaIds,
       destination,
@@ -369,76 +362,7 @@ export async function POST(request: NextRequest) {
       accommodationType,
       travelingWithPets,
       sustainabilityPreference,
-    } = body as {
-      areaIds: string[];
-      destination: string;
-      preferences: {
-        budgetMin?: number;
-        budgetMax?: number;
-        minRating?: number;
-        vibes?: string[];
-      };
-      coordinates?: { lat: number; lng: number };
-      checkIn?: string;  // YYYY-MM-DD
-      checkOut?: string; // YYYY-MM-DD
-      adults?: number;
-      children?: number;
-      estimatedRooms?: number;
-      accessibilityNeeds?: {
-        wheelchairAccessible?: boolean;
-        groundFloorRequired?: boolean;
-        elevatorRequired?: boolean;
-        noStairs?: boolean;
-      };
-      accommodationType?: 'hotel' | 'hostel' | 'vacation_rental' | 'resort' | 'eco_lodge' | 'boutique' | 'villa';
-      travelingWithPets?: {
-        hasPet: boolean;
-        petType?: 'dog' | 'cat' | 'other';
-        petSize?: 'small' | 'medium' | 'large';
-      };
-      sustainabilityPreference?: 'standard' | 'eco_conscious' | 'eco_focused';
-    };
-
-    // FIX 2.6: Input Validation
-    if (!areaIds || !Array.isArray(areaIds) || areaIds.length === 0) {
-      return NextResponse.json(
-        { error: 'areaIds must be a non-empty array' },
-        { status: 400 }
-      );
-    }
-
-    if (!destination || typeof destination !== 'string') {
-      return NextResponse.json(
-        { error: 'destination is required and must be a string' },
-        { status: 400 }
-      );
-    }
-
-    if (checkIn && checkOut) {
-      const startDate = new Date(checkIn);
-      const endDate = new Date(checkOut);
-
-      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-        return NextResponse.json(
-          { error: 'Invalid date format. Use YYYY-MM-DD' },
-          { status: 400 }
-        );
-      }
-
-      if (endDate <= startDate) {
-        return NextResponse.json(
-          { error: 'checkOut must be after checkIn' },
-          { status: 400 }
-        );
-      }
-    }
-
-    if (adults !== undefined && (typeof adults !== 'number' || adults < 1 || adults > 20)) {
-      return NextResponse.json(
-        { error: 'adults must be a number between 1 and 20' },
-        { status: 400 }
-      );
-    }
+    } = validationResult.data;
 
     const results: Record<string, HotelCandidate[]> = {};
 
@@ -479,7 +403,12 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Hotels API] Budget filter: $${preferences.budgetMin}-$${preferences.budgetMax}, priceLevel: ${JSON.stringify(priceLevelRange)}`);
 
-    for (const areaId of areaIds) {
+    // =================================================================
+    // PARALLELIZED: Process all areas concurrently using Promise.all
+    // =================================================================
+    console.log(`[Hotels API] Processing ${areaIds.length} areas in parallel`);
+
+    const areaResults = await Promise.all(areaIds.map(async (areaId) => {
       // Convert area ID back to name
       const areaName = areaId.replace(/-/g, ' ');
       const cacheKey = `${destination}:${areaName}`.toLowerCase();
@@ -492,34 +421,117 @@ export async function POST(request: NextRequest) {
 
       let hotels: any[] = [];
       let dbAvailable = true;
+      let usedMakcorps = false;
 
-      // Try database first, fallback to Google-only if DB unavailable
-      try {
-        // Query DB - FIRST try area-specific match, THEN fallback to country
-        hotels = await prisma.hotel.findMany({
-          where: {
-            AND: [
-              { country: { contains: destination } },
-              {
-                OR: [
-                  { region: { contains: areaName } },
-                  { city: { contains: areaName } },
-                ],
-              },
-              priceLevelFilter,
+      // =================================================================
+      // PHASE 1 FIX: Use Makcorps as PRIMARY source (instant, with prices)
+      // =================================================================
+      if (checkIn && checkOut) {
+        try {
+          // Map the area/destination to Makcorps city ID
+          const cityId = await mapCityToMakcorps(areaName, destination);
+
+          if (cityId) {
+            console.log(`[Hotels API] MAKCORPS PRIMARY: Fetching hotels for ${areaName}, cityId: ${cityId}`);
+
+            const makcorpsResult = await getHotelsByCity(
+              cityId,
+              checkIn,
+              checkOut,
+              adults || 2,
+              roomsNeeded,
+              0 // first page
+            );
+
+            if (makcorpsResult.hotels.length > 0) {
+              console.log(`[Hotels API] MAKCORPS SUCCESS: ${makcorpsResult.hotels.length} hotels with real pricing`);
+
+              // Convert Makcorps hotels to our format
+              hotels = makcorpsResult.hotels.map((h: MakcorpsHotel) => ({
+                id: `makcorps_${h.hotelId}`,
+                placeId: `makcorps_${h.hotelId}`,
+                name: h.name,
+                address: null,
+                city: areaName,
+                region: areaName,
+                country: destination,
+                lat: h.latitude,
+                lng: h.longitude,
+                googleRating: h.rating || 4.0,
+                reviewCount: h.reviewCount || 0,
+                priceLevel: h.cheapestPrice < 100 ? 1 : h.cheapestPrice < 200 ? 2 : h.cheapestPrice < 400 ? 3 : 4,
+                // Real pricing from Makcorps
+                makcorpsPrice: h.cheapestPrice,
+                makcorpsVendor: h.cheapestVendor,
+                makcorpsPrices: h.prices,
+                photoReference: null,
+              }));
+
+              // Apply budget filter to Makcorps results
+              if (preferences.budgetMax && preferences.budgetMax < 10000) {
+                hotels = hotels.filter((h: any) => h.makcorpsPrice <= preferences.budgetMax!);
+              }
+              if (preferences.budgetMin && preferences.budgetMin > 0) {
+                hotels = hotels.filter((h: any) => h.makcorpsPrice >= preferences.budgetMin!);
+              }
+
+              // Apply rating filter
+              const minRating = preferences.minRating || 4.0;
+              hotels = hotels.filter((h: any) => (h.googleRating || 0) >= minRating);
+
+              // Sort by rating
+              hotels.sort((a: any, b: any) => (b.googleRating || 0) - (a.googleRating || 0));
+
+              usedMakcorps = true;
+              console.log(`[Hotels API] MAKCORPS: ${hotels.length} hotels after filtering`);
+            }
+          }
+        } catch (makcorpsError) {
+          console.error(`[Hotels API] Makcorps failed for ${areaName}, falling back to DB:`, makcorpsError);
+        }
+      }
+
+      // =================================================================
+      // FALLBACK: Only use database if Makcorps didn't return results
+      // =================================================================
+      if (!usedMakcorps || hotels.length < 3) {
+        console.log(`[Hotels API] Using database fallback for ${areaName} (Makcorps: ${usedMakcorps}, hotels: ${hotels.length})`);
+
+        try {
+          // Query DB - FIRST try area-specific match, THEN fallback to country
+          const dbHotels = await prisma.hotel.findMany({
+            where: {
+              AND: [
+                { country: { contains: destination } },
+                {
+                  OR: [
+                    { region: { contains: areaName } },
+                    { city: { contains: areaName } },
+                  ],
+                },
+                priceLevelFilter,
+              ],
+              googleRating: { gte: preferences.minRating || 4.0 },
+            },
+            orderBy: [
+              { googleRating: 'desc' },
+              { reviewCount: 'desc' },
             ],
-            googleRating: { gte: preferences.minRating || 4.0 },
-          },
-          orderBy: [
-            { googleRating: 'desc' },
-            { reviewCount: 'desc' },
-          ],
-          take: 15,
-        });
-        console.log(`[Hotels API] Area-specific query for ${areaName}: found ${hotels.length} hotels`);
-      } catch (dbError: any) {
-        console.warn(`[Hotels API] Database unavailable, using Google search only: ${dbError.message?.slice(0, 100)}`);
-        dbAvailable = false;
+            take: 15,
+          });
+          console.log(`[Hotels API] DB query for ${areaName}: found ${dbHotels.length} hotels`);
+
+          // Merge DB hotels with any Makcorps results (avoid duplicates by name)
+          const existingNames = new Set(hotels.map((h: any) => h.name.toLowerCase()));
+          for (const dbHotel of dbHotels) {
+            if (!existingNames.has(dbHotel.name.toLowerCase())) {
+              hotels.push(dbHotel);
+            }
+          }
+        } catch (dbError: any) {
+          console.warn(`[Hotels API] Database unavailable: ${dbError.message?.slice(0, 100)}`);
+          dbAvailable = false;
+        }
       }
 
       // Determine if we need luxury or backpacker search
@@ -694,65 +706,33 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Auto-index if needed (skip if DB unavailable)
+      // =================================================================
+      // PHASE 1 FIX: Background indexing ONLY - NEVER block the response
+      // =================================================================
       const lastIndexed = indexingTimestamps.get(cacheKey) || 0;
       const cooldownPassed = Date.now() - lastIndexed > INDEXING_COOLDOWN_MS;
 
-      // Trigger indexing - AWAIT if no hotels found, otherwise run in background
-      if (hotels.length < MIN_HOTELS_THRESHOLD && cooldownPassed && !indexingInProgress.has(cacheKey)) {
+      // Trigger BACKGROUND indexing for future requests - NEVER await
+      if (hotels.length < MIN_HOTELS_THRESHOLD && cooldownPassed && !indexingInProgress.has(cacheKey) && dbAvailable) {
         indexingInProgress.add(cacheKey);
         indexingTimestamps.set(cacheKey, Date.now());
 
-        const shouldAwait = hotels.length === 0; // Block if we have NO hotels
-        console.log(`[Hotels API] Triggering ${shouldAwait ? 'SYNC' : 'background'} indexing for ${areaName}`);
+        console.log(`[Hotels API] Triggering BACKGROUND indexing for ${areaName} (will not block response)`);
 
-        const indexPromise = indexHotelsForArea(
+        // Fire-and-forget - DO NOT await this promise
+        indexHotelsForArea(
           areaName,
           destination,
           coordinates?.lat || null,
           coordinates?.lng || null
-        ).then(async (indexedCount) => {
-          console.log(`[Hotels API] Indexing complete for ${areaName}: ${indexedCount} hotels`);
-
-          // If we awaited, re-query the database
-          if (shouldAwait && indexedCount > 0) {
-            const newHotels = await prisma.hotel.findMany({
-              where: {
-                AND: [
-                  { country: { contains: destination } },
-                  {
-                    OR: [
-                      { region: { contains: areaName } },
-                      { city: { contains: areaName } },
-                    ],
-                  },
-                ],
-                googleRating: { gte: preferences.minRating || 4.0 },
-              },
-              orderBy: [
-                { googleRating: 'desc' },
-                { reviewCount: 'desc' },
-              ],
-              take: 15,
-            });
-            return newHotels;
-          }
-          return null;
+        ).then((indexedCount) => {
+          console.log(`[Hotels API] Background indexing complete for ${areaName}: ${indexedCount} hotels`);
         }).catch((e) => {
-          console.error(`[Hotels API] Indexing failed for ${areaName}:`, e);
-          return null;
+          console.error(`[Hotels API] Background indexing failed for ${areaName}:`, e);
         }).finally(() => {
           indexingInProgress.delete(cacheKey);
         });
-
-        // If we have NO hotels, wait for indexing to complete
-        if (shouldAwait) {
-          const newHotels = await indexPromise;
-          if (newHotels && newHotels.length > 0) {
-            hotels = newHotels;
-            console.log(`[Hotels API] After sync indexing for ${areaName}: ${hotels.length} hotels`);
-          }
-        }
+        // NOTE: We intentionally do NOT await - response returns immediately
       }
 
       // Filter hotels based on various preferences
@@ -845,18 +825,37 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      results[areaId] = filteredHotels.map((hotel) => {
-        // Estimate price from Google price_level (1-4 scale) or star rating
+      // Map hotels to response format and return with areaId for parallel collection
+      const mappedHotels = filteredHotels.map((hotel) => {
         const starRating = getStarRating(hotel.name);
-        const estimatedPrice = hotel.priceLevel
-          ? Math.round(hotel.priceLevel * 75 + 50 + (starRating * 20))
-          : Math.round(starRating * 50 + 80); // Fallback: estimate from star rating
+
+        // PHASE 1 FIX: Use real Makcorps price if available, otherwise estimate
+        const hasMakcorpsPrice = hotel.makcorpsPrice && hotel.makcorpsPrice > 0;
+        const pricePerNight = hasMakcorpsPrice
+          ? hotel.makcorpsPrice
+          : hotel.priceLevel
+            ? Math.round(hotel.priceLevel * 75 + 50 + (starRating * 20))
+            : Math.round(starRating * 50 + 80);
+
+        const priceConfidence = hasMakcorpsPrice ? 'real' as const : (hotel.priceLevel ? 'estimated' as const : 'rough' as const);
+        const priceSource = hasMakcorpsPrice ? 'makcorps' as const : (hotel.priceLevel ? 'google' as const : 'estimate' as const);
 
         // Get Reddit data for this hotel
         const redditData = redditHotels.get(hotel.name.toLowerCase());
 
         // Get accessibility info
         const accessibility = estimateAccessibility(hotel.name);
+
+        // Build price comparison if Makcorps data available
+        const priceComparison = hasMakcorpsPrice && hotel.makcorpsPrices?.length > 0
+          ? {
+              cheapest: { vendor: hotel.makcorpsVendor, price: hotel.makcorpsPrice },
+              alternatives: hotel.makcorpsPrices.slice(1, 4).map((p: any) => ({
+                vendor: p.vendor,
+                price: p.price,
+              })),
+            }
+          : undefined;
 
         return {
           id: hotel.id,
@@ -871,16 +870,17 @@ export async function POST(request: NextRequest) {
           googleRating: hotel.googleRating || 0,
           reviewCount: hotel.reviewCount || 0,
           stars: getStarRating(hotel.name),
-          pricePerNight: estimatedPrice,
+          pricePerNight,
           totalPrice: null,
           currency: 'USD',
-          priceConfidence: hotel.priceLevel ? 'estimated' as const : 'rough' as const,
-          priceSource: hotel.priceLevel ? 'google' as const : 'estimate' as const,
+          priceConfidence,
+          priceSource,
+          priceComparison,
           isAdultsOnly: false,
           isAllInclusive: hotel.name.toLowerCase().includes('all inclusive'),
           amenities: generateAmenities(hotel.name),
           imageUrl: hotel.photoReference
-            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${hotel.photoReference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+            ? `/api/photo-proxy?ref=${encodeURIComponent(hotel.photoReference)}&maxwidth=400`
             : '/images/hotel-placeholder.svg',
           redditScore: redditData?.mentions || 0,
           overallScore: calculateOverallScore(hotel, redditData?.mentions || 0),
@@ -915,77 +915,83 @@ export async function POST(request: NextRequest) {
             : undefined,
         };
       });
+
+      return { areaId, hotels: mappedHotels };
+    }));
+
+    // Collect results from parallel execution
+    for (const { areaId, hotels } of areaResults) {
+      results[areaId] = hotels;
     }
 
-    // Fetch real prices from Makcorps if dates are available
+    // Fetch real prices from Makcorps for DB fallback hotels that don't have prices yet
     if (checkIn && checkOut) {
-      console.log('[Hotels API] Fetching real prices from Makcorps...');
-
-      // Group hotels by area for efficient city-based pricing
+      // Only process hotels that DON'T already have Makcorps prices (from PRIMARY source)
       const hotelsByArea: Record<string, Array<{ name: string; index: number }>> = {};
+      let needsPricing = 0;
+
       for (const [areaId, hotels] of Object.entries(results)) {
-        hotelsByArea[areaId] = hotels.map((hotel, index) => ({
-          name: hotel.name,
-          index,
-        }));
+        const unpricedHotels = hotels
+          .map((hotel, index) => ({ name: hotel.name, index, priceSource: hotel.priceSource }))
+          .filter(h => h.priceSource !== 'makcorps');
+
+        if (unpricedHotels.length > 0) {
+          hotelsByArea[areaId] = unpricedHotels;
+          needsPricing += unpricedHotels.length;
+        }
       }
 
-      try {
-        // Use city-based API for each area (much more efficient)
-        // This fetches ~60 hotels per city in just 2-3 API calls instead of 2 calls per hotel
-        for (const [areaId, hotels] of Object.entries(hotelsByArea)) {
-          const areaName = areaId.replace(/-/g, ' ');
-          const hotelNames = hotels.map(h => h.name);
+      // Skip if all hotels already have Makcorps prices
+      if (needsPricing === 0) {
+        console.log('[Hotels API] All hotels already have Makcorps prices from PRIMARY source');
+      } else {
+        console.log(`[Hotels API] Fetching Makcorps prices for ${needsPricing} DB fallback hotels...`);
 
-          console.log(`[Hotels API] Fetching Makcorps prices for ${areaName} (${hotelNames.length} hotels)`);
+        try {
+          for (const [areaId, hotels] of Object.entries(hotelsByArea)) {
+            const areaName = areaId.replace(/-/g, ' ');
+            const hotelNames = hotels.map(h => h.name);
 
-          const priceMap = await getBatchPricingByCity(
-            areaName,
-            destination,
-            hotelNames,
-            checkIn,
-            checkOut,
-            adults || 2
-          );
+            const priceMap = await getBatchPricingByCity(
+              areaName,
+              destination,
+              hotelNames,
+              checkIn,
+              checkOut,
+              adults || 2
+            );
 
-          // Update results with real prices
-          let matchedCount = 0;
-          for (const hotel of hotels) {
-            const priceKey = hotel.name.toLowerCase();
-            const priceData = priceMap.get(priceKey);
+            let matchedCount = 0;
+            for (const hotel of hotels) {
+              const priceKey = hotel.name.toLowerCase();
+              const priceData = priceMap.get(priceKey);
 
-            if (priceData && results[areaId]?.[hotel.index]) {
-              const hotelEntry = results[areaId][hotel.index];
-              hotelEntry.pricePerNight = priceData.price;
-              hotelEntry.priceConfidence = 'real';
-              hotelEntry.priceSource = 'makcorps';
-              (hotelEntry as any).priceComparison = {
-                cheapest: { vendor: priceData.vendor, price: priceData.price },
-                alternatives: priceData.allPrices.slice(1, 4).map(p => ({
-                  vendor: p.vendor,
-                  price: p.price,
-                })),
-              };
-              matchedCount++;
+              if (priceData && results[areaId]?.[hotel.index]) {
+                const hotelEntry = results[areaId][hotel.index];
+                hotelEntry.pricePerNight = priceData.price;
+                hotelEntry.priceConfidence = 'real';
+                hotelEntry.priceSource = 'makcorps';
+                (hotelEntry as any).priceComparison = {
+                  cheapest: { vendor: priceData.vendor, price: priceData.price },
+                  alternatives: priceData.allPrices.slice(1, 4).map(p => ({
+                    vendor: p.vendor,
+                    price: p.price,
+                  })),
+                };
+                matchedCount++;
+              }
             }
+
+            console.log(`[Hotels API] Matched ${matchedCount}/${hotels.length} DB fallback hotels for ${areaName}`);
           }
-
-          console.log(`[Hotels API] Matched ${matchedCount}/${hotels.length} hotels with Makcorps prices for ${areaName}`);
+        } catch (e) {
+          console.error('[Hotels API] Makcorps pricing for fallback hotels failed:', e);
         }
-
-        // Note: Individual hotel fallback disabled - Makcorps /mapping endpoint is currently broken
-        // The city-based approach above is more efficient anyway (60 hotels in 2-3 calls vs 2 calls per hotel)
-        const unpricedCount = Object.values(results).flat().filter(h => h.priceSource !== 'makcorps').length;
-        if (unpricedCount > 0) {
-          console.log(`[Hotels API] ${unpricedCount} hotels without Makcorps prices (will use estimates)`);
-        }
-
-        const totalPriced = Object.values(results).flat().filter(h => h.priceSource === 'makcorps').length;
-        const totalHotels = Object.values(results).flat().length;
-        console.log(`[Hotels API] Total: ${totalPriced}/${totalHotels} hotels with real prices`);
-      } catch (e) {
-        console.error('[Hotels API] Makcorps pricing failed:', e);
       }
+
+      const totalPriced = Object.values(results).flat().filter(h => h.priceSource === 'makcorps').length;
+      const totalHotels = Object.values(results).flat().length;
+      console.log(`[Hotels API] Final: ${totalPriced}/${totalHotels} hotels with real Makcorps prices`);
     }
 
     // For large groups, add room calculations to each hotel
@@ -1002,7 +1008,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       hotelsByArea: results,
       totalCount: Object.values(results).reduce((sum, arr) => sum + arr.length, 0),
       partyInfo: isLargeGroup ? {
@@ -1014,10 +1020,35 @@ export async function POST(request: NextRequest) {
           : 'For your group size, you may want to book connecting rooms or a suite.',
       } : undefined,
     });
+
+    // Add cache headers - hotel search with dates is user-specific but can still be cached briefly
+    // Use shorter cache for POST requests with real-time pricing
+    response.headers.set('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=300');
+    return response;
   } catch (error) {
-    console.error('Batch hotels fetch error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Batch hotels POST fetch error:', errorMessage, error);
+
+    // Check for specific error types
+    if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
+      return NextResponse.json(
+        {
+          error: 'TIMEOUT_ERROR',
+          message: 'The hotel search took too long. Please try again.',
+          hotelsByArea: {},
+          totalCount: 0,
+        },
+        { status: 504 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'Failed to fetch hotels' },
+      {
+        error: 'FETCH_ERROR',
+        message: 'We had trouble finding hotels. Please try again.',
+        hotelsByArea: {},
+        totalCount: 0,
+      },
       { status: 500 }
     );
   }

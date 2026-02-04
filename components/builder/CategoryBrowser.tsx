@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
-import type { CollectionItem } from '@/stores/tripStoreV2';
+import { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
+import { useTripStore } from '@/stores/tripStore';
+import type { CollectionItem } from '@/stores/tripStore';
 import {
   Search,
   MapPin,
@@ -14,9 +15,24 @@ import {
   ArrowUp,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { handleImageError, getPlaceholderImage } from '@/lib/utils';
 import { getSubredditsForDestination, isGlobalSubreddit, getGlobalSubredditColor } from '@/lib/data/subredditMapping';
 import { ALL_CATEGORIES, getCategoriesForDestination } from '@/lib/data/categories';
-import PlaceDetailModal from './PlaceDetailModal';
+
+// Dynamic import for PlaceDetailModal - reduces initial bundle size
+const PlaceDetailModal = dynamic(
+  () => import('./PlaceDetailModal'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-8">
+          <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+        </div>
+      </div>
+    ),
+  }
+);
 
 interface PlaceResult {
   id: string;
@@ -43,7 +59,7 @@ interface PlaceResult {
 }
 
 export default function CategoryBrowser() {
-  const { trip, addToCollection } = useTripStoreV2();
+  const { trip, addToCollection } = useTripStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [places, setPlaces] = useState<PlaceResult[]>([]);
@@ -54,7 +70,8 @@ export default function CategoryBrowser() {
   // Subreddit selection state
   const [availableSubreddits, setAvailableSubreddits] = useState<string[]>([]);
   const [selectedSubreddits, setSelectedSubreddits] = useState<Set<string>>(new Set());
-  const [useRedditFirst, setUseRedditFirst] = useState(true);
+  // useRedditFirst controls search priority - currently always true
+  const [useRedditFirst] = useState(true);
 
   // Get current destination for search
   const activeDestination = trip.destinations.find(
@@ -88,14 +105,7 @@ export default function CategoryBrowser() {
     });
   };
 
-  // Fetch places when category selected
-  useEffect(() => {
-    if (selectedCategory && activeDestination) {
-      fetchPlaces();
-    }
-  }, [selectedCategory, activeDestination?.destinationId]);
-
-  const fetchPlaces = async () => {
+  const fetchPlaces = useCallback(async () => {
     if (!activeDestination) return;
 
     setIsLoading(true);
@@ -161,7 +171,14 @@ export default function CategoryBrowser() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [activeDestination, selectedCategory, searchQuery, useRedditFirst, selectedSubreddits, destinationName]);
+
+  // Fetch places when category selected
+  useEffect(() => {
+    if (selectedCategory && activeDestination) {
+      fetchPlaces();
+    }
+  }, [selectedCategory, activeDestination, fetchPlaces]);
 
   const handleSearch = () => {
     if (searchQuery.trim()) {
@@ -317,19 +334,13 @@ export default function CategoryBrowser() {
                       : "bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 hover:border-slate-200 dark:hover:border-slate-600 hover:shadow-md"
                   )}
                 >
-                  {/* Image with Unsplash fallback */}
+                  {/* Image with placeholder fallback */}
                   <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-slate-100 dark:bg-slate-700">
                     <img
-                      src={place.imageUrl || `https://source.unsplash.com/100x100/?${encodeURIComponent(selectedCategory || 'travel')}`}
+                      src={place.imageUrl || getPlaceholderImage('generic')}
                       alt={place.name}
                       className="w-full h-full object-cover"
-                      onError={(e) => {
-                        const img = e.target as HTMLImageElement;
-                        // Try Unsplash fallback with place name
-                        if (!img.src.includes('unsplash.com')) {
-                          img.src = `https://source.unsplash.com/100x100/?${encodeURIComponent(place.name || selectedCategory || 'restaurant')}`;
-                        }
-                      }}
+                      onError={(e) => handleImageError(e, 'generic')}
                     />
                   </div>
 

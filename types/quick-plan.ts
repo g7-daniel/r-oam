@@ -200,7 +200,11 @@ export interface TripPreferences {
   tripOccasion?: TripOccasion;
 
   // Pets
+  hasPets?: boolean; // Quick flag if traveling with pets
   travelingWithPets?: PetInfo;
+
+  // Accessibility
+  hasAccessibilityNeeds?: boolean; // Quick flag if accessibility is needed
 
   // Budget
   budgetPerNight: { min: number; max: number };
@@ -1045,7 +1049,7 @@ export interface OrchestratorState {
     hotels: Map<string, HotelCandidate[]>; // by area
     activities: VerifiedActivity[];
     restaurants: Map<string, RestaurantCandidate[]>; // by cuisine type
-    experiences: Map<string, any[]>; // by activity type
+    experiences: Map<string, VerifiedActivity[]>; // by activity type
   };
 
   // Chat state
@@ -1097,6 +1101,7 @@ export interface ReplyCardConfig {
   min?: number;
   max?: number;
   step?: number;
+  defaultValue?: number;
   labels?: Record<number, string>;
   maxMeansUnlimited?: boolean; // When true, max value means "X or more"
 

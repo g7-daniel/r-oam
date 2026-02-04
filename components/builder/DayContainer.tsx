@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Droppable } from '@hello-pangea/dnd';
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import ScheduledItem from './ScheduledItem';
 import AddPlaceSearch from './AddPlaceSearch';
 import {
@@ -15,9 +15,9 @@ import {
   Plane,
   Building2,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import clsx from 'clsx';
-import type { CollectionItem } from '@/stores/tripStoreV2';
+import type { CollectionItem } from '@/stores/tripStore';
 
 interface DayContainerProps {
   dayIndex: number;
@@ -48,7 +48,7 @@ export default function DayContainer({
   destinationId,
   hotelName,
 }: DayContainerProps) {
-  const { optimizeDay, autoFillDay } = useTripStoreV2();
+  const { optimizeDay, autoFillDay } = useTripStore();
   const [showAddPlace, setShowAddPlace] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
 
@@ -101,7 +101,7 @@ export default function DayContainer({
               <span className="font-semibold text-sm sm:text-base text-slate-900 dark:text-white">Day {dayNumber}</span>
               {date && (
                 <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 truncate">
-                  <span className="hidden sm:inline">- </span>{format(date, 'EEE, MMM d')}
+                  <span className="hidden sm:inline">- </span>{formatDate(date, 'medium')}
                 </span>
               )}
             </div>

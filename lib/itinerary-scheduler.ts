@@ -1,4 +1,5 @@
 import type { TripLeg, Experience, ItineraryDay, ItineraryItem } from '@/types';
+import { calculateHaversineDistance } from '@/lib/utils/geo';
 
 // Parse ISO 8601 duration string (e.g., "PT2H30M") to minutes
 function parseDurationToMinutes(duration: string | number | undefined): number {
@@ -56,25 +57,8 @@ function estimateTransitTime(distanceKm: number): number {
   return 60 + Math.floor((distanceKm - 30) * 1.5);
 }
 
-// Calculate distance between two coordinates using Haversine formula
-function calculateDistance(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
-  const R = 6371; // Earth's radius in km
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
+// Use centralized Haversine implementation from geo utils
+const calculateDistance = calculateHaversineDistance;
 
 // Get duration for an experience based on its category
 function getExperienceDuration(experience: Experience): number {

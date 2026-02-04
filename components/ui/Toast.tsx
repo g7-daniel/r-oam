@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, createContext, useContext, useCallback } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, XCircle, AlertCircle, Info, X } from 'lucide-react';
 
@@ -34,9 +34,25 @@ export function useToast() {
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Track timeout IDs for cleanup
+  const timeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  // Cleanup all timeouts on unmount
+  useEffect(() => {
+    return () => {
+      timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+      timeoutRefs.current.clear();
+    };
+  }, []);
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+    // Clear the timeout reference when toast is removed
+    const timeout = timeoutRefs.current.get(id);
+    if (timeout) {
+      clearTimeout(timeout);
+      timeoutRefs.current.delete(id);
+    }
   }, []);
 
   const showToast = useCallback((toast: Omit<Toast, 'id'>) => {
@@ -44,9 +60,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const newToast = { ...toast, id };
     setToasts((prev) => [...prev, newToast]);
 
-    // Auto-remove after duration
+    // Auto-remove after duration with cleanup tracking
     const duration = toast.duration || (toast.type === 'error' ? 6000 : 4000);
-    setTimeout(() => removeToast(id), duration);
+    const timeoutId = setTimeout(() => {
+      removeToast(id);
+    }, duration);
+    timeoutRefs.current.set(id, timeoutId);
   }, [removeToast]);
 
   const success = useCallback((title: string, message?: string) => {
@@ -81,7 +100,12 @@ function ToastContainer({
   onRemove: (id: string) => void;
 }) {
   return (
-    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-[90vw] sm:max-w-sm">
+    <div
+      className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-[90vw] sm:max-w-sm"
+      role="status"
+      aria-live="polite"
+      aria-label="Notifications"
+    >
       <AnimatePresence>
         {toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} onRemove={onRemove} />
@@ -127,6 +151,8 @@ function ToastItem({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, x: 100, scale: 0.9 }}
       className={`${colors[toast.type]} border rounded-xl p-4 shadow-lg flex items-start gap-3`}
+      role={toast.type === 'error' ? 'alert' : 'status'}
+      aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
     >
       <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${iconColors[toast.type]}`} />
       <div className="flex-1 min-w-0">

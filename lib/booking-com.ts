@@ -4,17 +4,23 @@
  */
 
 import { fetchWithTimeout } from './api-cache';
+import { isConfigured } from './env';
 
 const RAPIDAPI_HOST = 'booking-com15.p.rapidapi.com';
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '';
+// Use lazy evaluation to avoid issues during module load
+const getRapidApiKey = () => process.env.RAPIDAPI_KEY || '';
 const BASE_URL = `https://${RAPIDAPI_HOST}/api/v1`;
 const BOOKING_TIMEOUT = 15000; // 15 second timeout
 
-// Debug: Log if key is configured
-if (!RAPIDAPI_KEY) {
-  console.warn('WARNING: RAPIDAPI_KEY is not configured - Booking.com pricing will not work');
-} else {
-  console.log(`Booking.com API configured (key: ${RAPIDAPI_KEY.substring(0, 10)}...)`);
+// Log configuration status on first use (not at module load)
+let configLogged = false;
+function logConfigStatus() {
+  if (configLogged) return;
+  configLogged = true;
+
+  if (!isConfigured.rapidApi()) {
+    console.warn('WARNING: RAPIDAPI_KEY is not configured - Booking.com pricing will not work. Set it in .env.local');
+  }
 }
 
 interface BookingHotelSearchResult {
@@ -67,8 +73,10 @@ interface HotelPriceResult {
 }
 
 async function fetchBookingAPI<T>(endpoint: string, params: Record<string, string>): Promise<T | null> {
-  if (!RAPIDAPI_KEY) {
-    console.error('RAPIDAPI_KEY not configured');
+  logConfigStatus();
+
+  if (!isConfigured.rapidApi()) {
+    console.error('RAPIDAPI_KEY not configured. Set it in .env.local');
     return null;
   }
 
@@ -80,7 +88,7 @@ async function fetchBookingAPI<T>(endpoint: string, params: Record<string, strin
       method: 'GET',
       headers: {
         'x-rapidapi-host': RAPIDAPI_HOST,
-        'x-rapidapi-key': RAPIDAPI_KEY,
+        'x-rapidapi-key': getRapidApiKey(),
       },
     }, BOOKING_TIMEOUT);
 
@@ -193,10 +201,14 @@ export async function getHotelPricing(
     };
   }
 
-  // Get cheapest room price
-  const cheapestRoom = hotel.block[0];
-  const priceBreakdown = cheapestRoom?.product_price_breakdown;
+  // Get cheapest room price - with extra safety check
+  const cheapestRoom = hotel.block?.[0];
+  if (!cheapestRoom) {
+    console.warn('Booking.com: block exists but no rooms available');
+    return null;
+  }
 
+  const priceBreakdown = cheapestRoom.product_price_breakdown;
   if (!priceBreakdown?.gross_amount_per_night?.value) {
     return null;
   }

@@ -115,49 +115,123 @@ async function searchPlace(query: string, type?: string): Promise<PlaceDetails[]
 }
 
 export async function GET(request: NextRequest) {
-  const params = request.nextUrl.searchParams;
-  const placeId = params.get('placeId');
-  const query = params.get('query');
-  const type = params.get('type') || undefined;
+  const context = 'Validate Place API - GET';
 
-  // Validate by place ID
-  if (placeId) {
-    const details = await getPlaceDetails(placeId);
+  try {
+    const params = request.nextUrl.searchParams;
+    const placeId = params.get('placeId');
+    const query = params.get('query');
+    const type = params.get('type') || undefined;
 
-    if (!details) {
-      return NextResponse.json(
-        { isValid: false, error: 'Place not found or invalid' },
-        { status: 404 }
-      );
+    // Validate by place ID
+    if (placeId) {
+      const details = await getPlaceDetails(placeId);
+
+      if (!details) {
+        return NextResponse.json(
+          {
+            isValid: false,
+            error: 'NOT_FOUND',
+            message: 'The place could not be found. It may have been removed or the ID is invalid.',
+          },
+          { status: 404 }
+        );
+      }
+
+      const response = NextResponse.json(details);
+      // Place details are relatively static - cache for 24 hours
+      response.headers.set('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=172800');
+      return response;
     }
 
-    return NextResponse.json(details);
+    // Search by query
+    if (query) {
+      if (query.trim().length < 2) {
+        return NextResponse.json(
+          {
+            error: 'VALIDATION_ERROR',
+            message: 'Search query must be at least 2 characters long.',
+          },
+          { status: 400 }
+        );
+      }
+
+      const results = await searchPlace(query, type);
+
+      const response = NextResponse.json({
+        results,
+        count: results.length,
+        success: true,
+      });
+      // Search results can be cached for 1 hour
+      response.headers.set('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=7200');
+      return response;
+    }
+
+    return NextResponse.json(
+      {
+        error: 'VALIDATION_ERROR',
+        message: 'Please provide either a placeId or a search query.',
+      },
+      { status: 400 }
+    );
+  } catch (error) {
+    console.error(`[${context}] Error:`, error);
+    return NextResponse.json(
+      {
+        error: 'INTERNAL_ERROR',
+        message: 'Unable to validate place. Please try again.',
+      },
+      { status: 500 }
+    );
   }
-
-  // Search by query
-  if (query) {
-    const results = await searchPlace(query, type);
-
-    return NextResponse.json({
-      results,
-      count: results.length,
-    });
-  }
-
-  return NextResponse.json(
-    { error: 'Either placeId or query parameter is required' },
-    { status: 400 }
-  );
 }
 
 export async function POST(request: NextRequest) {
+  const context = 'Validate Place API - POST';
+
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      return NextResponse.json(
+        {
+          error: 'VALIDATION_ERROR',
+          message: 'Invalid request format. Please provide valid JSON.',
+        },
+        { status: 400 }
+      );
+    }
+
     const { placeIds } = body as { placeIds: string[] };
 
     if (!placeIds || !Array.isArray(placeIds)) {
       return NextResponse.json(
-        { error: 'placeIds array is required' },
+        {
+          error: 'VALIDATION_ERROR',
+          message: 'Please provide an array of place IDs to validate.',
+        },
+        { status: 400 }
+      );
+    }
+
+    if (placeIds.length === 0) {
+      return NextResponse.json(
+        {
+          error: 'VALIDATION_ERROR',
+          message: 'The place IDs array cannot be empty.',
+        },
+        { status: 400 }
+      );
+    }
+
+    if (placeIds.length > 50) {
+      return NextResponse.json(
+        {
+          error: 'VALIDATION_ERROR',
+          message: 'Maximum 50 place IDs can be validated at once.',
+        },
         { status: 400 }
       );
     }
@@ -165,26 +239,43 @@ export async function POST(request: NextRequest) {
     // Validate multiple place IDs in parallel
     const results = await Promise.all(
       placeIds.map(async (placeId) => {
-        const details = await getPlaceDetails(placeId);
-        return {
-          placeId,
-          isValid: !!details,
-          details,
-        };
+        try {
+          const details = await getPlaceDetails(placeId);
+          return {
+            placeId,
+            isValid: !!details,
+            details,
+          };
+        } catch (placeError) {
+          console.error(`[${context}] Error validating place ${placeId}:`, placeError);
+          return {
+            placeId,
+            isValid: false,
+            details: null,
+            error: 'Validation failed for this place',
+          };
+        }
       })
     );
 
     const validCount = results.filter(r => r.isValid).length;
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       results,
       validCount,
       totalCount: placeIds.length,
+      success: true,
     });
+    // Batch validation can be cached briefly
+    response.headers.set('Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=3600');
+    return response;
   } catch (error) {
-    console.error('Batch validation error:', error);
+    console.error(`[${context}] Error:`, error);
     return NextResponse.json(
-      { error: 'Validation failed' },
+      {
+        error: 'INTERNAL_ERROR',
+        message: 'Unable to validate places. Please try again.',
+      },
       { status: 500 }
     );
   }

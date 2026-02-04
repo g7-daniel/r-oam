@@ -1,6 +1,6 @@
 'use client';
 
-import { useTripStoreV2 } from '@/stores/tripStoreV2';
+import { useTripStore } from '@/stores/tripStore';
 import Card from '@/components/ui/Card';
 import {
   CheckCircle2,
@@ -11,14 +11,12 @@ import {
   Sparkles,
   MapPin,
   Calendar,
-  Users,
   DollarSign,
-  Star,
 } from 'lucide-react';
 import clsx from 'clsx';
 
 export default function Step8Review() {
-  const { trip, getTotalBudgetSpent, getRemainingBudget } = useTripStoreV2();
+  const { trip, getTotalBudgetSpent, getRemainingBudget } = useTripStore();
   const { basics, destinations, flights } = trip;
 
   const spent = getTotalBudgetSpent();

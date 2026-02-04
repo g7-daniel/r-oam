@@ -1,6 +1,6 @@
 'use client';
 
-import { MapPin, Check, MessageCircle } from 'lucide-react';
+import { MapPin, Check } from 'lucide-react';
 import type { LocationSuggestion } from '@/types';
 import clsx from 'clsx';
 
@@ -19,10 +19,10 @@ export default function SuggestionCard({
     <div
       onClick={onSelect}
       className={clsx(
-        'relative p-4 rounded-xl border-2 cursor-pointer transition-all',
+        'relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all min-h-[44px]',
         isSelected
-          ? 'border-teal-500 bg-teal-50 shadow-md'
-          : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+          ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20 shadow-md'
+          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-sm'
       )}
     >
       {/* Selection indicator */}
@@ -34,57 +34,62 @@ export default function SuggestionCard({
 
       {/* Header */}
       <div className="flex items-start justify-between mb-2">
-        <div>
-          <h4 className="font-semibold text-slate-800">{suggestion.name}</h4>
-          <div className="flex items-center gap-1 text-sm text-slate-500">
-            <MapPin className="w-3 h-3" />
-            <span className="capitalize">{suggestion.type}</span>
+        <div className="min-w-0 flex-1 pr-2">
+          <h4 className="font-semibold text-sm sm:text-base text-slate-800 dark:text-white truncate">{suggestion.name}</h4>
+          <div className="flex items-center gap-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+            <MapPin className="w-3 h-3 flex-shrink-0" />
+            <span className="capitalize truncate">{suggestion.type}</span>
           </div>
         </div>
         {suggestion.imageUrl && (
           <img
             src={suggestion.imageUrl}
             alt={suggestion.name}
-            className="w-12 h-12 rounded-lg object-cover"
+            className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg object-cover flex-shrink-0"
           />
         )}
       </div>
 
       {/* Description */}
-      <p className="text-sm text-slate-600 mb-3">{suggestion.description}</p>
+      <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mb-3 line-clamp-2 sm:line-clamp-none">{suggestion.description}</p>
 
       {/* Reddit Quote */}
       {suggestion.redditQuote && (
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+        <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-2 sm:p-3">
           <div className="flex items-center gap-2 mb-1">
-            <div className="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center text-white text-xs font-bold">
+            <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-orange-500 flex items-center justify-center text-white text-[10px] sm:text-xs font-bold flex-shrink-0">
               r/
             </div>
-            <span className="text-xs text-orange-600 font-medium">
+            <span className="text-[10px] sm:text-xs text-orange-600 dark:text-orange-400 font-medium truncate">
               {suggestion.redditSubreddit}
             </span>
           </div>
-          <p className="text-sm text-slate-600 italic">
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 italic line-clamp-2 sm:line-clamp-none">
             "{suggestion.redditQuote}"
           </p>
         </div>
       )}
 
       {/* Tags */}
-      <div className="flex flex-wrap gap-1.5 mt-3">
-        {suggestion.recommendedFor.map((tag) => (
+      <div className="flex flex-wrap gap-1 sm:gap-1.5 mt-2 sm:mt-3">
+        {suggestion.recommendedFor.slice(0, 3).map((tag) => (
           <span
             key={tag}
             className={clsx(
-              'px-2 py-0.5 text-xs rounded-full capitalize',
+              'px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-xs rounded-full capitalize',
               isSelected
-                ? 'bg-teal-200 text-teal-700'
-                : 'bg-slate-100 text-slate-600'
+                ? 'bg-teal-200 dark:bg-teal-800 text-teal-700 dark:text-teal-300'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
             )}
           >
             {tag}
           </span>
         ))}
+        {suggestion.recommendedFor.length > 3 && (
+          <span className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500">
+            +{suggestion.recommendedFor.length - 3}
+          </span>
+        )}
       </div>
     </div>
   );

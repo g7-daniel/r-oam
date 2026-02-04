@@ -1,6 +1,10 @@
 import OpenAI from 'openai';
+import type { Stream } from 'openai/streaming';
+import { isConfigured } from './env';
 
 // Groq uses OpenAI-compatible API
+// Note: We use process.env directly here because this file may be imported
+// before env validation runs. The actual API calls check for the key.
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY || '',
   baseURL: 'https://api.groq.com/openai/v1',
@@ -11,6 +15,16 @@ export const GROQ_MODEL = 'llama-3.3-70b-versatile';
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+// Type for API error responses from OpenAI-compatible APIs
+interface ApiErrorResponse {
+  status?: number;
+  message?: string;
+  error?: {
+    message?: string;
+    code?: string;
+  };
 }
 
 export interface ExperienceRecommendation {
@@ -86,42 +100,135 @@ Remember: Focus on EXPERIENCES and ACTIVITIES, not hotels or logistics. That com
 }
 
 /**
+ * Custom error class for Groq API errors
+ */
+export class GroqApiError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+    public readonly statusCode?: number
+  ) {
+    super(message);
+    this.name = 'GroqApiError';
+  }
+}
+
+/**
  * Non-streaming chat completion
+ * @throws {GroqApiError} When API call fails or returns no content
  */
 export async function chatCompletion(
   messages: ChatMessage[],
   temperature: number = 0.7
 ): Promise<string> {
-  const response = await groq.chat.completions.create({
-    model: GROQ_MODEL,
-    messages,
-    temperature,
-    max_tokens: 1024,
-  });
+  if (!isConfigured.groq()) {
+    throw new GroqApiError(
+      'Groq API key not configured. Please set GROQ_API_KEY in your .env.local file.',
+      'NO_API_KEY'
+    );
+  }
 
-  return response.choices[0]?.message?.content || '';
+  try {
+    const response = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages,
+      temperature,
+      max_tokens: 1024,
+    });
+
+    const content = response.choices[0]?.message?.content;
+
+    if (!content) {
+      throw new GroqApiError(
+        'Groq API returned empty response',
+        'EMPTY_RESPONSE'
+      );
+    }
+
+    return content;
+  } catch (error) {
+    // Re-throw our custom errors
+    if (error instanceof GroqApiError) {
+      throw error;
+    }
+
+    // Handle OpenAI/Groq SDK errors with proper type checking
+    const apiError = error as ApiErrorResponse;
+    const status = apiError?.status;
+    const message = apiError?.message || apiError?.error?.message || 'Unknown error';
+
+    if (status === 429) {
+      throw new GroqApiError('Rate limit exceeded', 'RATE_LIMITED', 429);
+    }
+    if (status !== undefined && status >= 500) {
+      throw new GroqApiError('Groq service unavailable', 'SERVICE_ERROR', status);
+    }
+
+    throw new GroqApiError(
+      `Groq API error: ${message}`,
+      'API_ERROR',
+      status
+    );
+  }
 }
 
 /**
  * Streaming chat completion
+ * @throws {GroqApiError} When API call fails
  */
 export async function* streamChatCompletion(
   messages: ChatMessage[],
   temperature: number = 0.7
 ): AsyncGenerator<string> {
-  const stream = await groq.chat.completions.create({
-    model: GROQ_MODEL,
-    messages,
-    temperature,
-    max_tokens: 1024,
-    stream: true,
-  });
+  if (!isConfigured.groq()) {
+    throw new GroqApiError(
+      'Groq API key not configured. Please set GROQ_API_KEY in your .env.local file.',
+      'NO_API_KEY'
+    );
+  }
 
-  for await (const chunk of stream) {
-    const content = chunk.choices[0]?.delta?.content;
-    if (content) {
-      yield content;
+  try {
+    const stream = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages,
+      temperature,
+      max_tokens: 1024,
+      stream: true,
+    }) as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
+
+    let hasContent = false;
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        hasContent = true;
+        yield content;
+      }
     }
+
+    if (!hasContent) {
+      throw new GroqApiError('Groq API stream returned no content', 'EMPTY_STREAM');
+    }
+  } catch (error) {
+    // Re-throw our custom errors
+    if (error instanceof GroqApiError) {
+      throw error;
+    }
+
+    // Handle OpenAI/Groq SDK errors with proper type checking
+    const apiError = error as ApiErrorResponse;
+    const status = apiError?.status;
+    const message = apiError?.message || apiError?.error?.message || 'Unknown error';
+
+    if (status === 429) {
+      throw new GroqApiError('Rate limit exceeded', 'RATE_LIMITED', 429);
+    }
+
+    throw new GroqApiError(
+      `Groq streaming error: ${message}`,
+      'STREAM_ERROR',
+      status
+    );
   }
 }
 
@@ -148,7 +255,7 @@ export function parseRecommendations(response: string): ExperienceRecommendation
  * Check if Groq API is configured
  */
 export function isGroqConfigured(): boolean {
-  return !!process.env.GROQ_API_KEY;
+  return isConfigured.groq();
 }
 
 export default groq;
