@@ -1419,13 +1419,13 @@ function HotelDetailModal({
             />
           </div>
           <div className="hidden sm:flex aspect-[4/3] rounded-lg overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 items-center justify-center" role="img" aria-label="Additional hotel photo">
-            <div className="text-center text-slate-400 dark:text-slate-500">
+            <div className="text-center text-slate-400 dark:text-slate-400">
               <ImageIcon className="w-8 h-8 mx-auto mb-1" aria-hidden="true" />
               <span className="text-xs">More photos</span>
             </div>
           </div>
           <div className="hidden sm:block aspect-[4/3] rounded-lg overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 relative" role="img" aria-label="Additional hotel photo">
-            <div className="absolute inset-0 flex items-center justify-center text-slate-400 dark:text-slate-500">
+            <div className="absolute inset-0 flex items-center justify-center text-slate-400 dark:text-slate-400">
               <div className="text-center">
                 <ImageIcon className="w-8 h-8 mx-auto mb-1" aria-hidden="true" />
                 <span className="text-xs">Gallery</span>

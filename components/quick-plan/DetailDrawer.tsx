@@ -558,7 +558,7 @@ function EvidenceSection({ evidence, redditScore }: { evidence?: Evidence[]; red
           {redditEvidence.slice(0, 2).map((ev, i) => (
             <div key={i} className="border-l-2 border-orange-300 dark:border-orange-600 pl-3">
               <p className="text-sm text-slate-600 dark:text-slate-300 italic">"{ev.snippet}"</p>
-              <div className="flex items-center gap-2 mt-1 text-xs text-slate-400 dark:text-slate-500">
+              <div className="flex items-center gap-2 mt-1 text-xs text-slate-400 dark:text-slate-400">
                 {ev.subreddit && <span>r/{ev.subreddit}</span>}
                 {ev.score && <span>↑ {ev.score}</span>}
               </div>

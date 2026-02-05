@@ -541,7 +541,7 @@ function detectMultiCountry(destination: string): MultiCountryInfo {
     }
   }
 
-  // Try pattern matching - validate that matched items are actually countries
+  // Try pattern matching for 2-country combos
   for (const pattern of multiCountryPatterns) {
     const match = destination.match(pattern);
     if (match) {
@@ -567,6 +567,27 @@ function detectMultiCountry(destination: string): MultiCountryInfo {
           ],
         };
       }
+    }
+  }
+
+  // Try 3+ country patterns: "X, Y, and Z" or "X, Y, Z"
+  const listPattern = lower.split(/[,&]\s*|\s+and\s+|\s+then\s+/).map(s => s.trim()).filter(Boolean);
+  if (listPattern.length >= 3) {
+    const validCountries = listPattern.filter(c => knownCountries.has(c));
+    if (validCountries.length >= 3) {
+      const countries = validCountries.map(c =>
+        c.charAt(0).toUpperCase() + c.slice(1).toLowerCase()
+      );
+      return {
+        countries,
+        isMultiCountry: true,
+        logisticsTips: [
+          `Check visa requirements for all ${countries.length} countries`,
+          `Consider flight or train routes between ${countries.join(', ')}`,
+          'Book transport in advance for best prices',
+          'Consider an open-jaw flight to avoid backtracking',
+        ],
+      };
     }
   }
 
@@ -1286,13 +1307,16 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         }
       } else if (areas.length >= 3) {
         // Three+ areas - distribute evenly with remainder to last
-        const baseNights = Math.floor(tripLength / areas.length);
-        const extraNights = tripLength % areas.length;
+        // Limit areas to tripLength to ensure at least 1 night per area
+        const maxAreas = Math.min(areas.length, tripLength);
+        const effectiveAreas = areas.slice(0, maxAreas);
+        const baseNights = Math.floor(tripLength / effectiveAreas.length);
+        const extraNights = tripLength % effectiveAreas.length;
 
-        const evenStops = areas.map((area, idx) => ({
+        const evenStops = effectiveAreas.map((area, idx) => ({
           areaId: area.id,
           areaName: area.name,
-          nights: baseNights + (idx === areas.length - 1 ? extraNights : 0),
+          nights: Math.max(1, baseNights + (idx === effectiveAreas.length - 1 ? extraNights : 0)),
           area,
         }));
 
@@ -1301,21 +1325,21 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
           evenStops.map(s => `${s.nights}n ${s.areaName}`).join(' → '),
           evenStops,
           0.9,
-          areas
+          effectiveAreas
         ));
 
         // Option with more time in first area
         // Bug fix: ensure no area gets 0 nights - need at least 3*areas nights to redistribute
-        if (tripLength >= areas.length * 3) {
-          const focusStops = areas.map((area, idx) => ({
+        if (tripLength >= effectiveAreas.length * 3) {
+          const focusStops = effectiveAreas.map((area, idx) => ({
             areaId: area.id,
             areaName: area.name,
             // Give first area +2 nights, last area -1, redistribute remaining from middle
             nights: idx === 0
               ? baseNights + 2
-              : (idx === areas.length - 1
+              : (idx === effectiveAreas.length - 1
                   ? Math.max(1, baseNights + extraNights - 1)
-                  : Math.max(1, baseNights - Math.ceil(1 / (areas.length - 2)))),
+                  : Math.max(1, baseNights - Math.ceil(1 / (effectiveAreas.length - 2)))),
             area,
           }));
           // Verify all stops have at least 1 night
@@ -1326,7 +1350,7 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
               focusStops.map(s => `${s.nights}n ${s.areaName}`).join(' → '),
               focusStops,
               0.85,
-              areas
+              effectiveAreas
             ));
           }
         }
@@ -1918,7 +1942,12 @@ export class QuickPlanOrchestrator {
   reset(): void {
     this.state = this.createInitialState();
     this.debugLog = [];
-    console.log('[Orchestrator] Reset to initial state');
+    // Clear module-level caches so stale data doesn't bleed across sessions
+    activitySuggestionsCache.clear();
+    activitySuggestionsPending.clear();
+    subredditSuggestionsCache.clear();
+    subredditSuggestionsPending.clear();
+    console.log('[Orchestrator] Reset to initial state (caches cleared)');
   }
 
   // ============================================================================
@@ -1928,7 +1957,7 @@ export class QuickPlanOrchestrator {
   addMessage(message: Omit<ChatMessage, 'id' | 'timestamp'>): ChatMessage {
     const fullMessage: ChatMessage = {
       ...message,
-      id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
       timestamp: new Date(),
     };
     this.state.messages.push(fullMessage);
@@ -2094,6 +2123,19 @@ export class QuickPlanOrchestrator {
     // Clear current question to force re-evaluation
     this.state.currentQuestion = null;
 
+    // Revert phase if the target field belongs to an earlier phase.
+    // Enriching-phase fields are gated by `phase !== 'gathering'` in getMissingRequiredFields,
+    // so going back to a gathering field from a later phase requires reverting to gathering.
+    const ENRICHING_PHASE_FIELDS = [
+      'areas', 'split', 'hotelPreferences', 'hotels',
+      'dining', 'dietaryRestrictions', 'cuisinePreferences', 'restaurants', 'experiences',
+    ];
+    const targetIsGatheringField = !ENRICHING_PHASE_FIELDS.includes(previousField);
+    if (targetIsGatheringField && this.state.phase !== 'gathering') {
+      console.log('[Orchestrator] Reverting phase to gathering for go-back to:', previousField);
+      this.state.phase = 'gathering';
+    }
+
     this.log('orchestrator', `Went back to ${previousField}`, { from: currentField, to: previousField });
     return true;
   }
@@ -2244,6 +2286,9 @@ export class QuickPlanOrchestrator {
     // 1. Areas are complete AND
     // 2. User hasn't already selected a split AND
     // 3. There are 2+ areas (no need to split with just one area!)
+    // Track if we should treat the split as valid (includes auto-created single-area splits)
+    let hasSplitForHotelPrefs = hasValidUserSelectedSplit;
+
     if (areasComplete && !hasValidUserSelectedSplit && selectedAreasCount >= 2) {
       console.log('[getMissingRequiredFields] >>> ADDING SPLIT TO MISSING FIELDS <<<');
       missing.push('split');
@@ -2263,19 +2308,22 @@ export class QuickPlanOrchestrator {
           fitScore: 1.0,
         };
         console.log('[getMissingRequiredFields] Auto-created single-area split');
+        // Single-area auto-split counts as valid for hotelPreferences
+        hasSplitForHotelPrefs = true;
       }
     } else if (areasComplete && hasValidUserSelectedSplit) {
       console.log('[getMissingRequiredFields] User already selected split:', split?.name);
     }
 
-    // Hotel preferences required after split is selected
-    // IMPORTANT: Only ask hotelPreferences if user has EXPLICITLY selected a split (not auto-generated)
+    // Hotel preferences required after split is selected (or auto-created for single area)
+    // NOTE: Ask hotelPreferences if user selected a split OR if single-area auto-split was created
     const shouldAskHotelPrefs = this.state.confidence.areas === 'complete' &&
-        hasValidUserSelectedSplit &&
+        hasSplitForHotelPrefs &&
         !(this.state.preferences as any).hotelPreferences;
     console.log('[getMissingRequiredFields] HotelPreferences check:', {
       areasConfidence: this.state.confidence.areas,
       hasValidUserSelectedSplit,
+      hasSplitForHotelPrefs,
       hasHotelPreferences: !!(this.state.preferences as any).hotelPreferences,
       shouldAskHotelPrefs,
     });
@@ -2283,9 +2331,9 @@ export class QuickPlanOrchestrator {
       missing.push('hotelPreferences');
     }
 
-    // DEBUG: Warn if hotelPreferences is added without a valid user-selected split
-    if (!hasValidUserSelectedSplit && missing.includes('hotelPreferences')) {
-      console.error('[getMissingRequiredFields] BUG: hotelPreferences added without valid user-selected split!');
+    // DEBUG: Warn if hotelPreferences is added without a valid split
+    if (!hasSplitForHotelPrefs && missing.includes('hotelPreferences')) {
+      console.error('[getMissingRequiredFields] BUG: hotelPreferences added without valid split!');
     }
 
     // Hotels required after hotel preferences AND hotels have been fetched
@@ -2625,6 +2673,10 @@ export class QuickPlanOrchestrator {
         return FIELD_QUESTIONS.satisfaction ? await this.createQuestionConfig('satisfaction') : null;
       }
 
+      if (this.state.phase === 'reviewing') {
+        return FIELD_QUESTIONS.satisfaction ? await this.createQuestionConfig('satisfaction') : null;
+      }
+
       return null; // All done
     }
 
@@ -2925,8 +2977,8 @@ Respond with just the field name.`;
         this.setConfidence('party', 'inferred');
         break;
       case 'dining':
-        const inferredDining = value as { mode: string };
-        this.state.preferences.diningMode = inferredDining.mode as DiningMode;
+        const inferredDining = value as { id: string };
+        this.state.preferences.diningMode = inferredDining.id as DiningMode;
         this.setConfidence('dining', 'inferred');
         break;
     }
@@ -3258,8 +3310,8 @@ Respond with just the field name.`;
 
       case 'budget':
         const budget = response as { value: number; label: string };
-        // If user selected max value (2500), treat as unlimited (no upper bound in search)
-        const isUnlimited = budget.value >= 2500;
+        // If user selected max slider value (1000), treat as unlimited (no upper bound in search)
+        const isUnlimited = budget.value >= 1000;
         // Bug fix: use percentage-based range (±25%) instead of fixed ±100
         // This scales better for different budget levels
         const budgetRange = Math.round(budget.value * 0.25);
@@ -3451,7 +3503,8 @@ Respond with just the field name.`;
         break;
 
       case 'vibe':
-        const vibe = response as string;
+        // Sanitize: strip HTML tags from free-text input
+        const vibe = (response as string).replace(/<[^>]*>/g, '');
         // BUG FIX: Store the vibe text itself so the field is marked as answered
         (this.state.preferences as any).vibe = vibe || '';
 
@@ -3819,9 +3872,9 @@ Ask something that would help personalize their experience. Keep it casual.`;
           break;
 
         case 'wrong_vibe':
-          // Clear vibe preferences to re-ask
-          this.state.preferences.vibes = undefined;
-          this.setConfidence('activities', 'unknown');
+          // Clear vibe preference (stored as .vibe, not .vibes) to re-ask
+          (this.state.preferences as any).vibe = undefined;
+          this.setConfidence('vibe', 'unknown');
           this.state.phase = 'gathering';
           break;
 
@@ -3833,17 +3886,19 @@ Ask something that would help personalize their experience. Keep it casual.`;
           break;
 
         case 'hotel_wrong':
-          // Go back to hotel selection
+          // Go back to hotel selection — keep discovered hotels, only clear selections
           this.setConfidence('hotels', 'unknown');
-          this.state.discoveredData.hotels.clear();
-          this.state.phase = 'gathering';
+          (this.state.preferences as any).selectedHotels = {};
+          this.state.phase = 'enriching';
           break;
 
         case 'dining_wrong':
-          // Re-ask dining preferences
-          this.state.preferences.diningMode = undefined;
-          this.setConfidence('dining', 'unknown');
-          this.state.phase = 'gathering';
+          // Clear restaurant selections and cuisine prefs — keep dining mode and dietary restrictions
+          // User will re-answer cuisine preferences, which triggers restaurant re-fetch
+          this.state.discoveredData.restaurants.clear();
+          (this.state.preferences as any).selectedRestaurants = undefined;
+          (this.state.preferences as any).cuisinePreferences = undefined;
+          this.state.phase = 'enriching';
           break;
 
         case 'too_touristy':

@@ -128,6 +128,15 @@ export default function QuickPlanChat() {
   // ============================================================================
 
   const handleStartOver = useCallback(() => {
+    // Confirm before discarding all progress
+    if (!window.confirm('Start over? All your current choices will be lost.')) {
+      return;
+    }
+    // Cancel any pending navigation timeout (prevents race with satisfaction flow)
+    if (navigationTimeoutRef.current) {
+      clearTimeout(navigationTimeoutRef.current);
+      navigationTimeoutRef.current = null;
+    }
     // Reset all state to initial values
     orchestrator.reset();
     setMessages([]);
@@ -169,7 +178,9 @@ export default function QuickPlanChat() {
     e.preventDefault();
     if (!freeTextInput.trim() || isProcessing) return;
 
-    const userMessage = freeTextInput.trim();
+    // Sanitize: strip HTML tags to prevent injection into LLM prompts and transcript
+    const userMessage = freeTextInput.trim().replace(/<[^>]*>/g, '');
+    if (!userMessage) return;
     setFreeTextInput('');
     setShowFreeTextInput(false);
     setIsProcessing(true);
@@ -244,8 +255,27 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   const handleGoBack = useCallback(async () => {
     const success = orchestrator.goToPreviousQuestion();
     if (success) {
-      // Get the new current question after going back
+      // goToPreviousQuestion may have reverted the phase — sync UI
+      const phaseAfterGoBack = orchestrator.getPhase();
+      if (phaseAfterGoBack !== phase) {
+        setPhase(phaseAfterGoBack);
+      }
+
+      // Get the new current question after going back.
+      // Save phase to detect unexpected transitions from selectNextQuestion side effects.
+      const phaseBefore = orchestrator.getPhase();
       const question = await orchestrator.selectNextQuestion();
+      const phaseAfter = orchestrator.getPhase();
+
+      // Guard: if selectNextQuestion caused an unexpected phase advance, revert it.
+      // Going back should never advance the phase forward.
+      const PHASE_ORDER = ['gathering', 'enriching', 'generating', 'reviewing', 'satisfied'];
+      if (PHASE_ORDER.indexOf(phaseAfter) > PHASE_ORDER.indexOf(phaseBefore)) {
+        console.warn('[QuickPlanChat] Go-back caused unexpected phase advance:', phaseBefore, '->', phaseAfter, '- reverting');
+        (orchestrator as any).state.phase = phaseBefore;
+        setPhase(phaseBefore);
+      }
+
       if (question) {
         setCurrentQuestion(question);
         orchestrator.state.currentQuestion = question;
@@ -254,7 +284,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     } else {
       console.log('[QuickPlanChat] Cannot go back - at first question');
     }
-  }, [orchestrator]);
+  }, [orchestrator, phase]);
 
   // FIX 4.3: Skip functionality - properly advance to next question
   const handleSkip = useCallback(async () => {
@@ -263,12 +293,12 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     setIsProcessing(true);
     setSnooState('thinking');
 
-    // Add user message to show the skip action in the chat transcript
+    // Mark the current question as skipped first (validates the skip)
+    orchestrator.processUserResponse(currentQuestion.id, 'SKIP');
+
+    // Only add transcript message after processUserResponse accepts the skip
     orchestrator.addUserMessage('(Skipped)');
     setMessages([...orchestrator.getMessages()]);
-
-    // Mark the current question as skipped
-    orchestrator.processUserResponse(currentQuestion.id, 'SKIP');
     setCurrentQuestion(null);
 
     console.log('[QuickPlanChat] Skipped question:', currentQuestion.field);
@@ -402,8 +432,13 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       await new Promise(resolve => setTimeout(resolve, 600));
     }
 
-    // Process the response
-    orchestrator.processUserResponse(currentQuestion.id, value);
+    // Process the response (trim string values to avoid whitespace-only inputs)
+    const processedValue = typeof value === 'string' ? (value.trim() || null) : value;
+    if (processedValue === null) {
+      // Whitespace-only input — treat as if nothing was entered
+      return;
+    }
+    orchestrator.processUserResponse(currentQuestion.id, processedValue);
     setCurrentQuestion(null);
 
     // CRITICAL: Handle satisfaction response (dissatisfaction needs special handling)
@@ -480,8 +515,19 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       }
     }
 
-    // Check for seasonal warnings after dates are answered
+    // Check for trip length cap and seasonal warnings after dates are answered
     if (answeredField === 'dates') {
+      const userNights = (value as any).nights;
+      const storedNights = orchestrator.getState().preferences.tripLength;
+      if (userNights && storedNights && userNights !== storedNights) {
+        orchestrator.addSnooMessage(
+          `Just a heads up — I've adjusted your trip to ${storedNights} nights (the maximum I can plan for is 365). You can always extend it later in the full planner.`,
+          'idle'
+        );
+        setMessages([...orchestrator.getMessages()]);
+        await new Promise(resolve => setTimeout(resolve, 800));
+      }
+
       const state = orchestrator.getState();
       const warnings = state.seasonalWarnings;
       if (warnings && warnings.length > 0) {
@@ -510,7 +556,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         const hasSevereWarnings = warnings.some(w => w.severity === 'caution' || w.severity === 'warning');
 
         const warningMessage = hasSevereWarnings
-          ? `Heads up about your travel dates:\n\n${warningLines.join('\n\n')}\n\nThis is good to know as we plan! Let's continue.`
+          ? `Heads up about your travel dates:\n\n${warningLines.join('\n\n')}\n\nIf you'd like to pick different dates, tap the **back** button. Otherwise, let's keep planning!`
           : `Quick note about your dates:\n\n${warningLines.join('\n\n')}\n\nLet's keep planning!`;
 
         orchestrator.addSnooMessage(warningMessage, 'idle');
@@ -532,7 +578,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         const nextQuestion = await orchestrator.selectNextQuestion();
         console.log('[Dining] After dining plan, next question:', nextQuestion?.field);
 
-        if (nextQuestion && nextQuestion.field === 'cuisinePreferences') {
+        if (nextQuestion && (nextQuestion.field === 'cuisinePreferences' || nextQuestion.field === 'dietaryRestrictions')) {
           orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
           setMessages([...orchestrator.getMessages()]);
           setCurrentQuestion(nextQuestion);
@@ -574,56 +620,47 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       await Promise.all(fetchPromises);
       console.log('[QuickPlanChat] Parallel fetch complete');
 
-      // After fetches complete, get the next question (restaurant selection)
-      const restaurantQuestion = await orchestrator.selectNextQuestion();
-      console.log('[Restaurants] After fetch, selectNextQuestion returned:', restaurantQuestion ? {
-        field: restaurantQuestion.field,
-        inputType: restaurantQuestion.inputType,
-        candidatesCount: (restaurantQuestion.inputConfig as any)?.candidates?.length || 0,
+      // After fetches complete, get the next question — ONE call only to avoid double phase transition
+      const nextQuestion = await orchestrator.selectNextQuestion();
+      console.log('[CuisinePrefs] After fetch, selectNextQuestion returned:', nextQuestion ? {
+        field: nextQuestion.field,
+        inputType: nextQuestion.inputType,
+        candidatesCount: (nextQuestion.inputConfig as any)?.candidates?.length || 0,
       } : null);
 
-      if (restaurantQuestion) {
-        orchestrator.addSnooMessage(restaurantQuestion.snooMessage, 'idle');
+      if (nextQuestion) {
+        // Show the question (restaurants, experiences, etc.)
+        orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
         setMessages([...orchestrator.getMessages()]);
-        setCurrentQuestion(restaurantQuestion);
-        orchestrator.state.currentQuestion = restaurantQuestion;
+        setCurrentQuestion(nextQuestion);
+        orchestrator.state.currentQuestion = nextQuestion;
         setIsTyping(false);
         setIsProcessing(false);
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
-      } else {
-        // No restaurant question - experiences already fetched in parallel above
-        console.log('[Restaurants] No more restaurants, experiences already fetched in parallel');
+      }
 
-        // Get the next question (experiences were already fetched above in parallel)
-        if (selectedActivities.length > 0) {
-          const experienceQuestion = await orchestrator.selectNextQuestion();
-          if (experienceQuestion && experienceQuestion.field === 'experiences') {
-            orchestrator.addSnooMessage(experienceQuestion.snooMessage, 'idle');
-            setMessages([...orchestrator.getMessages()]);
-            setCurrentQuestion(experienceQuestion);
-            orchestrator.state.currentQuestion = experienceQuestion;
-            setIsTyping(false);
-            setIsProcessing(false);
-            setSnooState('idle');
-            setDebugLog([...orchestrator.getDebugLog()]);
-            return;
-          }
+      // No question — check phase (may have transitioned to 'generating')
+      const currentPhase = orchestrator.getPhase();
+      console.log('[CuisinePrefs] No question returned, phase:', currentPhase);
+
+      if (currentPhase === 'generating') {
+        setPhase('generating');
+        await handleGenerationPhase();
+        setPhase('reviewing');
+        const reviewQ = await orchestrator.selectNextQuestion();
+        if (reviewQ) {
+          orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
+          setMessages([...orchestrator.getMessages()]);
+          setCurrentQuestion(reviewQ);
+          orchestrator.state.currentQuestion = reviewQ;
         }
-
-        const currentPhase = orchestrator.getPhase();
-        console.log('[Restaurants] No question returned, phase:', currentPhase);
-
-        if (currentPhase === 'generating') {
-          setPhase('generating');
-          await handleGenerationPhase();
-          setIsTyping(false);
-          setIsProcessing(false);
-          setSnooState('idle');
-          setDebugLog([...orchestrator.getDebugLog()]);
-          return;
-        }
+        setIsTyping(false);
+        setIsProcessing(false);
+        setSnooState('idle');
+        setDebugLog([...orchestrator.getDebugLog()]);
+        return;
       }
     }
 
@@ -791,6 +828,26 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
         // After enrichment, get the next question again
         const postEnrichmentQuestion = await orchestrator.selectNextQuestion();
+
+        // Guard: check if enrichment→generating transition happened (all enrichment fields done)
+        const postEnrichPhase = orchestrator.getPhase();
+        if (postEnrichPhase === 'generating') {
+          setPhase('generating');
+          await handleGenerationPhase();
+          setPhase('reviewing');
+          const reviewQ = await orchestrator.selectNextQuestion();
+          if (reviewQ) {
+            orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
+            setMessages([...orchestrator.getMessages()]);
+            setCurrentQuestion(reviewQ);
+            orchestrator.state.currentQuestion = reviewQ;
+          }
+          setIsProcessing(false);
+          setSnooState('idle');
+          setDebugLog([...orchestrator.getDebugLog()]);
+          return;
+        }
+
         if (postEnrichmentQuestion) {
           orchestrator.addSnooMessage(postEnrichmentQuestion.snooMessage, 'idle');
           setMessages([...orchestrator.getMessages()]);
@@ -804,9 +861,9 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         return;
       } else if (currentPhase === 'generating') {
         await handleGenerationPhase();
-        // After regeneration, show the itinerary again
+        // After generation, show the itinerary review
         setPhase('reviewing');
-        // Get the satisfaction question to show again
+        // Get the satisfaction question to show
         const satisfactionQuestion = await orchestrator.selectNextQuestion();
         if (satisfactionQuestion) {
           orchestrator.addSnooMessage(satisfactionQuestion.snooMessage, 'idle');
@@ -843,36 +900,57 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setPhase('satisfied');
         setIsProcessing(false);
 
-        // Auto-navigate to the full itinerary after a short delay with cleanup tracking
+        // Save trip data synchronously BEFORE the delay to prevent race conditions
+        let savedTripId: string | null = null;
+        try {
+          savedTripId = finalizeQuickPlanTrip(orchestrator.getState());
+          console.log('[QuickPlanChat] Trip saved successfully:', savedTripId);
+
+          // Verify localStorage was written
+          const stored = localStorage.getItem('wandercraft-trip-v2');
+          if (!stored) {
+            throw new Error('Trip data not saved to localStorage');
+          }
+        } catch (error) {
+          console.error('[QuickPlanChat] Failed to finalize trip:', error);
+          orchestrator.addSnooMessage(
+            "Oops! Something went wrong saving your trip. Please try clicking the button again.",
+            'idle'
+          );
+          setMessages([...orchestrator.getMessages()]);
+          setSnooState('idle');
+          setPhase('reviewing');
+          return;
+        }
+
+        // Navigate after a short delay for celebration — only if state hasn't been reset
         if (navigationTimeoutRef.current) {
           clearTimeout(navigationTimeoutRef.current);
         }
-        navigationTimeoutRef.current = setTimeout(async () => {
-          try {
-            const tripId = finalizeQuickPlanTrip(orchestrator.getState());
-            console.log('[QuickPlanChat] Satisfaction confirmed, navigating to trip:', tripId);
-
-            // BUG #6 FIX: Verify localStorage was written before navigating
-            const stored = localStorage.getItem('wandercraft-trip-v2');
-            if (!stored) {
-              throw new Error('Trip data not saved to localStorage');
-            }
-
-            window.location.href = `/plan/${tripId}`;
-          } catch (error) {
-            console.error('[QuickPlanChat] Failed to finalize trip:', error);
-            // Show error to user instead of blank page
-            orchestrator.addSnooMessage(
-              "Oops! Something went wrong saving your trip. Please try clicking the button again.",
-              'idle'
-            );
-            setMessages([...orchestrator.getMessages()]);
-            setSnooState('idle');
-            setPhase('reviewing'); // Go back to reviewing so user can try again
+        const tripIdForNav = savedTripId;
+        navigationTimeoutRef.current = setTimeout(() => {
+          // Guard: if user clicked "Start Over" during the delay, don't navigate
+          if (orchestrator.getPhase() !== 'satisfied') {
+            console.log('[QuickPlanChat] Navigation cancelled — state was reset');
+            return;
           }
+          window.location.href = `/plan/${tripIdForNav}`;
         }, 1500); // Give user time to see the celebration message
         return; // Don't continue processing - we're navigating away
       }
+    } else if (currentPhase === 'reviewing') {
+      const reviewQ = await orchestrator.selectNextQuestion();
+      if (reviewQ) {
+        orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
+        setMessages([...orchestrator.getMessages()]);
+        setCurrentQuestion(reviewQ);
+        orchestrator.state.currentQuestion = reviewQ;
+      }
+      setIsTyping(false);
+      setIsProcessing(false);
+      setSnooState('idle');
+      setDebugLog([...orchestrator.getDebugLog()]);
+      return;
     }
 
     if (nextQuestion) {
@@ -952,7 +1030,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         );
       } else {
         orchestrator.addSnooMessage(
-          `I'm having trouble finding specific areas for ${destination}. Let's continue with general recommendations.`,
+          `I couldn't find specific areas for ${destination}. I'll continue building your trip without area-specific suggestions — you can always add neighborhoods later in the full planner. If you'd like to try a different destination, tap the **back** button.`,
           'idle'
         );
       }
@@ -1098,7 +1176,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       } else {
         // No hotels found - let user know and skip to next question
         orchestrator.addSnooMessage(
-          `I couldn't find any hotels matching your preferences in those areas yet. Let me move on to the next step.`,
+          `I couldn't find hotels matching your preferences in those areas. I'll continue building your itinerary without hotel picks — you can add accommodations later in the full planner.`,
           'concerned'
         );
         // Mark hotels as complete (skipped) so we don't get stuck
@@ -1527,7 +1605,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
               <SnooAgent state={snooState} size="sm" showLabel={false} />
               <div>
                 <h2 className="font-semibold text-slate-900 dark:text-white text-sm">Snoo</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 hidden xs:block">Your AI travel buddy</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">Your AI travel buddy</p>
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
@@ -1575,6 +1653,12 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
             <div className="px-4 pb-4">
               <ItineraryPreview
                 orchestratorState={orchestrator.getState()}
+                onNavigate={() => {
+                  if (navigationTimeoutRef.current) {
+                    clearTimeout(navigationTimeoutRef.current);
+                    navigationTimeoutRef.current = null;
+                  }
+                }}
               />
             </div>
           )}
@@ -1677,7 +1761,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
                   {/* Validation hint */}
                   {freeTextInput.length > 450 && (
                     <p className="text-xs text-amber-600 dark:text-amber-400">
-                      Approaching character limit
+                      {500 - freeTextInput.length} characters remaining
                     </p>
                   )}
 
@@ -1705,10 +1789,10 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
               ) : (
                 <button
                   onClick={() => setShowFreeTextInput(true)}
-                  className="w-full flex items-center justify-center gap-2 min-h-[44px] py-2.5 text-sm text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="flex items-center justify-center gap-2 min-h-[44px] py-2 px-3 sm:w-full sm:py-2.5 text-sm text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
-                  <MessageCircle className="w-4 h-4" />
-                  <span className="text-sm font-medium">Ask Snoo a question or add context</span>
+                  <MessageCircle className="w-4 h-4 flex-shrink-0" />
+                  <span className="text-sm font-medium hidden sm:inline">Ask Snoo a question or add context</span>
                 </button>
               )}
             </div>
@@ -1809,7 +1893,7 @@ function formatUserResponse(value: unknown): string {
     // Dining response (single id without label)
     if (obj.id && !obj.label && !obj.placeId && !obj.canonicalName) {
       const diningLabels: Record<string, string> = {
-        'schedule': 'Plan dinners',
+        'plan': 'Help me find restaurants',
         'list': 'Just a list',
         'none': 'Skip dining',
       };
@@ -1837,9 +1921,10 @@ function formatUserResponse(value: unknown): string {
 
 interface ItineraryPreviewProps {
   orchestratorState: OrchestratorState;
+  onNavigate?: () => void;
 }
 
-function ItineraryPreview({ orchestratorState }: ItineraryPreviewProps) {
+function ItineraryPreview({ orchestratorState, onNavigate }: ItineraryPreviewProps) {
   const [isNavigating, setIsNavigating] = useState(false);
   const toast = useToast();
 
@@ -1858,6 +1943,8 @@ function ItineraryPreview({ orchestratorState }: ItineraryPreviewProps) {
   const stops = itinerary.stops || [];
 
   const handleTakeToItinerary = async () => {
+    // Cancel any auto-navigation timer to prevent double navigation
+    onNavigate?.();
     setIsNavigating(true);
 
     try {
@@ -1939,7 +2026,7 @@ function ItineraryPreview({ orchestratorState }: ItineraryPreviewProps) {
               </span>
               {day.date && (
                 <span className="text-xs text-slate-500 font-medium">
-                  {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  {new Date(day.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
                 </span>
               )}
             </div>
@@ -1947,19 +2034,19 @@ function ItineraryPreview({ orchestratorState }: ItineraryPreviewProps) {
             <div className="space-y-2.5 ml-1">
               {day.morning && (
                 <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors">
-                  <span className="text-xs text-slate-400 dark:text-slate-500 w-16 font-semibold uppercase tracking-wide pt-0.5">Morning</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-400 w-16 font-semibold uppercase tracking-wide pt-0.5">Morning</span>
                   <p className="text-sm text-slate-700 dark:text-slate-300 flex-1 leading-relaxed">{day.morning.description || day.morning.activity}</p>
                 </div>
               )}
               {day.afternoon && (
                 <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors">
-                  <span className="text-xs text-slate-400 dark:text-slate-500 w-16 font-semibold uppercase tracking-wide pt-0.5">Afternoon</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-400 w-16 font-semibold uppercase tracking-wide pt-0.5">Afternoon</span>
                   <p className="text-sm text-slate-700 dark:text-slate-300 flex-1 leading-relaxed">{day.afternoon.description || day.afternoon.activity}</p>
                 </div>
               )}
               {day.evening && (
                 <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors">
-                  <span className="text-xs text-slate-400 dark:text-slate-500 w-16 font-semibold uppercase tracking-wide pt-0.5">Evening</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-400 w-16 font-semibold uppercase tracking-wide pt-0.5">Evening</span>
                   <p className="text-sm text-slate-700 dark:text-slate-300 flex-1 leading-relaxed">{day.evening.description || day.evening.activity}</p>
                 </div>
               )}

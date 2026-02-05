@@ -125,7 +125,7 @@ export function PhaseDivider({ phase }: PhaseDividerProps) {
   return (
     <div className="flex items-center gap-4 py-5 my-2">
       <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent dark:via-slate-700" />
-      <span className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider px-3 py-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-full border border-slate-100 dark:border-slate-700">
+      <span className="text-xs font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wider px-3 py-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-full border border-slate-100 dark:border-slate-700">
         {phaseLabels[phase] || phase}
       </span>
       <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent dark:via-slate-700" />

@@ -443,7 +443,7 @@ export function MultiStepLoading({
                 ? 'text-slate-800 dark:text-slate-200 font-medium'
                 : step.status === 'error'
                 ? 'text-red-600 dark:text-red-400'
-                : 'text-slate-400 dark:text-slate-500'
+                : 'text-slate-400 dark:text-slate-400'
             }`}
           >
             {step.label}

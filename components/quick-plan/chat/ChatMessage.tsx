@@ -121,7 +121,7 @@ export default function ChatMessage({ message, isLatest = false, showTyping = fa
         </div>
 
         {/* Timestamp - only shown on hover */}
-        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <p className="text-xs text-slate-400 dark:text-slate-400 mt-1 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
           {formatTime(message.timestamp)}
         </p>
       </div>
@@ -135,7 +135,7 @@ function EvidenceChip({ evidence }: { evidence: RedditEvidence }) {
     <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 text-xs border border-slate-100 dark:border-slate-600" role="article" aria-label={`Reddit post from r/${evidence.subreddit}`}>
       <div className="flex items-center flex-wrap gap-1.5 sm:gap-2 mb-1.5">
         <span className="text-orange-500 font-semibold">r/{evidence.subreddit}</span>
-        <span className="text-slate-300 dark:text-slate-500 hidden sm:inline" aria-hidden="true">·</span>
+        <span className="text-slate-300 dark:text-slate-400 hidden sm:inline" aria-hidden="true">·</span>
         <span className="text-slate-500 dark:text-slate-400 font-medium">{evidence.upvotes} upvotes</span>
         {evidence.postUrl && (
           <a

@@ -6,7 +6,7 @@
  */
 
 import { motion } from 'framer-motion';
-import { Check, Circle, Loader2 } from 'lucide-react';
+import { Check, Circle } from 'lucide-react';
 
 export type PlanningPhase = 'gathering' | 'enriching' | 'generating' | 'reviewing' | 'satisfied';
 
@@ -49,7 +49,7 @@ export default function ProgressIndicator({ currentPhase, className = '' }: Prog
                     ? 'bg-green-500 text-white'
                     : isCurrent
                     ? 'bg-orange-500 text-white'
-                    : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-400'
                   }
                 `}
                 animate={isCurrent ? { scale: [1, 1.1, 1] } : {}}
@@ -58,7 +58,7 @@ export default function ProgressIndicator({ currentPhase, className = '' }: Prog
                 {isComplete ? (
                   <Check className="w-4 h-4" />
                 ) : isCurrent ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-xs font-bold">{index + 1}</span>
                 ) : (
                   <Circle className="w-3 h-3" />
                 )}
@@ -68,7 +68,7 @@ export default function ProgressIndicator({ currentPhase, className = '' }: Prog
                   text-[10px] mt-1 text-center whitespace-nowrap
                   ${isComplete || isCurrent
                     ? 'text-slate-700 dark:text-slate-300 font-medium'
-                    : 'text-slate-400 dark:text-slate-500'
+                    : 'text-slate-400 dark:text-slate-400'
                   }
                 `}
               >

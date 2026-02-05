@@ -41,13 +41,16 @@ export async function POST(request: NextRequest) {
       throw new ValidationError('Messages array cannot be empty');
     }
 
-    // Validate message structure
+    // Validate message structure and content length
     for (const msg of messages) {
       if (!msg.role || !['system', 'user', 'assistant'].includes(msg.role)) {
         throw new ValidationError('Each message must have a valid role (system, user, or assistant)');
       }
       if (typeof msg.content !== 'string') {
         throw new ValidationError('Each message must have a content string');
+      }
+      if (msg.content.length > 10000) {
+        throw new ValidationError('Message content exceeds maximum length (10000 characters)');
       }
     }
 

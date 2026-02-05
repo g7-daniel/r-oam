@@ -67,10 +67,22 @@ class RequestDeduplicator {
     errorCacheTTL: 5000,
   };
 
+  private cleanupIntervalId: ReturnType<typeof setInterval> | null = null;
+
   constructor() {
     // Periodic cleanup every 60 seconds
     if (typeof setInterval !== 'undefined') {
-      setInterval(() => this.cleanup(), 60000);
+      this.cleanupIntervalId = setInterval(() => this.cleanup(), 60000);
+    }
+  }
+
+  /**
+   * Stop the periodic cleanup timer
+   */
+  destroy(): void {
+    if (this.cleanupIntervalId !== null) {
+      clearInterval(this.cleanupIntervalId);
+      this.cleanupIntervalId = null;
     }
   }
 
@@ -287,7 +299,14 @@ class RequestDeduplicator {
 // SINGLETON INSTANCE
 // ============================================================================
 
+// Guard against HMR creating duplicate instances with stale intervals
+const globalKey = '__requestDedup__' as const;
+const globalObj = (typeof globalThis !== 'undefined' ? globalThis : {}) as Record<string, any>;
+if (globalObj[globalKey]) {
+  (globalObj[globalKey] as RequestDeduplicator).destroy();
+}
 export const requestDedup = new RequestDeduplicator();
+globalObj[globalKey] = requestDedup;
 
 // ============================================================================
 // CONVENIENCE FUNCTIONS
