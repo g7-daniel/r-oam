@@ -3911,9 +3911,8 @@ Ask something that would help personalize their experience. Keep it casual.`;
           break;
 
         case 'surf_days_wrong':
-          // Clear surfing details so user can re-specify
+          // Clear surfing details so user can re-specify (keep activity selections intact)
           (this.state.preferences as any).surfingDetails = undefined;
-          this.setConfidence('activities', 'unknown');
           this.state.phase = 'gathering';
           break;
 

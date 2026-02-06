@@ -1348,7 +1348,20 @@ function HotelDetailModal({
   isSelected: boolean;
   nightCount: number;
 }) {
-  const [activeTab, setActiveTab] = useState<'rooms' | 'details' | 'amenities' | 'location'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'amenities' | 'location'>('details');
+
+  // Escape key to close detail modal (stopImmediatePropagation prevents closing parent modal)
+  useEffect(() => {
+    if (!isOpen || !hotel) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, hotel, onClose]);
 
   if (!isOpen || !hotel) return null;
 

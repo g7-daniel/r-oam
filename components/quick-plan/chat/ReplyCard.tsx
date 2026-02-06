@@ -1514,6 +1514,7 @@ function HotelQuestionsInput({
   onAnswer: (answer: HotelQuestionAnswer) => void;
 }) {
   const [activeAnswer, setActiveAnswer] = useState<HotelQuestionAnswer | null>(null);
+  const [activeLabel, setActiveLabel] = useState<string | null>(null);
 
   // Define quick questions with answer logic
   const quickQuestions = useMemo(() => [
@@ -1612,6 +1613,7 @@ function HotelQuestionsInput({
   const handleQuestion = (q: typeof quickQuestions[0]) => {
     const answer = q.getAnswer();
     setActiveAnswer(answer);
+    setActiveLabel(q.label);
     onAnswer(answer);
   };
 
@@ -1627,7 +1629,7 @@ function HotelQuestionsInput({
             key={q.label}
             onClick={() => handleQuestion(q)}
             className={`text-xs px-2.5 py-1.5 rounded-full transition-colors ${
-              activeAnswer?.question === q.getAnswer().question
+              activeLabel === q.label
                 ? 'bg-orange-500 text-white'
                 : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
             }`}
@@ -2748,7 +2750,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
       });
       setCustomNights(initial);
       setCustomOrder(areas.map((a: any) => a.id)); // Initialize order from areas
-      console.log('[SplitCard] Initialized customNights:', initial, 'areas:', areas.map((a: any) => a.name), 'tripLength:', tripLength);
+      if (process.env.NODE_ENV === 'development') console.log('[SplitCard] Initialized customNights:', initial, 'areas:', areas.map((a: any) => a.name), 'tripLength:', tripLength);
     }
   }, [areas, tripLength]);
 
@@ -2840,11 +2842,11 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
         })),
         fitScore: 1.0,
       };
-      console.log('[SplitCard] Submitting custom split:', customSplit);
+      if (process.env.NODE_ENV === 'development') console.log('[SplitCard] Submitting custom split:', customSplit);
       onSubmit(customSplit);
     } else if (selected) {
       const selectedSplit = splits.find(s => s.id === selected);
-      console.log('[SplitCard] Submitting preset split:', selectedSplit);
+      if (process.env.NODE_ENV === 'development') console.log('[SplitCard] Submitting preset split:', selectedSplit);
       onSubmit(selectedSplit);
     }
   };
