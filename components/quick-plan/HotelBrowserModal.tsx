@@ -234,6 +234,16 @@ export default function HotelBrowserModal({
     }));
   }, [priceStats, nightCount]);
 
+  // Escape key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+
   // Prevent body scroll
   useEffect(() => {
     if (isOpen) {
@@ -975,6 +985,19 @@ function FilterPanel({
         : [...f.accessibilityFeatures, feature],
     }));
   };
+
+  // Escape key to close filter panel (stopImmediatePropagation prevents also closing parent modal)
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
 
   return (
     <AnimatePresence>

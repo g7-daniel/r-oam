@@ -177,13 +177,14 @@ export default function QuickPlanChat() {
 
   const handleFreeTextSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!freeTextInput.trim() || isProcessing) return;
+    if (!freeTextInput.trim() || isProcessing || isProcessingRef.current) return;
 
     // Sanitize: strip HTML tags to prevent injection into LLM prompts and transcript
     const userMessage = freeTextInput.trim().replace(/<[^>]*>/g, '');
     if (!userMessage) return;
     setFreeTextInput('');
     setShowFreeTextInput(false);
+    isProcessingRef.current = true;
     setIsProcessing(true);
     setSnooState('thinking');
 
@@ -257,6 +258,10 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
   // FIX 4.2: Go Back functionality
   const handleGoBack = useCallback(async () => {
+    if (isProcessing || isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    setIsProcessing(true);
+
     const success = orchestrator.goToPreviousQuestion();
     if (success) {
       // goToPreviousQuestion may have reverted the phase — sync UI
@@ -288,12 +293,15 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     } else {
       console.log('[QuickPlanChat] Cannot go back - at first question');
     }
+
+    setIsProcessing(false); isProcessingRef.current = false;
   }, [orchestrator, phase]);
 
   // FIX 4.3: Skip functionality - properly advance to next question
   const handleSkip = useCallback(async () => {
-    if (!currentQuestion) return;
+    if (!currentQuestion || isProcessingRef.current) return;
 
+    isProcessingRef.current = true;
     setIsProcessing(true);
     setSnooState('thinking');
 

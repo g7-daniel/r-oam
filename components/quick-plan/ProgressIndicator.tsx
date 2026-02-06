@@ -35,7 +35,6 @@ export default function ProgressIndicator({ currentPhase, className = '' }: Prog
       {PHASES.map((phase, index) => {
         const isComplete = index < currentIndex;
         const isCurrent = index === currentIndex;
-        const isPending = index > currentIndex;
 
         return (
           <div key={phase.id} className="flex items-center flex-1">

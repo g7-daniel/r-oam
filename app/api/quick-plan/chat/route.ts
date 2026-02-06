@@ -32,6 +32,11 @@ export async function POST(request: NextRequest) {
       temperature?: number;
     };
 
+    // Validate temperature
+    if (typeof temperature !== 'number' || temperature < 0 || temperature > 2) {
+      throw new ValidationError('Temperature must be a number between 0 and 2');
+    }
+
     // Validate input
     if (!messages || !Array.isArray(messages)) {
       throw new ValidationError('Messages array is required');
@@ -39,6 +44,10 @@ export async function POST(request: NextRequest) {
 
     if (messages.length === 0) {
       throw new ValidationError('Messages array cannot be empty');
+    }
+
+    if (messages.length > 20) {
+      throw new ValidationError('Messages array exceeds maximum length (20)');
     }
 
     // Validate message structure and content length
