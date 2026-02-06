@@ -89,7 +89,8 @@ function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
     return window.location.origin;
   }
-  return 'http://localhost:3000';
+  // This module is client-only; fallback should never be reached in production
+  return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
 }
 
 /**
@@ -490,6 +491,8 @@ function detectMultiCountry(destination: string): MultiCountryInfo {
     'usa', 'canada', 'mexico', 'costa rica', 'panama', 'colombia', 'peru', 'chile', 'argentina', 'brazil',
     'australia', 'new zealand', 'fiji',
     'uae', 'dubai', 'qatar', 'jordan', 'turkey', 'israel',
+    'new zealand', 'south africa', 'sri lanka', 'costa rica', 'puerto rico', 'dominican republic',
+    'czech republic', 'united kingdom', 'south korea', 'north korea',
   ]);
 
   // Common multi-country patterns - only match "X and Y", "X & Y", "X to Y" patterns
@@ -707,7 +710,7 @@ interface FieldQuestionConfig {
 const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
   destination: {
     field: 'destination',
-    snooMessage: pickTemplate(SNOO_TEMPLATES.greeting),
+    get snooMessage() { return pickTemplate(SNOO_TEMPLATES.greeting); },
     inputType: 'destination',
     getInputConfig: () => ({}),
     required: true,
@@ -2115,6 +2118,13 @@ export class QuickPlanOrchestrator {
     if (previousField in this.state.preferences) {
       delete (this.state.preferences as any)[previousField];
     }
+    // Also clear related derived properties for specific fields
+    const relatedProps: Record<string, string[]> = {
+      travelingWithPets: ['hasPets', 'travelingWithPetsType'],
+    };
+    for (const prop of relatedProps[previousField] || []) {
+      delete (this.state.preferences as any)[prop];
+    }
 
     // Remove last item from history
     questionHistory.pop();
@@ -2483,7 +2493,7 @@ export class QuickPlanOrchestrator {
     // Surfing details - after activities are selected, if surfing was chosen
     const hasSurfActivity = this.state.preferences.selectedActivities?.some(a => a.type === 'surf');
     const hasSurfDetails = !!(this.state.preferences as any).surfingDetails;
-    if (this.state.confidence.activities === 'confirmed' && hasSurfActivity && !hasSurfDetails) {
+    if (this.state.confidence.activities === 'complete' && hasSurfActivity && !hasSurfDetails) {
       console.log('[getMissingRequiredFields] >>> ADDING surfingDetails (surf activity selected) <<<');
       missing.push('surfingDetails');
     }
@@ -2746,23 +2756,6 @@ export class QuickPlanOrchestrator {
 
     console.log('[decideNextField] Fallback to first candidate:', candidates[0]);
     return candidates[0];
-  }
-
-  private buildNextFieldPrompt(candidates: string[]): string {
-    const destination = this.state.preferences.destinationContext?.canonicalName || 'unknown';
-    const known = this.summarizeKnownPreferences();
-
-    return `Planning a trip to ${destination}.
-
-What we already know:
-${known}
-
-What should we ask about next to make the best trip plan?
-Options: ${candidates.join(', ')}
-
-Consider: What's most impactful for personalizing the trip? What builds on what we already know?
-
-Respond with just the field name.`;
   }
 
   private summarizeKnownPreferences(): string {
@@ -3316,7 +3309,7 @@ Respond with just the field name.`;
         // This scales better for different budget levels
         const budgetRange = Math.round(budget.value * 0.25);
         this.state.preferences.budgetPerNight = {
-          min: Math.max(50, budget.value - budgetRange),
+          min: Math.max(Math.round(budget.value * 0.5), budget.value - budgetRange),
           max: isUnlimited ? 999999 : budget.value + budgetRange,
         };
         (this.state.preferences as any).budgetUnlimited = isUnlimited;
@@ -3490,9 +3483,9 @@ Respond with just the field name.`;
           }
         }
 
-        this.state.preferences.selectedActivities = activities.map(a => ({
+        this.state.preferences.selectedActivities = activities.map((a, idx) => ({
           type: a.id as TripPreferences['selectedActivities'][0]['type'],
-          priority: 'must-do' as const,
+          priority: (idx < 3 ? 'must-do' : 'nice-to-have') as 'must-do' | 'nice-to-have',
           // Preserve custom activity info for smart matching
           ...(a.isCustom ? { isCustom: true, customLabel: a.label } : {}),
         }));
@@ -3917,6 +3910,21 @@ Ask something that would help personalize their experience. Keep it casual.`;
           this.state.phase = 'generating';
           break;
 
+        case 'surf_days_wrong':
+          // Clear surfing details so user can re-specify
+          (this.state.preferences as any).surfingDetails = undefined;
+          this.setConfidence('activities', 'unknown');
+          this.state.phase = 'gathering';
+          break;
+
+        case 'budget_exceeded':
+          // Bump budget up by 25% and regenerate
+          if (this.state.preferences.budgetPerNight) {
+            this.state.preferences.budgetPerNight.max = Math.round(this.state.preferences.budgetPerNight.max * 1.25);
+          }
+          this.state.phase = 'generating';
+          break;
+
         default:
           // For 'other' or unknown reasons, use custom feedback
           if (customFeedback) {
@@ -3971,6 +3979,7 @@ Ask something that would help personalize their experience. Keep it casual.`;
         hotels: Array.from(this.state.discoveredData.hotels.entries()),
         activities: this.state.discoveredData.activities,
         restaurants: Array.from(this.state.discoveredData.restaurants.entries()),
+        experiences: Array.from(this.state.discoveredData.experiences.entries()),
       },
       messages: this.state.messages,
       currentQuestion: this.state.currentQuestion,
@@ -3987,6 +3996,7 @@ Ask something that would help personalize their experience. Keep it casual.`;
         hotels: new Map(data.discoveredData.hotels),
         activities: data.discoveredData.activities,
         restaurants: new Map(data.discoveredData.restaurants),
+        experiences: new Map(data.discoveredData.experiences || []),
       },
     });
   }

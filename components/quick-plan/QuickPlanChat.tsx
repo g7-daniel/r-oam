@@ -62,6 +62,7 @@ export default function QuickPlanChat() {
   // UI state
   const [isTyping, setIsTyping] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const isProcessingRef = useRef(false); // Synchronous guard against double-submission
   const inputRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
   // Track timeouts for cleanup
@@ -155,7 +156,7 @@ export default function QuickPlanChat() {
       experiences: 'pending',
     });
     setIsTyping(false);
-    setIsProcessing(false);
+    setIsProcessing(false); isProcessingRef.current = false;
 
     // Reset the initialization flag to allow restart
     hasInitialized.current = false;
@@ -202,7 +203,10 @@ export default function QuickPlanChat() {
               content: `You are Snoo, a friendly AI travel planning assistant. The user is planning a trip and has asked a question or provided additional context.
 
 Current trip context:
-${JSON.stringify(orchestrator.getState().preferences, null, 2)}
+${JSON.stringify((() => {
+  const { safetyContext, accessibilityNeeds, childNeeds, allergyTypes, mobilityLimitations, ...safe } = orchestrator.getState().preferences as any;
+  return safe;
+})(), null, 2)}
 
 Respond helpfully and concisely (2-3 sentences max). If they're asking about something specific to their trip, incorporate that into your response. If they're providing preferences or context, acknowledge it and explain how you'll use that information. Stay friendly and encouraging!`
             },
@@ -236,7 +240,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       setMessages([...orchestrator.getMessages()]);
     }
 
-    setIsProcessing(false);
+    setIsProcessing(false); isProcessingRef.current = false;
     setSnooState('idle');
     setDebugLog([...orchestrator.getDebugLog()]);
   }, [freeTextInput, isProcessing, orchestrator]);
@@ -314,7 +318,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       orchestrator.state.currentQuestion = nextQuestion;
     }
 
-    setIsProcessing(false);
+    setIsProcessing(false); isProcessingRef.current = false;
     setSnooState('idle');
     setDebugLog([...orchestrator.getDebugLog()]);
   }, [orchestrator, currentQuestion]);
@@ -410,8 +414,9 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   // ============================================================================
 
   const handleUserResponse = useCallback(async (value: unknown) => {
-    if (isProcessing || !currentQuestion) return;
+    if (isProcessing || isProcessingRef.current || !currentQuestion) return;
 
+    isProcessingRef.current = true;
     setIsProcessing(true);
     setSnooState('thinking');
 
@@ -435,7 +440,9 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     // Process the response (trim string values to avoid whitespace-only inputs)
     const processedValue = typeof value === 'string' ? (value.trim() || null) : value;
     if (processedValue === null) {
-      // Whitespace-only input — treat as if nothing was entered
+      // Whitespace-only input — reset state and treat as if nothing was entered
+      setIsProcessing(false); isProcessingRef.current = false;
+      setSnooState('idle');
       return;
     }
     orchestrator.processUserResponse(currentQuestion.id, processedValue);
@@ -508,7 +515,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         }
 
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return; // Exit early - we've handled the dissatisfaction
@@ -584,7 +591,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           setCurrentQuestion(nextQuestion);
           orchestrator.state.currentQuestion = nextQuestion;
           setIsTyping(false);
-          setIsProcessing(false);
+          setIsProcessing(false); isProcessingRef.current = false;
           setSnooState('idle');
           setDebugLog([...orchestrator.getDebugLog()]);
           return;
@@ -635,7 +642,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setCurrentQuestion(nextQuestion);
         orchestrator.state.currentQuestion = nextQuestion;
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
@@ -657,7 +664,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           orchestrator.state.currentQuestion = reviewQ;
         }
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
@@ -677,7 +684,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setCurrentQuestion(nextQuestion);
         orchestrator.state.currentQuestion = nextQuestion;
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
@@ -696,7 +703,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
             setCurrentQuestion(experienceQuestion);
             orchestrator.state.currentQuestion = experienceQuestion;
             setIsTyping(false);
-            setIsProcessing(false);
+            setIsProcessing(false); isProcessingRef.current = false;
             setSnooState('idle');
             setDebugLog([...orchestrator.getDebugLog()]);
             return;
@@ -709,7 +716,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setCurrentQuestion(nextQuestion);
         orchestrator.state.currentQuestion = nextQuestion;
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
@@ -727,7 +734,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setCurrentQuestion(nextQuestion);
         orchestrator.state.currentQuestion = nextQuestion;
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
@@ -738,7 +745,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           setPhase('generating');
           await handleGenerationPhase();
           setIsTyping(false);
-          setIsProcessing(false);
+          setIsProcessing(false); isProcessingRef.current = false;
           setSnooState('idle');
           setDebugLog([...orchestrator.getDebugLog()]);
           return;
@@ -764,7 +771,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setCurrentQuestion(hotelQuestion);
         orchestrator.state.currentQuestion = hotelQuestion;
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return; // Exit early - we've handled this case
@@ -778,7 +785,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           setPhase('generating');
           await handleGenerationPhase();
           setIsTyping(false);
-          setIsProcessing(false);
+          setIsProcessing(false); isProcessingRef.current = false;
           setSnooState('idle');
           setDebugLog([...orchestrator.getDebugLog()]);
           return;
@@ -793,7 +800,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           orchestrator.state.currentQuestion = nextQuestion;
         }
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
@@ -842,7 +849,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
             setCurrentQuestion(reviewQ);
             orchestrator.state.currentQuestion = reviewQ;
           }
-          setIsProcessing(false);
+          setIsProcessing(false); isProcessingRef.current = false;
           setSnooState('idle');
           setDebugLog([...orchestrator.getDebugLog()]);
           return;
@@ -855,7 +862,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           orchestrator.state.currentQuestion = postEnrichmentQuestion;
         }
 
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
@@ -872,7 +879,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           orchestrator.state.currentQuestion = satisfactionQuestion;
         }
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
@@ -887,7 +894,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           orchestrator.state.currentQuestion = gatherQuestion;
         }
         setIsTyping(false);
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
@@ -898,7 +905,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setMessages([...orchestrator.getMessages()]);
         setSnooState('celebrating');
         setPhase('satisfied');
-        setIsProcessing(false);
+        setIsProcessing(false); isProcessingRef.current = false;
 
         // Save trip data synchronously BEFORE the delay to prevent race conditions
         let savedTripId: string | null = null;
@@ -947,7 +954,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         orchestrator.state.currentQuestion = reviewQ;
       }
       setIsTyping(false);
-      setIsProcessing(false);
+      setIsProcessing(false); isProcessingRef.current = false;
       setSnooState('idle');
       setDebugLog([...orchestrator.getDebugLog()]);
       return;
@@ -962,7 +969,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     }
 
     setIsTyping(false);
-    setIsProcessing(false);
+    setIsProcessing(false); isProcessingRef.current = false;
     setSnooState('idle');
 
     // Update debug info
@@ -1515,13 +1522,6 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     const autoSplit = prefs.selectedSplit || {
       id: 'auto-split',
       name: selectedAreas.map(a => a.name).join(' → '),
-      areas: selectedAreas.map((area, idx) => ({
-        areaId: area.id,
-        areaName: area.name,
-        nights: idx === selectedAreas.length - 1
-          ? tripLength - (nightsPerArea * (selectedAreas.length - 1)) // Last area gets remainder
-          : nightsPerArea,
-      })),
       fitScore: 0.8,
       stops: selectedAreas.map((area, idx) => ({
         areaId: area.id,

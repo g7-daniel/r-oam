@@ -84,19 +84,14 @@ export default function ProgressIndicator({ currentPhase, className = '' }: Prog
                   className="h-full rounded"
                   initial={{ width: 0 }}
                   animate={{
-                    width: isComplete ? '100%' : '0%',
+                    width: isComplete ? '100%' : isCurrent ? '50%' : '0%',
                     backgroundColor: isComplete
                       ? 'rgb(34 197 94)' // green-500
+                      : isCurrent
+                      ? 'rgb(249 115 22)' // orange-500
                       : 'rgb(226 232 240)', // slate-200
                   }}
                   transition={{ duration: 0.5 }}
-                  style={{
-                    backgroundColor: isComplete
-                      ? 'rgb(34 197 94)'
-                      : isCurrent
-                      ? 'rgb(249 115 22)' // orange-500
-                      : 'rgb(226 232 240)',
-                  }}
                 />
               </div>
             )}

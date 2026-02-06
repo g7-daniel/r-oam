@@ -92,7 +92,9 @@ export default function ChatMessage({ message, isLatest = false, showTyping = fa
             isSnoo
               ? 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 shadow-sm'
               : isUser
-              ? 'bg-gradient-to-r from-orange-500 to-orange-400 text-white max-w-full shadow-sm shadow-orange-500/20'
+              ? message.content === '(Skipped)'
+                ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 italic text-sm max-w-full'
+                : 'bg-gradient-to-r from-orange-500 to-orange-400 text-white max-w-full shadow-sm shadow-orange-500/20'
               : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm'
           }`}
         >

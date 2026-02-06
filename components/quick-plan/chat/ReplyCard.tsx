@@ -1748,7 +1748,8 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
 
   // BUG #8 FIX: Format distance with context (from hotel)
   const formatDistance = (km?: number, areaName?: string) => {
-    if (!km) return '';
+    if (km === undefined || km === null) return '';
+    if (km === 0) return 'At your hotel';
     const hotelRef = areaName ? `${areaName} hotel` : 'your hotel';
     if (km < 0.5) return `${Math.round(km * 1000)}m from ${hotelRef}`;
     if (km < 2) return `${km.toFixed(1)}km from ${hotelRef}`;
@@ -1998,7 +1999,8 @@ function ActivitiesCard({ config, onSubmit, disabled }: CardProps) {
 
   // BUG #8 FIX: Format distance with context (from hotel)
   const formatDistance = (km?: number, areaName?: string) => {
-    if (!km) return '';
+    if (km === undefined || km === null) return '';
+    if (km === 0) return 'At your hotel';
     const hotelRef = areaName ? `${areaName} hotel` : 'your hotel';
     if (km < 0.5) return `${Math.round(km * 1000)}m from ${hotelRef}`;
     if (km < 2) return `${km.toFixed(1)}km from ${hotelRef}`;
@@ -2066,7 +2068,7 @@ function ActivitiesCard({ config, onSubmit, disabled }: CardProps) {
             </div>
             {/* Activities in this area */}
             <div className="divide-y divide-slate-100 dark:divide-slate-700">
-              {areaActivities.slice(0, 5).map((activity) => (
+              {areaActivities.slice(0, 8).map((activity) => (
                 <button
                   key={activity.id}
                   onClick={() => toggleSelect(activity.id)}
@@ -2217,7 +2219,8 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
 
   // BUG #8 FIX: Format distance with context (from hotel)
   const formatDistance = (km?: number, areaName?: string) => {
-    if (!km) return '';
+    if (km === undefined || km === null) return '';
+    if (km === 0) return 'At your hotel';
     const hotelRef = areaName ? `${areaName} hotel` : 'your hotel';
     if (km < 0.5) return `${Math.round(km * 1000)}m from ${hotelRef}`;
     if (km < 2) return `${km.toFixed(1)}km from ${hotelRef}`;
@@ -2311,7 +2314,7 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
               </div>
               {/* Experiences in this area */}
               <div className="divide-y divide-slate-100 dark:divide-slate-700">
-                {areaExperiences.slice(0, 4).map((experience) => (
+                {areaExperiences.slice(0, 8).map((experience) => (
                   <div
                     key={experience.id}
                     className={`w-full p-3 flex items-start gap-3 text-left transition-colors ${
@@ -2563,13 +2566,23 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
   const areas = config.areaCandidates || [];
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  const MAX_AREAS = 3;
+  const [limitReached, setLimitReached] = useState(false);
+
   const toggleSelect = (areaId: string) => {
     if (disabled) return;
     const newSelected = new Set(selected);
     if (newSelected.has(areaId)) {
       newSelected.delete(areaId);
-    } else if (newSelected.size < 3) { // Max 3 areas
+      setLimitReached(false);
+    } else if (newSelected.size < MAX_AREAS) {
       newSelected.add(areaId);
+      setLimitReached(false);
+    } else {
+      // Flash limit warning
+      setLimitReached(true);
+      setTimeout(() => setLimitReached(false), 2000);
+      return;
     }
     setSelected(newSelected);
   };
@@ -2699,6 +2712,11 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
         >
           {selected.size > 0 ? `Continue with ${selected.size} area${selected.size > 1 ? 's' : ''}` : 'Select at least 1 area'}
         </button>
+        {limitReached && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 text-center mt-1">
+            Maximum {MAX_AREAS} areas — deselect one to choose a different area
+          </p>
+        )}
       </div>
     </div>
   );
@@ -2790,10 +2808,9 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
       currentTotal += customNights[area.id] ?? defaultNightsPerArea;
     }
 
-    // Validation
+    // Validation: each area must have at least 1 night
     if (newValue < 1) return;
     if (currentTotal + delta > tripLength && delta > 0) return;
-    if (currentTotal + delta < areas.length && delta < 0) return;
 
     setCustomNights({ ...customNights, [areaId]: newValue });
   };
@@ -2832,18 +2849,20 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
     }
   };
 
-  // Debug
-  console.log('[SplitCard] Rendering:', {
-    splitsCount: splits.length,
-    areasCount: areas.length,
-    areaNames: areas.map((a: any) => a.name),
-    tripLength,
-    showCustom,
-    selected,
-    customConfirmed,
-    customNights,
-    totalCustomNights,
-  });
+  // Debug (dev only)
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[SplitCard] Rendering:', {
+      splitsCount: splits.length,
+      areasCount: areas.length,
+      areaNames: areas.map((a: any) => a.name),
+      tripLength,
+      showCustom,
+      selected,
+      customConfirmed,
+      customNights,
+      totalCustomNights,
+    });
+  }
 
   if (splits.length === 0 && areas.length === 0) {
     return (

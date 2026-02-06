@@ -6,6 +6,7 @@
  * Shows users exactly what's happening during long loads
  */
 
+import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 
@@ -193,8 +194,7 @@ function RotatingMessage({ messages }: { messages: string[] }) {
   );
 }
 
-// Import React for useState/useEffect
-import React from 'react';
+// React is imported at the top of the file
 
 /**
  * Inline loading indicator for smaller contexts
