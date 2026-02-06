@@ -717,6 +717,17 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
             return;
           }
         }
+        // No activities or no experience question — check if we should generate
+        const currentPhaseAfterRestaurants = orchestrator.getPhase();
+        if (currentPhaseAfterRestaurants === 'generating') {
+          setPhase('generating');
+          await handleGenerationPhase();
+          setIsTyping(false);
+          setIsProcessing(false); isProcessingRef.current = false;
+          setSnooState('idle');
+          setDebugLog([...orchestrator.getDebugLog()]);
+          return;
+        }
       } else if (nextQuestion) {
         // Experiences or other question
         orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');

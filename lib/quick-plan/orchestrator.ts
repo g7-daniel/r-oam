@@ -2974,6 +2974,19 @@ export class QuickPlanOrchestrator {
         this.state.preferences.diningMode = inferredDining.id as DiningMode;
         this.setConfidence('dining', 'inferred');
         break;
+      case 'tripOccasion':
+        const inferredOccasion = value as { id: string };
+        (this.state.preferences as any).tripOccasion = inferredOccasion.id;
+        this.setConfidence('tripOccasion', 'inferred');
+        break;
+      case 'accommodationType':
+        const inferredAccom = value as { id: string };
+        (this.state.preferences as any).accommodationType = inferredAccom.id;
+        break;
+      case 'sustainabilityPreference':
+        const inferredSustainability = value as { id: string };
+        (this.state.preferences as any).sustainabilityPreference = inferredSustainability.id;
+        break;
     }
   }
 
@@ -3854,6 +3867,9 @@ Ask something that would help personalize their experience. Keep it casual.`;
   private handleDissatisfaction(reasons: string[], customFeedback?: string): void {
     this.log('orchestrator', 'Handling dissatisfaction', { reasons, customFeedback });
 
+    const PHASE_ORDER = ['gathering', 'enriching', 'generating', 'reviewing'];
+    const targetPhases: string[] = [];
+
     // Map reasons to actions - reset specific confidence levels to trigger regeneration
     for (const reason of reasons) {
       switch (reason) {
@@ -3861,28 +3877,28 @@ Ask something that would help personalize their experience. Keep it casual.`;
           // Go back to area discovery
           this.setConfidence('areas', 'unknown');
           this.state.discoveredData.areas = [];
-          this.state.phase = 'enriching';
+          targetPhases.push('enriching');
           break;
 
         case 'wrong_vibe':
           // Clear vibe preference (stored as .vibe, not .vibes) to re-ask
           (this.state.preferences as any).vibe = undefined;
           this.setConfidence('vibe', 'unknown');
-          this.state.phase = 'gathering';
+          targetPhases.push('gathering');
           break;
 
         case 'too_packed':
         case 'too_chill':
           // Adjust pace preference
           this.state.preferences.pace = reason === 'too_packed' ? 'chill' : 'packed';
-          this.state.phase = 'generating';
+          targetPhases.push('generating');
           break;
 
         case 'hotel_wrong':
           // Go back to hotel selection — keep discovered hotels, only clear selections
           this.setConfidence('hotels', 'unknown');
           (this.state.preferences as any).selectedHotels = {};
-          this.state.phase = 'enriching';
+          targetPhases.push('enriching');
           break;
 
         case 'dining_wrong':
@@ -3891,13 +3907,13 @@ Ask something that would help personalize their experience. Keep it casual.`;
           this.state.discoveredData.restaurants.clear();
           (this.state.preferences as any).selectedRestaurants = undefined;
           (this.state.preferences as any).cuisinePreferences = undefined;
-          this.state.phase = 'enriching';
+          targetPhases.push('enriching');
           break;
 
         case 'too_touristy':
           // Store preference for off-beaten-path
           this.state.preferences.avoidTouristy = true;
-          this.state.phase = 'generating';
+          targetPhases.push('generating');
           break;
 
         case 'missing_activity':
@@ -3907,13 +3923,13 @@ Ask something that would help personalize their experience. Keep it casual.`;
               this.state.preferences.mustIncludeActivities || [];
             this.state.preferences.mustIncludeActivities.push(customFeedback);
           }
-          this.state.phase = 'generating';
+          targetPhases.push('generating');
           break;
 
         case 'surf_days_wrong':
           // Clear surfing details so user can re-specify (keep activity selections intact)
           (this.state.preferences as any).surfingDetails = undefined;
-          this.state.phase = 'gathering';
+          targetPhases.push('gathering');
           break;
 
         case 'budget_exceeded':
@@ -3921,7 +3937,7 @@ Ask something that would help personalize their experience. Keep it casual.`;
           if (this.state.preferences.budgetPerNight) {
             this.state.preferences.budgetPerNight.max = Math.round(this.state.preferences.budgetPerNight.max * 1.25);
           }
-          this.state.phase = 'generating';
+          targetPhases.push('generating');
           break;
 
         default:
@@ -3929,9 +3945,13 @@ Ask something that would help personalize their experience. Keep it casual.`;
           if (customFeedback) {
             this.state.preferences.customFeedback = customFeedback;
           }
-          this.state.phase = 'generating';
+          targetPhases.push('generating');
       }
     }
+
+    // Set phase to the earliest needed to address all selected reasons
+    const earliest = PHASE_ORDER.find(p => targetPhases.includes(p)) || 'generating';
+    this.state.phase = earliest as any;
 
     // Add a message acknowledging the feedback
     this.addSnooMessage(
@@ -3983,12 +4003,14 @@ Ask something that would help personalize their experience. Keep it casual.`;
       messages: this.state.messages,
       currentQuestion: this.state.currentQuestion,
       itinerary: this.state.itinerary,
+      seasonalWarnings: this.state.seasonalWarnings,
+      questionHistory: (this.state as any).questionHistory,
     };
   }
 
   static fromJSON(json: ReturnType<QuickPlanOrchestrator['toJSON']>): QuickPlanOrchestrator {
     const data = json as any;
-    return new QuickPlanOrchestrator({
+    const orchestrator = new QuickPlanOrchestrator({
       ...data,
       discoveredData: {
         areas: data.discoveredData.areas,
@@ -3998,6 +4020,10 @@ Ask something that would help personalize their experience. Keep it casual.`;
         experiences: new Map(data.discoveredData.experiences || []),
       },
     });
+    if (data.questionHistory) {
+      (orchestrator.state as any).questionHistory = data.questionHistory;
+    }
+    return orchestrator;
   }
 }
 

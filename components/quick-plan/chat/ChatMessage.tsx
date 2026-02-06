@@ -223,7 +223,7 @@ export function SnooMessage({ content, snooState = 'idle', evidence, showTyping,
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.1 }}
-          className="ml-13 pl-[52px]"
+          className="ml-[52px]"
         >
           {children}
         </motion.div>

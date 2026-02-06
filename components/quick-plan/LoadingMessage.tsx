@@ -130,10 +130,9 @@ export default function LoadingMessage({
       <div className="relative flex-shrink-0">
         <span className="text-2xl">{config.icon}</span>
         <motion.div
-          className="absolute inset-0 rounded-full bg-current opacity-20"
+          className={`absolute inset-0 rounded-full bg-current opacity-20 ${config.color}`}
           animate={{ scale: [1, 1.5, 1], opacity: [0.2, 0, 0.2] }}
           transition={{ duration: 1.5, repeat: Infinity }}
-          style={{ color: config.color.replace('text-', '') }}
         />
       </div>
 

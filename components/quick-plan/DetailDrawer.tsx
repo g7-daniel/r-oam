@@ -285,7 +285,7 @@ function HotelDetails({ hotel }: { hotel: HotelCandidate }) {
       {/* Amenities */}
       {hotel.amenities && hotel.amenities.length > 0 && (
         <div>
-          <h3 className="font-medium text-slate-900 mb-2">Amenities</h3>
+          <h3 className="font-medium text-slate-900 dark:text-white mb-2">Amenities</h3>
           <div className="flex flex-wrap gap-2">
             {hotel.amenities.slice(0, 8).map((amenity, i) => (
               <span
@@ -302,7 +302,7 @@ function HotelDetails({ hotel }: { hotel: HotelCandidate }) {
       {/* Why this hotel */}
       {hotel.reasons && hotel.reasons.length > 0 && (
         <div>
-          <h3 className="font-medium text-slate-900 mb-2">Why we recommend it</h3>
+          <h3 className="font-medium text-slate-900 dark:text-white mb-2">Why we recommend it</h3>
           <ul className="space-y-1.5">
             {hotel.reasons.map((reason, i) => (
               <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
@@ -375,7 +375,7 @@ function RestaurantDetails({ restaurant }: { restaurant: RestaurantCandidate }) 
       {/* Best for */}
       {restaurant.bestFor && restaurant.bestFor.length > 0 && (
         <div>
-          <h3 className="font-medium text-slate-900 mb-2">Best for</h3>
+          <h3 className="font-medium text-slate-900 dark:text-white mb-2">Best for</h3>
           <div className="flex gap-2">
             {restaurant.bestFor.map((time, i) => (
               <span
@@ -400,7 +400,7 @@ function RestaurantDetails({ restaurant }: { restaurant: RestaurantCandidate }) 
       {/* Why we recommend */}
       {restaurant.reasons && restaurant.reasons.length > 0 && (
         <div>
-          <h3 className="font-medium text-slate-900 mb-2">Why we recommend it</h3>
+          <h3 className="font-medium text-slate-900 dark:text-white mb-2">Why we recommend it</h3>
           <ul className="space-y-1.5">
             {restaurant.reasons.map((reason, i) => (
               <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
@@ -487,7 +487,7 @@ function ExperienceDetails({ experience }: { experience: ExperienceItem }) {
       {/* Why we recommend */}
       {experience.reasons && experience.reasons.length > 0 && (
         <div>
-          <h3 className="font-medium text-slate-900 mb-2">Why we recommend it</h3>
+          <h3 className="font-medium text-slate-900 dark:text-white mb-2">Why we recommend it</h3>
           <ul className="space-y-1.5">
             {experience.reasons.map((reason, i) => (
               <li key={i} className="flex items-start gap-2 text-sm text-slate-600">

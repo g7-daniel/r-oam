@@ -1378,6 +1378,10 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
           {topHotels.map((hotel) => (
             <div
               key={hotel.id}
+              role="button"
+              tabIndex={0}
+              aria-label={`Select ${hotel.name}`}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect(hotel); } }}
               className={`flex gap-4 p-3.5 rounded-xl border-2 transition-all cursor-pointer ${
                 selected === hotel.id
                   ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20 shadow-md shadow-orange-500/10'
@@ -3273,12 +3277,13 @@ function SatisfactionCard({ config, onSubmit, disabled }: CardProps) {
               What would you like to change? (select all that apply)
             </p>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Select reasons for dissatisfaction">
               {DISSATISFACTION_OPTIONS.map((option) => (
                 <button
                   key={option.id}
                   onClick={() => toggleReason(option.id)}
                   disabled={disabled}
+                  aria-pressed={selectedReasons.has(option.id)}
                   className={`p-3 rounded-lg border text-left transition-all text-sm ${
                     selectedReasons.has(option.id)
                       ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20'

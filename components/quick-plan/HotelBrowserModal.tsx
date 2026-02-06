@@ -234,15 +234,18 @@ export default function HotelBrowserModal({
     }));
   }, [priceStats, nightCount]);
 
-  // Escape key to close modal
+  // Escape key to close modal (skip if child dialog is open)
   useEffect(() => {
     if (!isOpen) return;
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (showFilterPanel || detailHotel) return;
+        onClose();
+      }
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, showFilterPanel, detailHotel]);
 
   // Prevent body scroll
   useEffect(() => {
