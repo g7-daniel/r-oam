@@ -11,6 +11,7 @@ import { getSeasonalWarnings, formatSeasonalWarnings, hasSignificantWarnings, ty
 import { detectThemeParkDestination, getThemeParkGuidance, generateThemeParkItinerary } from './theme-park-data';
 import { detectSurfDestination, getSurfRecommendations } from './surf-data';
 import { getEventsForDates, hasSignificantEvents, type LocalEvent } from './events-api';
+import { clientEnv } from '@/lib/env';
 
 // FIX 1.9: LLM calls with retry logic and graceful error recovery
 async function callLLM(
@@ -18,6 +19,8 @@ async function callLLM(
   temperature = 0.7,
   retries = 2
 ): Promise<string> {
+  let lastError: Error | null = null;
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await fetch('/api/quick-plan/chat', {
@@ -36,19 +39,24 @@ async function callLLM(
       }
       return data.content;
     } catch (error) {
-      console.warn(`LLM call attempt ${attempt + 1}/${retries + 1} failed:`, error);
+      // BUG FIX: Store the error for logging
+      lastError = error instanceof Error ? error : new Error(String(error));
 
       if (attempt === retries) {
-        // Return graceful fallback message after all retries exhausted
-        console.error('All LLM retries exhausted, using fallback response');
+        // BUG FIX: Log the actual error before returning fallback
+        console.error('[callLLM] All retries exhausted:', lastError.message);
         return "I'm having a bit of trouble processing that. Let me try a different approach.";
       }
 
       // Wait before retry (exponential backoff)
-      await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 500));
+      // BUG FIX: Cap maximum backoff at 4 seconds to prevent infinite loops
+      const backoffMs = Math.min(Math.pow(2, attempt) * 500, 4000);
+      await new Promise(r => setTimeout(r, backoffMs));
     }
   }
-  return '';
+  // BUG FIX: This should be truly unreachable now, but keep for type safety
+  console.error('[callLLM] Unexpected code path reached');
+  return "I'm having a bit of trouble processing that. Let me try a different approach.";
 }
 import type {
   OrchestratorState,
@@ -60,7 +68,7 @@ import type {
   ReplyCardType,
   ReplyCardConfig,
   ChipOption,
-  ChatMessage,
+  SnooChatMessage,
   Tradeoff,
   TradeoffResolution,
   AreaCandidate,
@@ -73,6 +81,7 @@ import type {
   DiningMode,
   ItinerarySplit,
   ItineraryStop,
+  SurfingDetails,
 } from '@/types/quick-plan';
 
 // ============================================================================
@@ -90,7 +99,7 @@ function getApiBaseUrl(): string {
     return window.location.origin;
   }
   // This module is client-only; fallback should never be reached in production
-  return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+  return clientEnv.BASE_URL;
 }
 
 /**
@@ -102,28 +111,27 @@ async function fetchDestinationSubreddits(
 ): Promise<{ id: string; label: string; icon: string; description: string }[]> {
   // Only run in browser
   if (typeof window === 'undefined') {
-    console.log('[Subreddits] Skipping - not in browser');
     return [];
   }
 
   const cacheKey = destination.toLowerCase();
-  console.log(`[Subreddits] fetchDestinationSubreddits called for: ${destination}`);
 
   // Return cached if available
   if (subredditSuggestionsCache.has(cacheKey)) {
-    console.log(`[Subreddits] Returning cached results for ${destination}`);
-    return subredditSuggestionsCache.get(cacheKey)!;
+    const cached = subredditSuggestionsCache.get(cacheKey);
+    // BUG FIX: Add null check even though we just checked .has()
+    if (cached) return cached;
   }
 
   // Return pending promise if already fetching
   if (subredditSuggestionsPending.has(cacheKey)) {
-    console.log(`[Subreddits] Returning pending promise for ${destination}`);
-    return subredditSuggestionsPending.get(cacheKey)!;
+    const pending = subredditSuggestionsPending.get(cacheKey);
+    // BUG FIX: Add null check even though we just checked .has()
+    if (pending) return pending;
   }
 
   const fetchPromise = (async () => {
     try {
-      console.log(`[Subreddits] Starting API call for ${destination}`);
       const prompt = `For a trip to ${destination}, suggest 4-6 relevant Reddit subreddits that would have travel advice.
 
 Include:
@@ -149,7 +157,6 @@ Rules:
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
       const apiUrl = `${getApiBaseUrl()}/api/quick-plan/chat`;
-      console.log(`[Subreddits] Calling API: ${apiUrl}`);
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -165,22 +172,18 @@ Rules:
       });
       clearTimeout(timeoutId);
 
-      console.log(`[Subreddits] API response status: ${response.status}`);
-
       if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
       }
 
       const data = await response.json();
       const content = data.content || '';
-      console.log(`[Subreddits] API response content length: ${content.length}`);
 
       // Parse JSON from response
       const jsonMatch = content.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         const subreddits = JSON.parse(jsonMatch[0]);
         if (Array.isArray(subreddits) && subreddits.length > 0) {
-          console.log(`[Subreddits] SUCCESS! AI suggested ${subreddits.length} subreddits for ${destination}:`, subreddits.map(s => s.id));
           subredditSuggestionsCache.set(cacheKey, subreddits);
           return subreddits;
         }
@@ -209,23 +212,23 @@ async function fetchDestinationActivities(
 ): Promise<{ id: string; label: string; icon: string }[]> {
   // Only run in browser
   if (typeof window === 'undefined') {
-    console.log('[Activities] Skipping - not in browser');
     return [];
   }
 
   const cacheKey = destination.toLowerCase();
-  console.log(`[Activities] fetchDestinationActivities called for: ${destination}`);
 
   // Return cached if available
   if (activitySuggestionsCache.has(cacheKey)) {
-    console.log(`[Activities] Returning cached results for ${destination}`);
-    return activitySuggestionsCache.get(cacheKey)!;
+    const cached = activitySuggestionsCache.get(cacheKey);
+    // BUG FIX: Add null check even though we just checked .has()
+    if (cached) return cached;
   }
 
   // Return pending promise if already fetching
   if (activitySuggestionsPending.has(cacheKey)) {
-    console.log(`[Activities] Returning pending promise for ${destination}`);
-    return activitySuggestionsPending.get(cacheKey)!;
+    const pending = activitySuggestionsPending.get(cacheKey);
+    // BUG FIX: Add null check even though we just checked .has()
+    if (pending) return pending;
   }
 
   // Default activities (universal fallback)
@@ -244,7 +247,6 @@ async function fetchDestinationActivities(
 
   const fetchPromise = (async () => {
     try {
-      console.log(`[Activities] Starting API call for ${destination}`);
       const prompt = `For a trip to ${destination}, suggest 10-12 activities that are UNIQUELY relevant to this destination.
 
 Include activities that ${destination} is specifically known for, not generic activities.
@@ -272,7 +274,6 @@ Rules:
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
       const apiUrl = `${getApiBaseUrl()}/api/quick-plan/chat`;
-      console.log(`[Activities] Calling API: ${apiUrl}`);
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -288,22 +289,18 @@ Rules:
       });
       clearTimeout(timeoutId);
 
-      console.log(`[Activities] API response status: ${response.status}`);
-
       if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
       }
 
       const data = await response.json();
       const content = data.content || '';
-      console.log(`[Activities] API response content length: ${content.length}`);
 
       // Parse JSON from response
       const jsonMatch = content.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         const activities = JSON.parse(jsonMatch[0]);
         if (Array.isArray(activities) && activities.length > 0) {
-          console.log(`[Activities] SUCCESS! AI suggested ${activities.length} activities for ${destination}:`, activities.map(a => a.id));
           activitySuggestionsCache.set(cacheKey, activities);
           return activities;
         }
@@ -557,8 +554,10 @@ function detectMultiCountry(destination: string): MultiCountryInfo {
           potentialCountries[0] !== potentialCountries[1] &&
           knownCountries.has(potentialCountries[0]) &&
           knownCountries.has(potentialCountries[1])) {
+        // BUG FIX (R4): Capitalize each word for multi-word country names
+        // e.g. "south africa" -> "South Africa", not "South africa"
         const countries = potentialCountries.map(c =>
-          c.charAt(0).toUpperCase() + c.slice(1).toLowerCase()
+          c.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
         );
         return {
           countries,
@@ -578,8 +577,9 @@ function detectMultiCountry(destination: string): MultiCountryInfo {
   if (listPattern.length >= 3) {
     const validCountries = listPattern.filter(c => knownCountries.has(c));
     if (validCountries.length >= 3) {
+      // BUG FIX (R4): Capitalize each word for multi-word country names
       const countries = validCountries.map(c =>
-        c.charAt(0).toUpperCase() + c.slice(1).toLowerCase()
+        c.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
       );
       return {
         countries,
@@ -912,7 +912,7 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     inputType: 'chips',
     getInputConfig: (state) => {
       const budget = state.preferences.budgetPerNight?.max || 200;
-      const tripOccasion = (state.preferences as any).tripOccasion;
+      const tripOccasion = state.preferences.tripOccasion;
       const isGroup = (state.preferences.adults || 2) >= 4;
       const hasKids = (state.preferences.children || 0) > 0;
 
@@ -958,8 +958,8 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     canInfer: true,
     inferFrom: (state) => {
       const budget = state.preferences.budgetPerNight?.max || 200;
-      const tripOccasion = (state.preferences as any).tripOccasion;
-      const suggestedType = (state.preferences as any).suggestedAccommodationType;
+      const tripOccasion = state.preferences.tripOccasion;
+      const suggestedType = state.preferences.suggestedAccommodationType;
 
       // Infer hostel for very budget travelers
       if (budget <= 70) return { id: 'hostel' };
@@ -986,7 +986,7 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     canInfer: true,
     inferFrom: (state) => {
       // If user chose eco_lodge accommodation, infer eco-focused
-      const accommodationType = (state.preferences as any).accommodationType;
+      const accommodationType = state.preferences.accommodationType;
       if (accommodationType === 'eco_lodge') return { id: 'eco_focused' };
       return null;
     },
@@ -1003,8 +1003,6 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       const hasChildren = (state.preferences.children || 0) > 0;
       const isSolo = state.preferences.adults === 1 && !hasChildren;
 
-      console.log('[subreddits getInputConfig] Budget:', budget, 'HasChildren:', hasChildren, 'IsSolo:', isSolo);
-
       // Get AI-suggested destination-specific subreddits from cache
       const cacheKey = destination.toLowerCase();
       const cachedSubreddits = subredditSuggestionsCache.get(cacheKey);
@@ -1013,10 +1011,8 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       const options: { id: string; label: string; icon: string; description: string }[] = [];
 
       if (cachedSubreddits && cachedSubreddits.length > 0) {
-        console.log(`[subreddits] Using ${cachedSubreddits.length} AI-suggested subreddits for ${destination}`);
         options.push(...cachedSubreddits);
       } else {
-        console.log(`[subreddits] No AI suggestions cached for ${destination}, using general subreddits`);
       }
 
       // Add party composition subreddits
@@ -1086,7 +1082,6 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       const hasChildren = (state.preferences.children || 0) > 0;
       const childAges = state.preferences.childAges || [];
       const youngestChildAge = childAges.length > 0 ? Math.min(...childAges) : 0;
-      console.log('[activities getInputConfig] Children detected:', hasChildren, 'Ages:', childAges, 'Youngest:', youngestChildAge);
 
       // PHASE 3 FIX: Use AI-suggested activities if available (cached from destination confirmation)
       const destName = state.preferences.destinationContext?.canonicalName ||
@@ -1116,9 +1111,7 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
           ];
 
       if (cachedActivities) {
-        console.log(`[activities] Using ${cachedActivities.length} AI-suggested activities for ${destName}`);
       } else {
-        console.log(`[activities] Using default activities (AI suggestions not yet cached for ${destName})`);
       }
 
       // For families with young children, add descriptions noting age requirements
@@ -1236,9 +1229,14 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     field: 'areas',
     snooMessage: pickTemplate(SNOO_TEMPLATES.foundAreas),
     inputType: 'areas',
-    getInputConfig: (state) => ({
-      areaCandidates: state.discoveredData.areas,
-    }),
+    getInputConfig: (state) => {
+      const tripLength = state.preferences.tripLength || 7;
+      const splitAdvice = getSplitAdvice(tripLength);
+      return {
+        areaCandidates: state.discoveredData.areas,
+        maxSelection: splitAdvice.maxBases,
+      };
+    },
     required: true,
     canInfer: false,
   },
@@ -1249,12 +1247,6 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     getInputConfig: (state) => {
       const areas = state.preferences.selectedAreas || [];
       const tripLength = state.preferences.tripLength || 7;
-
-      console.log('[Split getInputConfig] Generating split options:', {
-        areasCount: areas.length,
-        areaNames: areas.map(a => a.name),
-        tripLength,
-      });
 
       // Generate split options based on number of areas
       const splitOptions: ItinerarySplit[] = [];
@@ -1334,20 +1326,44 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         // Option with more time in first area
         // Bug fix: ensure no area gets 0 nights - need at least 3*areas nights to redistribute
         if (tripLength >= effectiveAreas.length * 3) {
-          const focusStops = effectiveAreas.map((area, idx) => ({
-            areaId: area.id,
-            areaName: area.name,
-            // Give first area +2 nights, last area -1, redistribute remaining from middle
-            nights: idx === 0
-              ? baseNights + 2
-              : (idx === effectiveAreas.length - 1
-                  ? Math.max(1, baseNights + extraNights - 1)
-                  : Math.max(1, baseNights - Math.ceil(1 / (effectiveAreas.length - 2)))),
-            area,
-          }));
-          // Verify all stops have at least 1 night
+          // Calculate nights for focus-first split with validation
+          // Give first area more nights, ensure all areas have at least 1 night
+          const minNightsPerArea = 1;
+          const firstAreaBonus = 2;
+          const remainingNights = tripLength - (effectiveAreas.length * minNightsPerArea) - firstAreaBonus;
+
+          // Distribute remaining nights to ensure total equals tripLength
+          const focusStops = effectiveAreas.map((area, idx) => {
+            if (idx === 0) {
+              return {
+                areaId: area.id,
+                areaName: area.name,
+                nights: minNightsPerArea + firstAreaBonus,
+                area,
+              };
+            } else {
+              // Distribute remaining nights evenly among other areas
+              const shareOfRemaining = Math.floor(remainingNights / (effectiveAreas.length - 1));
+              return {
+                areaId: area.id,
+                areaName: area.name,
+                nights: minNightsPerArea + shareOfRemaining,
+                area,
+              };
+            }
+          });
+
+          // Add any leftover nights to the last area
+          const totalAssigned = focusStops.reduce((sum, s) => sum + s.nights, 0);
+          const leftover = tripLength - totalAssigned;
+          if (leftover > 0) {
+            focusStops[focusStops.length - 1].nights += leftover;
+          }
+
+          // Verify all stops have at least 1 night and total equals tripLength
           const allValid = focusStops.every(s => s.nights >= 1);
-          if (allValid && focusStops.reduce((sum, s) => sum + s.nights, 0) === tripLength) {
+          const totalNights = focusStops.reduce((sum, s) => sum + s.nights, 0);
+          if (allValid && totalNights === tripLength) {
             splitOptions.push(createItinerarySplit(
               'focus-first',
               focusStops.map(s => `${s.nights}n ${s.areaName}`).join(' → '),
@@ -1361,7 +1377,6 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
 
       // If no options generated (shouldn't happen), create a default
       if (splitOptions.length === 0 && areas.length > 0) {
-        console.warn('[Split getInputConfig] No options generated, creating default');
         // Bug fix: ensure minimum 1 night per area - limit areas if needed
         const maxAreas = Math.min(areas.length, tripLength);
         const limitedAreas = areas.slice(0, maxAreas);
@@ -1383,7 +1398,6 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
         ));
       }
 
-      console.log('[Split getInputConfig] Returning', splitOptions.length, 'split options:', splitOptions.map(o => o.name));
       return { splitOptions, areas, tripLength };
     },
     required: true,
@@ -1395,7 +1409,6 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     inputType: 'chips-multi',
     getInputConfig: (state) => {
       const hasChildren = (state.preferences.children || 0) > 0;
-      console.log('[hotelPreferences getInputConfig] Children detected:', hasChildren);
 
       const baseOptions = [
         { id: 'pool', label: 'Pool', icon: '🏊' },
@@ -1440,20 +1453,15 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     getInputConfig: (state) => {
       // Get hotels for the first area that doesn't have a selection yet
       const areas = state.preferences.selectedAreas || [];
-      const selectedHotels = (state.preferences as any).selectedHotels || {};
-
-      console.log('[Hotels getInputConfig] selectedAreas:', areas.map(a => a.id));
-      console.log('[Hotels getInputConfig] already selected:', Object.keys(selectedHotels));
+      const selectedHotels = state.preferences.selectedHotels || {};
 
       for (const area of areas) {
         // Skip areas that already have a hotel selected
         if (selectedHotels[area.id]) {
-          console.log(`[Hotels getInputConfig] Area ${area.id} already has hotel selected`);
           continue;
         }
 
         const hotels = state.discoveredData.hotels.get(area.id);
-        console.log(`[Hotels getInputConfig] Area ${area.id}: ${hotels?.length || 0} hotels available`);
         if (hotels && hotels.length > 0) {
           return { candidates: hotels, areaName: area.name, areaId: area.id };
         }
@@ -1545,22 +1553,17 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
     inputType: 'restaurants',
     getInputConfig: (state) => {
       // Get restaurants for the first cuisine type that doesn't have selections yet
-      const cuisinePrefs = (state.preferences as any).cuisinePreferences || [];
-      const selectedRestaurants = (state.preferences as any).selectedRestaurants || {};
+      const cuisinePrefs = state.preferences.cuisinePreferences || [];
+      const selectedRestaurants = state.preferences.selectedRestaurants || {};
       const areas = state.preferences.selectedAreas || [];
-
-      console.log('[Restaurants getInputConfig] cuisinePrefs:', cuisinePrefs);
-      console.log('[Restaurants getInputConfig] already selected:', Object.keys(selectedRestaurants));
 
       for (const cuisine of cuisinePrefs) {
         // Skip cuisines that already have restaurants selected
         if (selectedRestaurants[cuisine]) {
-          console.log(`[Restaurants getInputConfig] Cuisine ${cuisine} already has restaurants selected`);
           continue;
         }
 
         const restaurants = state.discoveredData.restaurants.get(cuisine);
-        console.log(`[Restaurants getInputConfig] Cuisine ${cuisine}: ${restaurants?.length || 0} restaurants available`);
         if (restaurants && restaurants.length > 0) {
           // Format cuisine label nicely
           const cuisineLabels: Record<string, string> = {
@@ -1598,21 +1601,16 @@ const FIELD_QUESTIONS: Record<string, FieldQuestionConfig> = {
       // Get experiences for the first activity type that doesn't have selections yet
       const selectedActivities = state.preferences.selectedActivities || [];
       const activityTypes = selectedActivities.map(a => a.type);
-      const selectedExperiences = (state.preferences as any).selectedExperiences || {};
+      const selectedExperiences = state.preferences.selectedExperiences || {};
       const areas = state.preferences.selectedAreas || [];
-
-      console.log('[Experiences getInputConfig] activityTypes:', activityTypes);
-      console.log('[Experiences getInputConfig] already selected:', Object.keys(selectedExperiences));
 
       for (const activity of activityTypes) {
         // Skip activities that already have experiences selected
         if (selectedExperiences[activity]) {
-          console.log(`[Experiences getInputConfig] Activity ${activity} already has experiences selected`);
           continue;
         }
 
-        const experiences = (state.discoveredData as any).experiences?.get(activity);
-        console.log(`[Experiences getInputConfig] Activity ${activity}: ${experiences?.length || 0} experiences available`);
+        const experiences = state.discoveredData.experiences?.get(activity);
         if (experiences && experiences.length > 0) {
           const activityLabels: Record<string, string> = {
             surf: 'Surfing',
@@ -1908,6 +1906,7 @@ export class QuickPlanOrchestrator {
       messages: [],
       currentQuestion: null,
       itinerary: null,
+      questionHistory: [],
       debugLog: [],
       ...override,
     };
@@ -1921,7 +1920,7 @@ export class QuickPlanOrchestrator {
     return this.state;
   }
 
-  getMessages(): ChatMessage[] {
+  getMessages(): SnooChatMessage[] {
     return this.state.messages;
   }
 
@@ -1950,15 +1949,14 @@ export class QuickPlanOrchestrator {
     activitySuggestionsPending.clear();
     subredditSuggestionsCache.clear();
     subredditSuggestionsPending.clear();
-    console.log('[Orchestrator] Reset to initial state (caches cleared)');
   }
 
   // ============================================================================
   // MESSAGE MANAGEMENT
   // ============================================================================
 
-  addMessage(message: Omit<ChatMessage, 'id' | 'timestamp'>): ChatMessage {
-    const fullMessage: ChatMessage = {
+  addMessage(message: Omit<SnooChatMessage, 'id' | 'timestamp'>): SnooChatMessage {
+    const fullMessage: SnooChatMessage = {
       ...message,
       id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
       timestamp: new Date(),
@@ -1967,7 +1965,7 @@ export class QuickPlanOrchestrator {
     return fullMessage;
   }
 
-  addSnooMessage(content: string, snooState: SnooState = 'idle', evidence?: RedditEvidence[]): ChatMessage {
+  addSnooMessage(content: string, snooState: SnooState = 'idle', evidence?: RedditEvidence[]): SnooChatMessage {
     return this.addMessage({
       type: 'snoo',
       content,
@@ -1976,7 +1974,7 @@ export class QuickPlanOrchestrator {
     });
   }
 
-  addUserMessage(content: string): ChatMessage {
+  addUserMessage(content: string): SnooChatMessage {
     return this.addMessage({
       type: 'user',
       content,
@@ -1990,13 +1988,13 @@ export class QuickPlanOrchestrator {
   addUserNote(field: string, note: string): void {
     if (!note || !note.trim()) return;
 
-    const existingNotes = (this.state.preferences as any).userNotes || [];
+    const existingNotes = this.state.preferences.userNotes || [];
     existingNotes.push({
       field,
       note: note.trim(),
       timestamp: new Date(),
     });
-    (this.state.preferences as any).userNotes = existingNotes;
+    this.state.preferences.userNotes = existingNotes;
     this.log('orchestrator', `User note added for ${field}: ${note.trim().substring(0, 50)}...`);
   }
 
@@ -2093,114 +2091,182 @@ export class QuickPlanOrchestrator {
   // ============================================================================
 
   /**
-   * Go back to previous question to change an answer
+   * Go back to previous question to change an answer.
+   * Returns the target field name so the caller can request that specific question,
+   * or null if going back is not possible.
    */
-  goToPreviousQuestion(): boolean {
-    const questionHistory = (this.state as any).questionHistory || [];
+  goToPreviousQuestion(): string | null {
+    const questionHistory = this.state.questionHistory || [];
 
-    if (questionHistory.length < 2) {
-      console.log('[Orchestrator] Cannot go back - at first question or no history');
-      return false; // Can't go back from first question
+    // questionHistory tracks ANSWERED questions only.
+    // The current displayed question is NOT in the history yet.
+    // So going "back" means going to the last item in history (the most recently answered question).
+    if (questionHistory.length < 1) {
+      return null; // Can't go back — no answered questions
     }
 
-    // Get the previous question's field
-    const currentField = questionHistory[questionHistory.length - 1];
-    const previousField = questionHistory[questionHistory.length - 2];
+    // The target is the last answered question
+    const targetField = questionHistory[questionHistory.length - 1];
+    const displayedField = this.state.currentQuestion?.field || '(unknown)';
 
-    console.log('[Orchestrator] Going back from', currentField, 'to', previousField);
-
-    // Reset confidence for the previous field
-    if (previousField in this.state.confidence) {
-      (this.state.confidence as any)[previousField] = 'unknown';
-    }
-
-    // Clear the preference value for the previous field
-    if (previousField in this.state.preferences) {
-      delete (this.state.preferences as any)[previousField];
-    }
-    // Also clear related derived properties for specific fields
-    const relatedProps: Record<string, string[]> = {
-      travelingWithPets: ['hasPets', 'travelingWithPetsType'],
+    // Comprehensive mapping of field names to their actual preference property keys
+    const FIELD_CLEAR_MAP: Record<string, string[]> = {
+      destination: ['destinationContext'],
+      dates: ['startDate', 'endDate', 'tripLength', 'isFlexibleDates'],
+      party: ['adults', 'children', 'childAges', 'estimatedRooms'],
+      tripOccasion: ['tripOccasion', 'specialMode'],
+      travelingWithPets: ['hasPets', 'travelingWithPets'],
+      travelingWithPetsType: ['travelingWithPetsType'],
+      accessibility: ['hasAccessibilityNeeds', 'accessibilityNeeds'],
+      accessibilityType: ['accessibilityNeeds'],
+      budget: ['budgetPerNight', 'budgetRange', 'budgetLabel', 'budgetIsUnlimited'],
+      accommodationType: ['accommodationType'],
+      sustainabilityPreference: ['sustainabilityPreference'],
+      pace: ['pace'],
+      activities: ['selectedActivities'],
+      surfingDetails: ['surfingDetails'],
+      activitySkillLevel: ['activitySkillLevel'],
+      vibe: ['vibe'],
+      subreddits: ['selectedSubreddits'],
+      userNotes: ['userNotes'],
+      areas: ['selectedAreas', 'selectedSplit', 'hotelPreferences', 'selectedHotels'],
+      split: ['selectedSplit', 'hotelPreferences', 'selectedHotels'],
+      hotelPreferences: ['hotelPreferences', 'selectedHotels'],
+      hotels: ['selectedHotels'],
+      dining: ['diningMode', 'dietaryRestrictions', 'cuisinePreferences', 'selectedRestaurants'],
+      dietaryRestrictions: ['dietaryRestrictions', 'cuisinePreferences', 'selectedRestaurants'],
+      cuisinePreferences: ['cuisinePreferences', 'selectedRestaurants'],
+      restaurants: ['selectedRestaurants'],
+      experiences: ['selectedExperiences'],
+      childNeeds: ['childNeeds'],
+      workationNeeds: ['workationNeeds'],
+      multiCountryLogistics: ['multiCountryLogistics'],
+      themeParkPreferences: ['themeParkPreferences'],
     };
-    for (const prop of relatedProps[previousField] || []) {
-      delete (this.state.preferences as any)[prop];
+
+    // Reset confidence for the target field so it gets re-asked
+    if (targetField in this.state.confidence) {
+      (this.state.confidence as Record<string, ConfidenceLevel>)[targetField] = 'unknown';
     }
 
-    // Remove last item from history
+    // Clear the preference values using the comprehensive mapping
+    // Special handling for 'hotels' — only remove the last area's selection, not all
+    if (targetField === 'hotels' && this.state.preferences.selectedHotels) {
+      const hotelKeys = Object.keys(this.state.preferences.selectedHotels);
+      if (hotelKeys.length > 0) {
+        const lastAreaId = hotelKeys[hotelKeys.length - 1];
+        delete this.state.preferences.selectedHotels[lastAreaId];
+      }
+      // If no selections remain, also reset confidence so all areas get re-asked
+      if (Object.keys(this.state.preferences.selectedHotels).length === 0) {
+        this.setConfidence('hotels', 'unknown');
+      }
+    } else {
+      const propsToClear = FIELD_CLEAR_MAP[targetField] || [targetField];
+      for (const prop of propsToClear) {
+        delete (this.state.preferences as Record<string, unknown>)[prop];
+      }
+      // Reset confidence for cascaded downstream fields so they get re-asked
+      const PROP_TO_CONFIDENCE: Record<string, string> = {
+        selectedAreas: 'areas', selectedSplit: 'split',
+        hotelPreferences: 'hotelPreferences', selectedHotels: 'hotels',
+        diningMode: 'dining', cuisinePreferences: 'cuisinePreferences',
+        selectedRestaurants: 'restaurants', selectedExperiences: 'experiences',
+      };
+      for (const prop of propsToClear) {
+        const confKey = PROP_TO_CONFIDENCE[prop];
+        if (confKey && confKey !== targetField) {
+          (this.state.confidence as Record<string, ConfidenceLevel>)[confKey] = 'unknown';
+        }
+      }
+    }
+
+    // Pop the target from history so re-answering it adds it back
     questionHistory.pop();
-    (this.state as any).questionHistory = questionHistory;
+    this.state.questionHistory = questionHistory;
 
     // Clear current question to force re-evaluation
     this.state.currentQuestion = null;
 
     // Revert phase if the target field belongs to an earlier phase.
-    // Enriching-phase fields are gated by `phase !== 'gathering'` in getMissingRequiredFields,
-    // so going back to a gathering field from a later phase requires reverting to gathering.
     const ENRICHING_PHASE_FIELDS = [
       'areas', 'split', 'hotelPreferences', 'hotels',
       'dining', 'dietaryRestrictions', 'cuisinePreferences', 'restaurants', 'experiences',
     ];
-    const targetIsGatheringField = !ENRICHING_PHASE_FIELDS.includes(previousField);
+    const targetIsGatheringField = !ENRICHING_PHASE_FIELDS.includes(targetField);
     if (targetIsGatheringField && this.state.phase !== 'gathering') {
-      console.log('[Orchestrator] Reverting phase to gathering for go-back to:', previousField);
       this.state.phase = 'gathering';
+      // Reset ALL enrichment statuses so the pipeline re-runs with updated preferences
+      this.setEnrichmentStatus('areas', 'pending');
+      this.setEnrichmentStatus('hotels', 'pending');
+      this.setEnrichmentStatus('restaurants', 'pending');
+      this.setEnrichmentStatus('experiences', 'pending');
+      // Clear discovered data so stale results aren't reused
+      this.state.discoveredData.areas = [];
+      this.state.discoveredData.hotels.clear();
+      this.state.discoveredData.restaurants.clear();
+      this.state.discoveredData.experiences.clear();
     }
 
-    this.log('orchestrator', `Went back to ${previousField}`, { from: currentField, to: previousField });
-    return true;
+    this.log('orchestrator', `Went back to ${targetField}`, { from: displayedField, to: targetField });
+    return targetField;
   }
 
   /**
    * Get the history of asked questions
    */
   getQuestionHistory(): string[] {
-    return (this.state as any).questionHistory || [];
+    return this.state.questionHistory || [];
+  }
+
+  /**
+   * Get a question config for a specific field (used by go-back to target the exact field)
+   */
+  async getQuestionConfigForField(field: string): Promise<QuestionConfig | null> {
+    return this.createQuestionConfig(field);
   }
 
   private getMissingRequiredFields(): string[] {
     const missing: string[] = [];
 
     // VERSION CHECK: This should show in console to verify new code is loaded
-    console.log('[getMissingRequiredFields] V2 - Starting check...', {
-      phase: this.state.phase,
-      confidence: { ...this.state.confidence },
-      hasSelectedSplit: !!this.state.preferences.selectedSplit,
-      hasHotelPreferences: !!(this.state.preferences as any).hotelPreferences,
-      selectedAreasCount: this.state.preferences.selectedAreas?.length || 0,
-    });
 
     if (this.state.confidence.destination === 'unknown') missing.push('destination');
     if (this.state.confidence.dates === 'unknown') missing.push('dates');
     if (this.state.confidence.party === 'unknown') missing.push('party');
 
     // Trip occasion asked after party (optional but highly valuable for personalization)
-    if (this.state.confidence.party !== 'unknown' &&
-        !(this.state.preferences as any).tripOccasion) {
+    // Use confidence check so skipping tripOccasion doesn't block downstream questions
+    const tripOccasionDone = this.state.confidence.tripOccasion !== undefined && this.state.confidence.tripOccasion !== 'unknown';
+    if (this.state.confidence.party !== 'unknown' && !tripOccasionDone) {
       missing.push('tripOccasion');
     }
 
     // Pet question asked after trip occasion (yes/no first)
+    // Gate on tripOccasion being done (answered or skipped), not on its value
+    const petsDone = this.state.preferences.hasPets !== undefined;
     if (this.state.confidence.party !== 'unknown' &&
-        (this.state.preferences as any).tripOccasion &&
-        (this.state.preferences as any).hasPets === undefined) {
+        tripOccasionDone &&
+        !petsDone) {
       missing.push('travelingWithPets');
     }
 
     // Pet type follow-up (only if user said yes to pets)
-    if ((this.state.preferences as any).hasPets === true &&
-        (this.state.preferences as any).travelingWithPets?.petType === undefined) {
+    if (this.state.preferences.hasPets === true &&
+        this.state.preferences.travelingWithPets?.petType === undefined) {
       missing.push('travelingWithPetsType');
     }
 
     // Accessibility question (yes/no first) - asked after pets question is answered
+    // Gate on pets being done (answered or skipped), not on its value
     if (this.state.confidence.party !== 'unknown' &&
-        (this.state.preferences as any).hasPets !== undefined &&
-        (this.state.preferences as any).hasAccessibilityNeeds === undefined) {
+        petsDone &&
+        this.state.preferences.hasAccessibilityNeeds === undefined) {
       missing.push('accessibility');
     }
 
     // Accessibility type follow-up (only if user said yes to accessibility needs)
-    if ((this.state.preferences as any).hasAccessibilityNeeds === true &&
+    if (this.state.preferences.hasAccessibilityNeeds === true &&
         this.state.preferences.accessibilityNeeds === undefined) {
       missing.push('accessibilityType');
     }
@@ -2208,18 +2274,21 @@ export class QuickPlanOrchestrator {
     if (this.state.confidence.budget === 'unknown') missing.push('budget');
 
     // Accommodation type asked after budget (helps with filtering)
-    if (this.state.confidence.budget !== 'unknown' &&
-        !(this.state.preferences as any).accommodationType) {
+    // Use confidence check so skipping doesn't cause the question to reappear
+    const conf = this.state.confidence as Record<string, ConfidenceLevel | undefined>;
+    const accommodationDone = conf.accommodationType !== undefined && conf.accommodationType !== 'unknown';
+    if (this.state.confidence.budget !== 'unknown' && !accommodationDone) {
       missing.push('accommodationType');
     }
 
     // Sustainability preference asked after accommodation type (optional)
     // Skip if they already chose eco_lodge (we can infer eco_focused)
-    const accommodationType = (this.state.preferences as any).accommodationType;
+    const accommodationType = this.state.preferences.accommodationType;
+    const sustainabilityDone = conf.sustainabilityPreference !== undefined && conf.sustainabilityPreference !== 'unknown';
     if (this.state.confidence.budget !== 'unknown' &&
-        accommodationType &&
+        accommodationDone &&
         accommodationType !== 'eco_lodge' &&
-        !(this.state.preferences as any).sustainabilityPreference) {
+        !sustainabilityDone) {
       missing.push('sustainabilityPreference');
     }
     if (this.state.confidence.activities === 'unknown') missing.push('activities');
@@ -2252,7 +2321,7 @@ export class QuickPlanOrchestrator {
 
     // Ask which subreddits to search after activities
     if (this.state.confidence.activities !== 'unknown' &&
-        !(this.state.preferences as any).selectedSubreddits) {
+        !this.state.preferences.selectedSubreddits) {
       missing.push('subreddits');
     }
 
@@ -2267,7 +2336,6 @@ export class QuickPlanOrchestrator {
                this.state.discoveredData.areas.length === 0 &&
                this.state.enrichmentStatus.areas === 'error') {
       // If enrichment failed and no areas, skip areas question and mark as partial
-      console.log('[getMissingRequiredFields] Areas enrichment failed with no areas, marking as partial');
       this.setConfidence('areas', 'partial');
     }
 
@@ -2282,16 +2350,6 @@ export class QuickPlanOrchestrator {
       split.stops &&
       split.stops.length > 0;
 
-    console.log('[getMissingRequiredFields] Split check:', {
-      areasConfidence: this.state.confidence.areas,
-      areasComplete,
-      selectedSplit: split,
-      splitId: split?.id,
-      hasStops: split?.stops?.length,
-      hasValidUserSelectedSplit,
-      selectedAreasCount,
-    });
-
     // Only ask about split if:
     // 1. Areas are complete AND
     // 2. User hasn't already selected a split AND
@@ -2300,43 +2358,44 @@ export class QuickPlanOrchestrator {
     let hasSplitForHotelPrefs = hasValidUserSelectedSplit;
 
     if (areasComplete && !hasValidUserSelectedSplit && selectedAreasCount >= 2) {
-      console.log('[getMissingRequiredFields] >>> ADDING SPLIT TO MISSING FIELDS <<<');
       missing.push('split');
     } else if (areasComplete && selectedAreasCount === 1) {
       // Auto-create a single-area split so downstream logic works
       if (!hasValidUserSelectedSplit) {
         const singleArea = this.state.preferences.selectedAreas![0];
-        // Use any cast since the simpler stop format is used throughout the codebase
-        (this.state.preferences as any).selectedSplit = {
+        // Auto-created single-area split uses simplified stop format
+        const tripNights = this.state.preferences.tripLength || 7;
+        this.state.preferences.selectedSplit = {
           id: 'single-area',
           name: `All nights in ${singleArea.name}`,
           stops: [{
             areaId: singleArea.id,
-            areaName: singleArea.name,
-            nights: this.state.preferences.tripLength || 7,
+            area: singleArea,
+            nights: tripNights,
+            order: 0,
+            arrivalDay: 1,
+            departureDay: tripNights,
+            isArrivalCity: true,
+            isDepartureCity: true,
+            travelDayBefore: false,
           }],
           fitScore: 1.0,
+          frictionScore: 0,
+          feasibilityScore: 1.0,
+          whyThisWorks: `Single base in ${singleArea.name} for all ${tripNights} nights`,
+          tradeoffs: [],
         };
-        console.log('[getMissingRequiredFields] Auto-created single-area split');
         // Single-area auto-split counts as valid for hotelPreferences
         hasSplitForHotelPrefs = true;
       }
     } else if (areasComplete && hasValidUserSelectedSplit) {
-      console.log('[getMissingRequiredFields] User already selected split:', split?.name);
     }
 
     // Hotel preferences required after split is selected (or auto-created for single area)
     // NOTE: Ask hotelPreferences if user selected a split OR if single-area auto-split was created
     const shouldAskHotelPrefs = this.state.confidence.areas === 'complete' &&
         hasSplitForHotelPrefs &&
-        !(this.state.preferences as any).hotelPreferences;
-    console.log('[getMissingRequiredFields] HotelPreferences check:', {
-      areasConfidence: this.state.confidence.areas,
-      hasValidUserSelectedSplit,
-      hasSplitForHotelPrefs,
-      hasHotelPreferences: !!(this.state.preferences as any).hotelPreferences,
-      shouldAskHotelPrefs,
-    });
+        !this.state.preferences.hotelPreferences;
     if (shouldAskHotelPrefs) {
       missing.push('hotelPreferences');
     }
@@ -2348,11 +2407,11 @@ export class QuickPlanOrchestrator {
 
     // Hotels required after hotel preferences AND hotels have been fetched
     if (this.state.confidence.areas === 'complete' &&
-        (this.state.preferences as any).hotelPreferences &&
+        this.state.preferences.hotelPreferences &&
         this.state.confidence.hotels !== 'complete') {
       // Check if we have hotels fetched for any area that still needs selection
       const areas = this.state.preferences.selectedAreas || [];
-      const selectedHotels = (this.state.preferences as any).selectedHotels || {};
+      const selectedHotels = this.state.preferences.selectedHotels || {};
 
       // Find areas that have hotels available but not yet selected
       let needsHotelSelection = false;
@@ -2365,12 +2424,6 @@ export class QuickPlanOrchestrator {
           }
         }
       }
-
-      console.log('[Orchestrator] Hotels check:', {
-        areasCount: areas.length,
-        selectedCount: Object.keys(selectedHotels).length,
-        needsSelection: needsHotelSelection
-      });
 
       if (needsHotelSelection) {
         missing.push('hotels');
@@ -2386,40 +2439,32 @@ export class QuickPlanOrchestrator {
 
     // Dietary restrictions and cuisine preferences required when diningMode is 'plan'
     const wantsDiningHelp = this.state.preferences.diningMode === 'plan';
-    console.log('[getMissingRequiredFields] Dining check:', {
-      diningMode: this.state.preferences.diningMode,
-      diningConfidence: this.state.confidence.dining,
-      wantsDiningHelp,
-      hasDietaryRestrictions: !!(this.state.preferences as any).dietaryRestrictions,
-      hasCuisinePreferences: !!(this.state.preferences as any).cuisinePreferences,
-    });
 
     // FIX 1.7: Dietary restrictions asked after dining mode selected (not after 'complete')
     // This ensures the question is asked right after user selects 'plan' mode
     if (wantsDiningHelp &&
         this.state.confidence.dining !== 'unknown' &&
-        !(this.state.preferences as any).dietaryRestrictions) {
-      console.log('[getMissingRequiredFields] >>> ADDING dietaryRestrictions TO MISSING <<<');
+        !this.state.preferences.dietaryRestrictions) {
       missing.push('dietaryRestrictions');
     }
 
     // Cuisine preferences asked after dietary restrictions
+    // BUG FIX: Check for dietary restrictions presence, not dining confidence
+    // Dining confidence is 'complete' only after all dining questions are done
     if (wantsDiningHelp &&
-        this.state.confidence.dining === 'complete' &&
-        (this.state.preferences as any).dietaryRestrictions &&
-        !(this.state.preferences as any).cuisinePreferences) {
-      console.log('[getMissingRequiredFields] >>> ADDING cuisinePreferences TO MISSING <<<');
+        this.state.preferences.dietaryRestrictions &&
+        !this.state.preferences.cuisinePreferences) {
       missing.push('cuisinePreferences');
     }
 
     // Restaurant selection required after cuisine preferences are set
     // Only when diningMode is 'plan' and we have restaurants fetched
     if (wantsDiningHelp &&
-        (this.state.preferences as any).cuisinePreferences &&
-        (this.state.preferences as any).cuisinePreferences.length > 0) {
+        this.state.preferences.cuisinePreferences &&
+        this.state.preferences.cuisinePreferences.length > 0) {
 
-      const cuisinePrefs = (this.state.preferences as any).cuisinePreferences as string[];
-      const selectedRestaurants = (this.state.preferences as any).selectedRestaurants || {};
+      const cuisinePrefs = this.state.preferences.cuisinePreferences as string[];
+      const selectedRestaurants = this.state.preferences.selectedRestaurants || {};
 
       // Check if we have restaurants for all cuisine types
       let needsRestaurantSelection = false;
@@ -2434,13 +2479,6 @@ export class QuickPlanOrchestrator {
         }
       }
 
-      console.log('[Orchestrator] Restaurant selection check:', {
-        diningMode: this.state.preferences.diningMode,
-        cuisinePrefs,
-        selectedRestaurants: Object.keys(selectedRestaurants),
-        needsSelection: needsRestaurantSelection,
-      });
-
       if (needsRestaurantSelection) {
         missing.push('restaurants');
       }
@@ -2448,10 +2486,11 @@ export class QuickPlanOrchestrator {
 
     // Experiences selection required after dining is complete
     // Only if user selected activities and we have experiences fetched
-    const diningIsComplete = this.state.confidence.dining === 'complete';
-    const restaurantsComplete = !wantsDiningHelp || !(this.state.preferences as any).cuisinePreferences ||
-      ((this.state.preferences as any).cuisinePreferences || []).every((cuisine: string) => {
-        const selected = (this.state.preferences as any).selectedRestaurants?.[cuisine];
+    // BUG FIX: Check for dining not unknown (complete OR confirmed both count)
+    const diningIsComplete = this.state.confidence.dining !== 'unknown';
+    const restaurantsComplete = !wantsDiningHelp || !this.state.preferences.cuisinePreferences ||
+      (this.state.preferences.cuisinePreferences || []).every((cuisine: string) => {
+        const selected = this.state.preferences.selectedRestaurants?.[cuisine];
         const available = this.state.discoveredData.restaurants.get(cuisine);
         return selected || !available || available.length === 0;
       });
@@ -2459,8 +2498,8 @@ export class QuickPlanOrchestrator {
     const selectedActivities = this.state.preferences.selectedActivities || [];
     if (diningIsComplete && restaurantsComplete && selectedActivities.length > 0) {
       const activityTypes = selectedActivities.map(a => a.type);
-      const selectedExperiences = (this.state.preferences as any).selectedExperiences || {};
-      const experiencesMap = (this.state.discoveredData as any).experiences;
+      const selectedExperiences = this.state.preferences.selectedExperiences || {};
+      const experiencesMap = this.state.discoveredData.experiences;
 
       let needsExperienceSelection = false;
       for (const activity of activityTypes) {
@@ -2473,14 +2512,6 @@ export class QuickPlanOrchestrator {
         }
       }
 
-      console.log('[Orchestrator] Experiences selection check:', {
-        diningComplete: diningIsComplete,
-        restaurantsComplete,
-        activityTypes,
-        selectedExperiences: Object.keys(selectedExperiences),
-        needsSelection: needsExperienceSelection,
-      });
-
       if (needsExperienceSelection) {
         missing.push('experiences');
       }
@@ -2492,42 +2523,37 @@ export class QuickPlanOrchestrator {
 
     // Surfing details - after activities are selected, if surfing was chosen
     const hasSurfActivity = this.state.preferences.selectedActivities?.some(a => a.type === 'surf');
-    const hasSurfDetails = !!(this.state.preferences as any).surfingDetails;
+    const hasSurfDetails = !!this.state.preferences.surfingDetails;
     if (this.state.confidence.activities === 'complete' && hasSurfActivity && !hasSurfDetails) {
-      console.log('[getMissingRequiredFields] >>> ADDING surfingDetails (surf activity selected) <<<');
       missing.push('surfingDetails');
     }
 
     // Child needs - after party is confirmed, if there are young children (under 10)
     const hasYoungChildren = (this.state.preferences.childAges || []).some(age => age < 10);
-    const hasChildNeeds = !!(this.state.preferences as any).childNeeds;
+    const hasChildNeeds = !!this.state.preferences.childNeeds;
     if (this.state.confidence.party === 'confirmed' && hasYoungChildren && !hasChildNeeds) {
-      console.log('[getMissingRequiredFields] >>> ADDING childNeeds (young children present) <<<');
       missing.push('childNeeds');
     }
 
     // Workation needs - after tripOccasion is set to workation
-    const isWorkation = (this.state.preferences as any).tripOccasion === 'workation';
-    const hasWorkationNeeds = !!(this.state.preferences as any).workationNeeds;
+    const isWorkation = this.state.preferences.tripOccasion === 'workation';
+    const hasWorkationNeeds = !!this.state.preferences.workationNeeds;
     if (isWorkation && !hasWorkationNeeds) {
-      console.log('[getMissingRequiredFields] >>> ADDING workationNeeds (workation trip) <<<');
       missing.push('workationNeeds');
     }
 
     // Multi-country logistics - after destination confirmed, if multiple countries
     const destInput = this.state.preferences.destinationContext?.rawInput || '';
     const multiCountryInfo = detectMultiCountry(destInput);
-    const hasMultiCountryAck = !!(this.state.preferences as any).multiCountryLogistics;
+    const hasMultiCountryAck = !!this.state.preferences.multiCountryLogistics;
     if (this.state.confidence.destination === 'complete' && multiCountryInfo.isMultiCountry && !hasMultiCountryAck) {
-      console.log('[getMissingRequiredFields] >>> ADDING multiCountryLogistics (multi-country trip) <<<', multiCountryInfo.countries);
       missing.push('multiCountryLogistics');
     }
 
     // Theme park preferences - if destination includes Disney/Universal
     const themeParkId = detectThemeParkDestination(destInput);
-    const hasThemeParkPrefs = !!(this.state.preferences as any).themeParkPreferences;
+    const hasThemeParkPrefs = !!this.state.preferences.themeParkPreferences;
     if (this.state.confidence.destination === 'complete' && themeParkId && !hasThemeParkPrefs) {
-      console.log('[getMissingRequiredFields] >>> ADDING themeParkPreferences (theme park destination) <<<');
       missing.push('themeParkPreferences');
     }
 
@@ -2539,17 +2565,15 @@ export class QuickPlanOrchestrator {
         selectedSplit: split,
         splitId: split?.id,
         hasValidUserSelectedSplit,
-        hotelPreferences: (this.state.preferences as any).hotelPreferences,
+        hotelPreferences: this.state.preferences.hotelPreferences,
       });
       // Remove hotelPreferences - split must be answered first
       const hotelPrefsIndex = missing.indexOf('hotelPreferences');
       if (hotelPrefsIndex > -1) {
         missing.splice(hotelPrefsIndex, 1);
-        console.log('[getMissingRequiredFields] Removed hotelPreferences from missing. New list:', missing);
       }
     }
 
-    console.log('[getMissingRequiredFields] Final missing fields:', missing);
     return missing;
   }
 
@@ -2558,6 +2582,10 @@ export class QuickPlanOrchestrator {
 
     for (const [field, config] of Object.entries(FIELD_QUESTIONS)) {
       if (config.canInfer && config.inferFrom) {
+        // Don't re-infer fields that have already been answered or inferred
+        const confidence = this.state.confidence[field as keyof typeof this.state.confidence];
+        if (confidence && confidence !== 'unknown') continue;
+
         const inferred = config.inferFrom(this.state);
         if (inferred !== null) {
           inferrable.push(field);
@@ -2606,9 +2634,6 @@ export class QuickPlanOrchestrator {
   // ============================================================================
 
   async selectNextQuestion(): Promise<QuestionConfig | null> {
-    console.log('[selectNextQuestion] Current phase:', this.state.phase);
-    console.log('[selectNextQuestion] Areas confidence:', this.state.confidence.areas);
-    console.log('[selectNextQuestion] Has selectedSplit:', !!this.state.preferences.selectedSplit);
 
     // 1. Check for unresolved tradeoffs (highest priority)
     if (this.state.activeTradeoffs.length > 0) {
@@ -2630,7 +2655,6 @@ export class QuickPlanOrchestrator {
 
     // 3. Find missing required fields
     const missing = this.getMissingRequiredFields();
-    console.log('[selectNextQuestion] Missing fields:', missing);
 
     if (missing.length === 0) {
       // All required fields complete
@@ -2646,22 +2670,14 @@ export class QuickPlanOrchestrator {
         const hotelsEnrichmentComplete = this.state.enrichmentStatus.hotels === 'done' || this.state.enrichmentStatus.hotels === 'error';
         const diningComplete = this.state.confidence.dining !== 'unknown';
 
-        // Check if user has EXPLICITLY selected a split (not auto-generated)
+        // Check if user has selected a split OR we auto-created one (for single-area trips)
+        // Valid splits: user-selected ('even-split', 'longer-first', etc.) or auto-created ('single-area')
+        // Invalid: undefined/null or explicitly marked as 'auto-split' placeholder
         const split = this.state.preferences.selectedSplit;
-        const splitSelected = split && split.id !== 'auto-split' && split.stops && split.stops.length > 0;
+        const splitSelected = split && split.stops && split.stops.length > 0 && split.id !== 'auto-split';
         // Hotels are "handled" if selected OR skipped (partial = no hotels found but user moved on)
         const hotelsHandled = this.state.confidence.hotels === 'complete' ||
                               this.state.confidence.hotels === 'partial';
-
-        console.log('[Orchestrator] Enrichment check:', {
-          areasEnrichment: this.state.enrichmentStatus.areas,
-          hotelsEnrichment: this.state.enrichmentStatus.hotels,
-          diningConfidence: this.state.confidence.dining,
-          splitId: split?.id,
-          splitSelected,
-          hotelsHandled,
-          hotelsConfidence: this.state.confidence.hotels,
-        });
 
         // Only move to generating if enrichment is done AND user has made all selections
         if (areasEnrichmentComplete && hotelsEnrichmentComplete && diningComplete && splitSelected && hotelsHandled) {
@@ -2670,7 +2686,12 @@ export class QuickPlanOrchestrator {
         }
 
         // If enrichment is still pending, return null to wait
-        if (!areasEnrichmentComplete) {
+        // BUG FIX (R4): Also wait for hotels enrichment, not just areas.
+        // Previously, if areas were done but hotels were still pending,
+        // the code fell through and returned null at the end of the function
+        // without any phase transition — a dead end where no question is asked
+        // and no phase change occurs.
+        if (!areasEnrichmentComplete || !hotelsEnrichmentComplete) {
           return null; // Still enriching
         }
 
@@ -2691,25 +2712,17 @@ export class QuickPlanOrchestrator {
     }
 
     // 4. Use LLM to decide which field to ask about next (for complex cases)
-    console.log('[selectNextQuestion] About to decide next field from missing:', missing);
     const nextField = await this.decideNextField(missing);
-    console.log('[selectNextQuestion] decideNextField returned:', nextField);
 
     if (missing.includes('split') && nextField !== 'split') {
       console.error('[selectNextQuestion] WARNING: split is in missing but was not selected! Selected:', nextField);
     }
 
     const config = await this.createQuestionConfig(nextField);
-    console.log('[selectNextQuestion] Returning question for:', config.field, 'inputType:', config.inputType, 'config:', {
-      hasOptions: !!(config.inputConfig as any).options?.length,
-      hasSplitOptions: !!(config.inputConfig as any).splitOptions?.length,
-      hasCandidates: !!(config.inputConfig as any).candidates?.length,
-    });
     return config;
   }
 
   private async decideNextField(candidates: string[]): Promise<string> {
-    console.log('[decideNextField] Candidates:', candidates, 'count:', candidates.length);
 
     // ALWAYS use priority list to ensure proper flow order
     // This is critical - questions must be asked in the correct order
@@ -2729,8 +2742,8 @@ export class QuickPlanOrchestrator {
       'budget',
       'accommodationType',       // After budget - hostel/hotel/resort/villa
       'sustainabilityPreference', // After accommodation - eco preferences
-      'pace',
       'activities',
+      'pace',
       'surfingDetails',          // SMART FOLLOW-UP: After activities if surfing selected
       'activitySkillLevel',
       'subreddits',
@@ -2749,12 +2762,10 @@ export class QuickPlanOrchestrator {
 
     for (const field of priority) {
       if (candidates.includes(field)) {
-        console.log('[decideNextField] Selected from priority:', field, '(index', priority.indexOf(field), ')');
         return field;
       }
     }
 
-    console.log('[decideNextField] Fallback to first candidate:', candidates[0]);
     return candidates[0];
   }
 
@@ -2775,7 +2786,6 @@ export class QuickPlanOrchestrator {
   }
 
   private async createQuestionConfig(field: string): Promise<QuestionConfig> {
-    console.log('[createQuestionConfig] Creating question for field:', field);
 
     const config = FIELD_QUESTIONS[field];
     if (!config) {
@@ -2791,21 +2801,17 @@ export class QuickPlanOrchestrator {
       if (field === 'activities') {
         // Wait for pending activity fetch if exists
         if (activitySuggestionsPending.has(cacheKey)) {
-          console.log('[createQuestionConfig] Waiting for activity suggestions...');
           try {
             await activitySuggestionsPending.get(cacheKey);
           } catch (e) {
-            console.warn('[createQuestionConfig] Activity suggestions failed:', e);
           }
         }
 
         // If still no cache, try fetching now
         if (!activitySuggestionsCache.has(cacheKey) && destination) {
-          console.log('[createQuestionConfig] No cached activities, fetching now...');
           try {
             await fetchDestinationActivities(destination);
           } catch (e) {
-            console.warn('[createQuestionConfig] Activity fetch failed:', e);
           }
         }
       }
@@ -2813,42 +2819,37 @@ export class QuickPlanOrchestrator {
       if (field === 'subreddits') {
         // Wait for pending subreddit fetch if exists
         if (subredditSuggestionsPending.has(cacheKey)) {
-          console.log('[createQuestionConfig] Waiting for subreddit suggestions...');
           try {
             await subredditSuggestionsPending.get(cacheKey);
           } catch (e) {
-            console.warn('[createQuestionConfig] Subreddit suggestions failed:', e);
           }
         }
 
         // If still no cache, try fetching now
         if (!subredditSuggestionsCache.has(cacheKey) && destination) {
-          console.log('[createQuestionConfig] No cached subreddits, fetching now...');
           try {
             await fetchDestinationSubreddits(destination);
           } catch (e) {
-            console.warn('[createQuestionConfig] Subreddit fetch failed:', e);
           }
         }
       }
     }
 
     const inputConfig = config.getInputConfig(this.state);
-    console.log('[createQuestionConfig] Input config for', field, ':', {
-      type: config.inputType,
-      hasOptions: !!(inputConfig as any).options?.length,
-      hasSplitOptions: !!(inputConfig as any).splitOptions?.length,
-      hasCandidates: !!(inputConfig as any).candidates?.length,
-    });
 
     // Handle dynamic snooMessage for hotels (includes area name and progress)
     let snooMessage = config.snooMessage;
     if (field === 'hotels') {
-      const areaName = (inputConfig as any).areaName || 'your selected area';
+      const areaName = inputConfig.areaName || 'your selected area';
       const areas = this.state.preferences.selectedAreas || [];
-      const selectedHotels = (this.state.preferences as any).selectedHotels || {};
+      const selectedHotels = this.state.preferences.selectedHotels || {};
       const selectedCount = Object.keys(selectedHotels).length;
-      const totalAreas = areas.length;
+      // Only count areas that actually have hotels available (not empty arrays)
+      const areasWithHotels = areas.filter(a => {
+        const h = this.state.discoveredData.hotels.get(a.id);
+        return h && h.length > 0;
+      });
+      const totalAreas = areasWithHotels.length;
 
       if (totalAreas > 1) {
         snooMessage = `Now for ${areaName} (${selectedCount + 1} of ${totalAreas}). Which hotel catches your eye?`;
@@ -2859,9 +2860,9 @@ export class QuickPlanOrchestrator {
 
     // Handle dynamic snooMessage for restaurants (by cuisine type)
     if (field === 'restaurants') {
-      const cuisineLabel = (inputConfig as any).cuisineLabel || 'your cuisine';
-      const cuisinePrefs = (this.state.preferences as any).cuisinePreferences || [];
-      const selectedRestaurants = (this.state.preferences as any).selectedRestaurants || {};
+      const cuisineLabel = inputConfig.cuisineLabel || 'your cuisine';
+      const cuisinePrefs = this.state.preferences.cuisinePreferences || [];
+      const selectedRestaurants = this.state.preferences.selectedRestaurants || {};
       const selectedCount = Object.keys(selectedRestaurants).length;
       const totalCuisines = cuisinePrefs.length;
 
@@ -2904,30 +2905,30 @@ export class QuickPlanOrchestrator {
     }
 
     // Phase 5 Fix 5.2: Add event alerts to the next question after dates are set
-    const pendingEventAlert = (this.state as any).pendingEventAlert;
+    const pendingEventAlert = this.state.pendingEventAlert;
     if (pendingEventAlert) {
       const eventInfo = pendingEventAlert.tip
         ? `\n\n📅 **Event alert**: ${pendingEventAlert.warning}\n💡 ${pendingEventAlert.tip}`
         : `\n\n📅 **Event alert**: ${pendingEventAlert.warning}`;
       snooMessage = `${snooMessage}${eventInfo}`;
       // Clear the pending alert
-      delete (this.state as any).pendingEventAlert;
+      delete this.state.pendingEventAlert;
     }
 
     // FIX 1.4 continued: Show activity warnings for child ages
-    const activityWarnings = (this.state as any).activityWarnings;
+    const activityWarnings = this.state.activityWarnings;
     if (activityWarnings && activityWarnings.length > 0) {
       const warningList = activityWarnings.slice(0, 2).join('; ');
       snooMessage = `${snooMessage}\n\n⚠️ **Note for families**: ${warningList}`;
       // Clear warnings after showing
-      delete (this.state as any).activityWarnings;
+      delete this.state.activityWarnings;
     }
 
     // Show theme park warnings if any
-    const themeParkWarning = (this.state as any).themeParkWarning;
+    const themeParkWarning = this.state.themeParkWarning;
     if (themeParkWarning) {
       snooMessage = `${snooMessage}\n\n🎢 ${themeParkWarning}`;
-      delete (this.state as any).themeParkWarning;
+      delete this.state.themeParkWarning;
     }
 
     return {
@@ -2972,20 +2973,28 @@ export class QuickPlanOrchestrator {
       case 'dining':
         const inferredDining = value as { id: string };
         this.state.preferences.diningMode = inferredDining.id as DiningMode;
-        this.setConfidence('dining', 'inferred');
+        // BUG FIX: If dining mode is inferred as 'none', also set dietary restrictions
+        // and mark dining as complete to skip follow-up questions
+        if (inferredDining.id === 'none') {
+          this.state.preferences.dietaryRestrictions = ['none'];
+          this.setConfidence('dining', 'complete');
+        } else {
+          // If inferred as 'plan', still need to ask dietary restrictions
+          this.setConfidence('dining', 'confirmed');
+        }
         break;
       case 'tripOccasion':
         const inferredOccasion = value as { id: string };
-        (this.state.preferences as any).tripOccasion = inferredOccasion.id;
+        this.state.preferences.tripOccasion = inferredOccasion.id as TripPreferences['tripOccasion'];
         this.setConfidence('tripOccasion', 'inferred');
         break;
       case 'accommodationType':
         const inferredAccom = value as { id: string };
-        (this.state.preferences as any).accommodationType = inferredAccom.id;
+        this.state.preferences.accommodationType = inferredAccom.id as TripPreferences['accommodationType'];
         break;
       case 'sustainabilityPreference':
         const inferredSustainability = value as { id: string };
-        (this.state.preferences as any).sustainabilityPreference = inferredSustainability.id;
+        this.state.preferences.sustainabilityPreference = inferredSustainability.id as TripPreferences['sustainabilityPreference'];
         break;
     }
   }
@@ -2998,11 +3007,13 @@ export class QuickPlanOrchestrator {
     const field = this.state.currentQuestion?.field;
     if (!field) return;
 
-    // FIX 1.13: Track question history for go-back functionality
-    const questionHistory = (this.state as any).questionHistory || [];
-    if (!questionHistory.includes(field)) {
+    // BUG FIX: Track question history - but avoid duplicates on multiple calls
+    // Only add field if it's not already the last item (prevents duplicate entries on retry/resubmit)
+    const questionHistory = this.state.questionHistory || [];
+    const lastField = questionHistory[questionHistory.length - 1];
+    if (lastField !== field) {
       questionHistory.push(field);
-      (this.state as any).questionHistory = questionHistory;
+      this.state.questionHistory = questionHistory;
     }
 
     // FIX 1.14: Handle skip responses for optional questions
@@ -3011,12 +3022,10 @@ export class QuickPlanOrchestrator {
       if (config && !config.required) {
         // Mark as intentionally skipped
         this.setConfidence(field as keyof OrchestratorState['confidence'], 'inferred');
-        (this.state.preferences as any)[`${field}Skipped`] = true;
-        console.log(`[Orchestrator] User skipped optional field: ${field}`);
+        this.state.preferences[`${field}Skipped`] = true;
         return;
       } else {
         // Required field - can't skip
-        console.log(`[Orchestrator] User tried to skip required field: ${field}, re-showing question`);
         return; // Don't process, let the question re-appear
       }
     }
@@ -3053,9 +3062,8 @@ export class QuickPlanOrchestrator {
       case 'dates':
         const dates = response as { startDate: Date; endDate: Date; nights: number; isFlexible: boolean };
         // Bug fix: validate trip length is at least 1 night and cap at 365
-        const validatedNights = Math.max(1, Math.min(365, dates.nights || 1));
+        const validatedNights = Math.max(1, Math.min(60, dates.nights || 1));
         if (dates.nights !== validatedNights) {
-          console.warn(`[Orchestrator] Trip length ${dates.nights} adjusted to ${validatedNights}`);
         }
         this.state.preferences.startDate = dates.startDate;
         this.state.preferences.endDate = dates.endDate;
@@ -3070,7 +3078,6 @@ export class QuickPlanOrchestrator {
           const warnings = getSeasonalWarnings(destName, dates.startDate);
           if (warnings.length > 0) {
             this.state.seasonalWarnings = warnings;
-            console.log(`[Orchestrator] Found ${warnings.length} seasonal warnings for ${destName}`);
           }
 
           // Phase 5 Fix 5.2: Check for local events during trip dates
@@ -3078,16 +3085,15 @@ export class QuickPlanOrchestrator {
             const eventsCheck = hasSignificantEvents(destName, dates.startDate, dates.endDate);
             if (eventsCheck.hasEvents) {
               const eventsData = getEventsForDates(destName, dates.startDate, dates.endDate);
-              (this.state as any).localEvents = eventsData.events;
-              (this.state as any).eventWarnings = eventsData.warnings;
-              (this.state as any).eventTips = eventsData.tips;
+              this.state.localEvents = eventsData.events;
+              this.state.eventWarnings = eventsData.warnings;
+              this.state.eventTips = eventsData.tips;
 
               // Log event awareness
-              console.log(`[Orchestrator] Found ${eventsCheck.highImpactCount} high-impact events for ${destName}:`, eventsCheck.eventNames);
 
               // Store event info for display in next message (will be shown by question handler)
               if (eventsCheck.highImpactCount > 0 && eventsData.warnings.length > 0) {
-                (this.state as any).pendingEventAlert = {
+                this.state.pendingEventAlert = {
                   warning: eventsData.warnings[0],
                   tip: eventsData.tips[0] || null,
                 };
@@ -3111,167 +3117,149 @@ export class QuickPlanOrchestrator {
         // Bug fix: store as suggestion so user still gets asked and can choose differently
         const totalTravelers = party.adults + party.children;
         if (totalTravelers >= 8) {
-          (this.state.preferences as any).suggestedAccommodationType = 'vacation_rental';
-          console.log(`[Orchestrator] Large group (${totalTravelers} travelers) - will suggest vacation rental`);
+          this.state.preferences.suggestedAccommodationType = 'vacation_rental';
         }
         break;
 
       case 'tripOccasion':
         const occasion = response as { id: string; label: string };
-        (this.state.preferences as any).tripOccasion = occasion.id;
+        this.state.preferences.tripOccasion = occasion.id as TripPreferences['tripOccasion'];
         // FIX 1.8: Set confidence for tripOccasion
         this.setConfidence('tripOccasion', 'confirmed');
 
         // FIX 5.1: Apply Honeymoon Mode
         if (occasion.id === 'honeymoon' || occasion.id === 'anniversary') {
-          (this.state.preferences as any).specialMode = 'romantic';
-          (this.state.preferences as any).vibeBoosts = ['romantic', 'intimate', 'luxury', 'secluded', 'sunset_views'];
-          (this.state.preferences as any).vibeFilters = ['party', 'backpacker', 'hostel', 'loud'];
-          (this.state.preferences as any).activityBoosts = ['spa_wellness', 'sunset_cruise', 'private_dinner', 'beach'];
-          (this.state.preferences as any).suggestUpgrade = true;
-          console.log('[Orchestrator] Honeymoon mode activated');
+          this.state.preferences.specialMode = 'romantic';
+          this.state.preferences.vibeBoosts = ['romantic', 'intimate', 'luxury', 'secluded', 'sunset_views'];
+          this.state.preferences.vibeFilters = ['party', 'backpacker', 'hostel', 'loud'];
+          this.state.preferences.activityBoosts = ['spa_wellness', 'sunset_cruise', 'private_dinner', 'beach'];
+          this.state.preferences.suggestUpgrade = true;
         }
 
         // FIX 5.2: Apply Backpacker Mode
         if (occasion.id === 'backpacking' || occasion.id === 'gap_year' || occasion.id === 'budget_adventure') {
-          (this.state.preferences as any).specialMode = 'backpacker';
-          (this.state.preferences as any).accommodationTypes = ['hostel', 'guesthouse', 'budget_hotel'];
-          (this.state.preferences as any).vibeBoosts = ['backpacker', 'social', 'authentic', 'local', 'adventure'];
-          (this.state.preferences as any).activityBoosts = ['hiking', 'beach', 'cultural', 'food_tour', 'adventure'];
-          (this.state.preferences as any).optimizeForBudget = true;
-          console.log('[Orchestrator] Backpacker mode activated');
+          this.state.preferences.specialMode = 'backpacker';
+          this.state.preferences.accommodationTypes = ['hostel', 'guesthouse', 'budget_hotel'];
+          this.state.preferences.vibeBoosts = ['backpacker', 'social', 'authentic', 'local', 'adventure'];
+          this.state.preferences.activityBoosts = ['hiking', 'beach', 'cultural', 'food_tour', 'adventure'];
+          this.state.preferences.optimizeForBudget = true;
         }
 
         // Adventure mode
         if (occasion.id === 'adventure' || occasion.id === 'extreme_sports') {
-          (this.state.preferences as any).specialMode = 'adventure';
-          (this.state.preferences as any).vibeBoosts = ['adventure', 'adrenaline', 'nature', 'outdoors'];
-          (this.state.preferences as any).activityBoosts = ['surf', 'diving', 'hiking', 'adventure', 'water_sports'];
-          console.log('[Orchestrator] Adventure mode activated');
+          this.state.preferences.specialMode = 'adventure';
+          this.state.preferences.vibeBoosts = ['adventure', 'adrenaline', 'nature', 'outdoors'];
+          this.state.preferences.activityBoosts = ['surf', 'diving', 'hiking', 'adventure', 'water_sports'];
         }
 
         // Wellness mode
         if (occasion.id === 'wellness' || occasion.id === 'retreat') {
-          (this.state.preferences as any).specialMode = 'wellness';
-          (this.state.preferences as any).vibeBoosts = ['peaceful', 'wellness', 'nature', 'quiet', 'relaxed'];
-          (this.state.preferences as any).activityBoosts = ['spa_wellness', 'yoga', 'meditation', 'hiking', 'nature'];
-          (this.state.preferences as any).vibeFilters = ['party', 'nightlife', 'busy'];
-          console.log('[Orchestrator] Wellness mode activated');
+          this.state.preferences.specialMode = 'wellness';
+          this.state.preferences.vibeBoosts = ['peaceful', 'wellness', 'nature', 'quiet', 'relaxed'];
+          this.state.preferences.activityBoosts = ['spa_wellness', 'yoga', 'meditation', 'hiking', 'nature'];
+          this.state.preferences.vibeFilters = ['party', 'nightlife', 'busy'];
         }
 
         // FIX 5.3: Family mode
         if (occasion.id === 'family' || occasion.id === 'family_vacation') {
-          (this.state.preferences as any).specialMode = 'family';
-          (this.state.preferences as any).vibeBoosts = ['family_friendly', 'safe', 'spacious', 'convenient'];
-          (this.state.preferences as any).activityBoosts = ['beach', 'wildlife', 'cultural', 'swimming', 'theme_park'];
-          (this.state.preferences as any).vibeFilters = ['adults_only', 'party', 'nightlife'];
-          (this.state.preferences as any).requireFamilyFriendly = true;
-          console.log('[Orchestrator] Family mode activated');
+          this.state.preferences.specialMode = 'family';
+          this.state.preferences.vibeBoosts = ['family_friendly', 'safe', 'spacious', 'convenient'];
+          this.state.preferences.activityBoosts = ['beach', 'wildlife', 'cultural', 'swimming', 'theme_park'];
+          this.state.preferences.vibeFilters = ['adults_only', 'party', 'nightlife'];
+          this.state.preferences.requireFamilyFriendly = true;
         }
 
         // FIX 5.4: Workation mode
         if (occasion.id === 'workation' || occasion.id === 'remote_work' || occasion.id === 'digital_nomad') {
-          (this.state.preferences as any).specialMode = 'workation';
-          (this.state.preferences as any).vibeBoosts = ['wifi', 'coworking', 'quiet', 'cafes', 'productive'];
-          (this.state.preferences as any).activityBoosts = ['cultural', 'food_tour', 'hiking', 'beach'];
-          (this.state.preferences as any).accommodationRequirements = ['wifi', 'workspace', 'quiet'];
-          (this.state.preferences as any).requireWorkspace = true;
-          console.log('[Orchestrator] Workation mode activated');
+          this.state.preferences.specialMode = 'workation';
+          this.state.preferences.vibeBoosts = ['wifi', 'coworking', 'quiet', 'cafes', 'productive'];
+          this.state.preferences.activityBoosts = ['cultural', 'food_tour', 'hiking', 'beach'];
+          this.state.preferences.accommodationRequirements = ['wifi', 'workspace', 'quiet'];
+          this.state.preferences.requireWorkspace = true;
         }
 
         // FIX 5.5: Solo traveler mode
         if (occasion.id === 'solo' || occasion.id === 'solo_travel') {
-          (this.state.preferences as any).specialMode = 'solo';
-          (this.state.preferences as any).vibeBoosts = ['social', 'safe', 'walkable', 'friendly', 'backpacker'];
-          (this.state.preferences as any).activityBoosts = ['food_tour', 'cultural', 'hiking', 'beach', 'nightlife'];
-          (this.state.preferences as any).prioritizeSafety = true;
-          console.log('[Orchestrator] Solo traveler mode activated');
+          this.state.preferences.specialMode = 'solo';
+          this.state.preferences.vibeBoosts = ['social', 'safe', 'walkable', 'friendly', 'backpacker'];
+          this.state.preferences.activityBoosts = ['food_tour', 'cultural', 'hiking', 'beach', 'nightlife'];
+          this.state.preferences.prioritizeSafety = true;
         }
 
         // FIX 5.6: Girls trip / Guys trip (social trip)
         if (occasion.id === 'girls_trip' || occasion.id === 'guys_trip' || occasion.id === 'friends_trip') {
-          (this.state.preferences as any).specialMode = 'social_trip';
-          (this.state.preferences as any).vibeBoosts = ['social', 'lively', 'nightlife', 'trendy', 'fun'];
-          (this.state.preferences as any).activityBoosts = ['nightlife', 'beach', 'spa_wellness', 'food_tour', 'adventure'];
-          (this.state.preferences as any).prioritizeGroupActivities = true;
-          console.log('[Orchestrator] Social trip mode activated');
+          this.state.preferences.specialMode = 'social_trip';
+          this.state.preferences.vibeBoosts = ['social', 'lively', 'nightlife', 'trendy', 'fun'];
+          this.state.preferences.activityBoosts = ['nightlife', 'beach', 'spa_wellness', 'food_tour', 'adventure'];
+          this.state.preferences.prioritizeGroupActivities = true;
         }
 
         // FIX 5.7: Foodie mode
         if (occasion.id === 'foodie' || occasion.id === 'culinary' || occasion.id === 'food_exploration') {
-          (this.state.preferences as any).specialMode = 'foodie';
-          (this.state.preferences as any).vibeBoosts = ['foodie', 'authentic', 'local', 'markets', 'dining'];
-          (this.state.preferences as any).activityBoosts = ['food_tour', 'cooking_class', 'wine_tasting', 'cultural'];
-          (this.state.preferences as any).prioritizeDining = true;
-          (this.state.preferences as any).includeMichelinOptions = true;
-          console.log('[Orchestrator] Foodie mode activated');
+          this.state.preferences.specialMode = 'foodie';
+          this.state.preferences.vibeBoosts = ['foodie', 'authentic', 'local', 'markets', 'dining'];
+          this.state.preferences.activityBoosts = ['food_tour', 'cooking_class', 'wine_tasting', 'cultural'];
+          this.state.preferences.prioritizeDining = true;
+          this.state.preferences.includeMichelinOptions = true;
         }
 
         // FIX 5.8: Party mode
         if (occasion.id === 'party' || occasion.id === 'bachelor' || occasion.id === 'bachelorette' || occasion.id === 'celebration') {
-          (this.state.preferences as any).specialMode = 'party';
-          (this.state.preferences as any).vibeBoosts = ['party', 'nightlife', 'lively', 'social', 'fun'];
-          (this.state.preferences as any).activityBoosts = ['nightlife', 'beach', 'full_moon_party', 'adventure'];
-          (this.state.preferences as any).vibeFilters = ['quiet', 'peaceful', 'family_friendly'];
-          console.log('[Orchestrator] Party mode activated');
+          this.state.preferences.specialMode = 'party';
+          this.state.preferences.vibeBoosts = ['party', 'nightlife', 'lively', 'social', 'fun'];
+          this.state.preferences.activityBoosts = ['nightlife', 'beach', 'full_moon_party', 'adventure'];
+          this.state.preferences.vibeFilters = ['quiet', 'peaceful', 'family_friendly'];
         }
 
         // FIX 5.9: Cultural immersion mode
         if (occasion.id === 'cultural' || occasion.id === 'immersion' || occasion.id === 'educational') {
-          (this.state.preferences as any).specialMode = 'cultural';
-          (this.state.preferences as any).vibeBoosts = ['authentic', 'cultural', 'historic', 'local', 'traditional'];
-          (this.state.preferences as any).activityBoosts = ['cultural', 'temple_visit', 'food_tour', 'cooking_class', 'photography'];
-          (this.state.preferences as any).prioritizeAuthenticity = true;
-          console.log('[Orchestrator] Cultural immersion mode activated');
+          this.state.preferences.specialMode = 'cultural';
+          this.state.preferences.vibeBoosts = ['authentic', 'cultural', 'historic', 'local', 'traditional'];
+          this.state.preferences.activityBoosts = ['cultural', 'temple_visit', 'food_tour', 'cooking_class', 'photography'];
+          this.state.preferences.prioritizeAuthenticity = true;
         }
 
         // FIX 5.10: Luxury mode
         if (occasion.id === 'luxury' || occasion.id === 'splurge' || occasion.id === 'special_occasion') {
-          (this.state.preferences as any).specialMode = 'luxury';
-          (this.state.preferences as any).vibeBoosts = ['luxury', 'exclusive', 'upscale', 'sophisticated', 'private'];
-          (this.state.preferences as any).activityBoosts = ['spa_wellness', 'wine_tasting', 'golf', 'sailing', 'private_tour'];
-          (this.state.preferences as any).suggestUpgrade = true;
-          (this.state.preferences as any).includeMichelinOptions = true;
-          console.log('[Orchestrator] Luxury mode activated');
+          this.state.preferences.specialMode = 'luxury';
+          this.state.preferences.vibeBoosts = ['luxury', 'exclusive', 'upscale', 'sophisticated', 'private'];
+          this.state.preferences.activityBoosts = ['spa_wellness', 'wine_tasting', 'golf', 'sailing', 'private_tour'];
+          this.state.preferences.suggestUpgrade = true;
+          this.state.preferences.includeMichelinOptions = true;
         }
 
         // FIX 5.11: Nature/Eco mode
         if (occasion.id === 'nature' || occasion.id === 'eco' || occasion.id === 'wildlife') {
-          (this.state.preferences as any).specialMode = 'nature';
-          (this.state.preferences as any).vibeBoosts = ['nature', 'eco', 'wildlife', 'scenic', 'outdoors'];
-          (this.state.preferences as any).activityBoosts = ['hiking', 'wildlife', 'snorkel', 'kayaking', 'photography'];
-          (this.state.preferences as any).prioritizeEcoFriendly = true;
-          console.log('[Orchestrator] Nature/Eco mode activated');
+          this.state.preferences.specialMode = 'nature';
+          this.state.preferences.vibeBoosts = ['nature', 'eco', 'wildlife', 'scenic', 'outdoors'];
+          this.state.preferences.activityBoosts = ['hiking', 'wildlife', 'snorkel', 'kayaking', 'photography'];
+          this.state.preferences.prioritizeEcoFriendly = true;
         }
 
         // FIX 5.12: Photography trip mode
         if (occasion.id === 'photography' || occasion.id === 'photo_trip') {
-          (this.state.preferences as any).specialMode = 'photography';
-          (this.state.preferences as any).vibeBoosts = ['scenic', 'photogenic', 'unique', 'authentic', 'diverse'];
-          (this.state.preferences as any).activityBoosts = ['photography', 'cultural', 'wildlife', 'hiking', 'sunrise_sunset'];
-          (this.state.preferences as any).prioritizeGoldenHour = true;
-          console.log('[Orchestrator] Photography mode activated');
+          this.state.preferences.specialMode = 'photography';
+          this.state.preferences.vibeBoosts = ['scenic', 'photogenic', 'unique', 'authentic', 'diverse'];
+          this.state.preferences.activityBoosts = ['photography', 'cultural', 'wildlife', 'hiking', 'sunrise_sunset'];
+          this.state.preferences.prioritizeGoldenHour = true;
         }
 
         // FIX 5.13: Sports/Active mode
         if (occasion.id === 'sports' || occasion.id === 'active' || occasion.id === 'fitness') {
-          (this.state.preferences as any).specialMode = 'active';
-          (this.state.preferences as any).vibeBoosts = ['active', 'outdoors', 'adventure', 'fitness'];
-          (this.state.preferences as any).activityBoosts = ['hiking', 'surf', 'cycling', 'rock_climbing', 'water_sports'];
-          console.log('[Orchestrator] Sports/Active mode activated');
+          this.state.preferences.specialMode = 'active';
+          this.state.preferences.vibeBoosts = ['active', 'outdoors', 'adventure', 'fitness'];
+          this.state.preferences.activityBoosts = ['hiking', 'surf', 'cycling', 'rock_climbing', 'water_sports'];
         }
 
-        console.log('[Orchestrator] Trip occasion set:', occasion.id);
         break;
 
       case 'travelingWithPets':
         // Simple yes/no question
         const petYesNo = response as { id: string; label: string };
-        (this.state.preferences as any).hasPets = petYesNo.id === 'yes';
+        this.state.preferences.hasPets = petYesNo.id === 'yes';
         if (petYesNo.id === 'no') {
-          (this.state.preferences as any).travelingWithPets = { hasPet: false };
+          this.state.preferences.travelingWithPets = { hasPet: false };
         }
-        console.log('[Orchestrator] Has pets:', (this.state.preferences as any).hasPets);
         break;
 
       case 'travelingWithPetsType':
@@ -3282,22 +3270,20 @@ export class QuickPlanOrchestrator {
                         petTypeResponse.id.includes('large') ? 'large' : undefined;
         const petType = petTypeResponse.id.includes('dog') ? 'dog' :
                         petTypeResponse.id.includes('cat') ? 'cat' : 'other';
-        (this.state.preferences as any).travelingWithPets = {
+        this.state.preferences.travelingWithPets = {
           hasPet: true,
           petType,
           petSize,
         };
-        console.log('[Orchestrator] Pet info set:', (this.state.preferences as any).travelingWithPets);
         break;
 
       case 'accessibility':
         // Simple yes/no question
         const accessYesNo = response as { id: string; label: string };
-        (this.state.preferences as any).hasAccessibilityNeeds = accessYesNo.id === 'yes';
+        this.state.preferences.hasAccessibilityNeeds = accessYesNo.id === 'yes';
         if (accessYesNo.id === 'no') {
           this.state.preferences.accessibilityNeeds = undefined;
         }
-        console.log('[Orchestrator] Has accessibility needs:', (this.state.preferences as any).hasAccessibilityNeeds);
         this.setConfidence('accessibility', 'complete');
         break;
 
@@ -3311,7 +3297,6 @@ export class QuickPlanOrchestrator {
           elevatorRequired: accessibilityIds.includes('elevator'),
           noStairs: accessibilityIds.includes('no_stairs'),
         };
-        console.log('[Orchestrator] Accessibility needs set:', this.state.preferences.accessibilityNeeds);
         break;
 
       case 'budget':
@@ -3325,20 +3310,20 @@ export class QuickPlanOrchestrator {
           min: Math.max(Math.round(budget.value * 0.5), budget.value - budgetRange),
           max: isUnlimited ? 999999 : budget.value + budgetRange,
         };
-        (this.state.preferences as any).budgetUnlimited = isUnlimited;
+        this.state.preferences.budgetUnlimited = isUnlimited;
         this.setConfidence('budget', 'complete');
         break;
 
       case 'accommodationType':
         const accomType = response as { id: string; label: string };
-        (this.state.preferences as any).accommodationType = accomType.id;
-        console.log('[Orchestrator] Accommodation type set:', accomType.id);
+        this.state.preferences.accommodationType = accomType.id as TripPreferences['accommodationType'];
+        (this.state.confidence as Record<string, ConfidenceLevel>).accommodationType = 'complete';
         break;
 
       case 'sustainabilityPreference':
         const sustainabilityPref = response as { id: string; label: string };
-        (this.state.preferences as any).sustainabilityPreference = sustainabilityPref.id;
-        console.log('[Orchestrator] Sustainability preference set:', sustainabilityPref.id);
+        this.state.preferences.sustainabilityPreference = sustainabilityPref.id as TripPreferences['sustainabilityPreference'];
+        (this.state.confidence as Record<string, ConfidenceLevel>).sustainabilityPreference = 'complete';
         break;
 
       // ============================================================================
@@ -3349,8 +3334,8 @@ export class QuickPlanOrchestrator {
         const surfResponse = response as { id: string; label: string; isCustom?: boolean };
         const surfLevel = surfResponse.id;
 
-        (this.state.preferences as any).surfingDetails = {
-          level: surfLevel,
+        this.state.preferences.surfingDetails = {
+          level: surfLevel as SurfingDetails['level'],
           wantsLessons: surfLevel === 'never' || surfLevel === 'beginner',
           customNotes: surfResponse.isCustom ? surfResponse.label : undefined,
         };
@@ -3358,18 +3343,17 @@ export class QuickPlanOrchestrator {
         // FIX 1.10: Apply surf level to area/experience filtering
         if (surfLevel === 'never' || surfLevel === 'beginner') {
           // Prioritize areas with surf schools and beginner-friendly breaks
-          (this.state.preferences as any).surfSchoolRequired = true;
-          (this.state.preferences as any).surfBreakType = 'beginner';
+          this.state.preferences.surfSchoolRequired = true;
+          this.state.preferences.surfBreakType = 'beginner';
         } else if (surfLevel === 'intermediate') {
           // Allow intermediate spots with some variety
-          (this.state.preferences as any).surfBreakType = 'intermediate';
+          this.state.preferences.surfBreakType = 'intermediate';
         } else if (surfLevel === 'advanced' || surfLevel === 'expert') {
           // Allow advanced spots with reef breaks, etc.
-          (this.state.preferences as any).allowAdvancedSpots = true;
-          (this.state.preferences as any).surfBreakType = 'advanced';
+          this.state.preferences.allowAdvancedSpots = true;
+          this.state.preferences.surfBreakType = 'advanced';
         }
 
-        console.log('[Orchestrator] Surfing details set:', (this.state.preferences as any).surfingDetails);
         break;
 
       case 'childNeeds':
@@ -3378,7 +3362,7 @@ export class QuickPlanOrchestrator {
         const customChildNotes = childNeedsResponse.find(r => r.isCustom)?.label;
 
         if (!childNeedsIds.includes('none')) {
-          (this.state.preferences as any).childNeeds = {
+          this.state.preferences.childNeeds = {
             scaredOfHeights: childNeedsIds.includes('scared_heights'),
             scaredOfWater: childNeedsIds.includes('scared_water'),
             scaredOfDark: childNeedsIds.includes('scared_dark_rides'),
@@ -3389,26 +3373,24 @@ export class QuickPlanOrchestrator {
             customNotes: customChildNotes,
           };
         } else {
-          (this.state.preferences as any).childNeeds = { none: true };
+          this.state.preferences.childNeeds = { none: true };
         }
-        console.log('[Orchestrator] Child needs set:', (this.state.preferences as any).childNeeds);
         break;
 
       case 'workationNeeds':
         const workationResponse = response as { id: string; label: string; isCustom?: boolean };
-        (this.state.preferences as any).workationNeeds = {
+        this.state.preferences.workationNeeds = {
           requiresWorkspace: true,
           wifiSpeed: workationResponse.id as 'basic' | 'fast' | 'excellent',
           customNotes: workationResponse.isCustom ? workationResponse.label : undefined,
         };
-        console.log('[Orchestrator] Workation needs set:', (this.state.preferences as any).workationNeeds);
         break;
 
       case 'multiCountryLogistics':
         const multiCountryResponse = response as { id: string; label: string; isCustom?: boolean };
         const destInputForMulti = this.state.preferences.destinationContext?.rawInput || '';
         const multiInfo = detectMultiCountry(destInputForMulti);
-        (this.state.preferences as any).multiCountryLogistics = {
+        this.state.preferences.multiCountryLogistics = {
           acknowledged: true,
           userChoice: multiCountryResponse.id,
           countries: multiInfo.countries,
@@ -3416,7 +3398,6 @@ export class QuickPlanOrchestrator {
           needsVisaInfo: multiCountryResponse.id === 'visa_check',
           customNotes: multiCountryResponse.isCustom ? multiCountryResponse.label : undefined,
         };
-        console.log('[Orchestrator] Multi-country logistics set:', (this.state.preferences as any).multiCountryLogistics);
         break;
 
       case 'themeParkPreferences':
@@ -3424,7 +3405,7 @@ export class QuickPlanOrchestrator {
         const themeParkIds = themeParkResponse.map(r => r.id);
         const customThemeParkNotes = themeParkResponse.find(r => r.isCustom)?.label;
 
-        (this.state.preferences as any).themeParkPreferences = {
+        this.state.preferences.themeParkPreferences = {
           wantsCharacterDining: themeParkIds.includes('character_dining'),
           thrillSeeker: themeParkIds.includes('thrill_seeker'),
           relaxedPace: themeParkIds.includes('relaxed_pace'),
@@ -3435,42 +3416,40 @@ export class QuickPlanOrchestrator {
 
         // FIX 1.11: Apply theme park preferences to itinerary planning
         if (themeParkIds.includes('avoid_crowds')) {
-          (this.state.preferences as any).preferLowCrowdTimes = true;
+          this.state.preferences.preferLowCrowdTimes = true;
         }
         if (themeParkIds.includes('thrill_seeker')) {
           // Check child ages for ride restrictions
           const parkChildAges = this.state.preferences.childAges || [];
           if (parkChildAges.some(age => age < 10)) {
-            (this.state as any).themeParkWarning = 'Note: Some thrill rides have height/age restrictions for younger kids';
+            this.state.themeParkWarning = 'Note: Some thrill rides have height/age restrictions for younger kids';
           }
         }
         if (themeParkIds.includes('relaxed_pace')) {
           // Suggest fewer parks per day
-          (this.state.preferences as any).parksPerDay = 1;
+          this.state.preferences.parksPerDay = 1;
         }
 
-        console.log('[Orchestrator] Theme park prefs set:', (this.state.preferences as any).themeParkPreferences);
         break;
 
       case 'userNotes':
         const notesResponse = response as string;
         if (notesResponse && notesResponse.trim()) {
           // Add to user notes array
-          const existingNotes = (this.state.preferences as any).userNotes || [];
+          const existingNotes = this.state.preferences.userNotes || [];
           existingNotes.push({
             field: 'general',
             note: notesResponse.trim(),
             timestamp: new Date(),
           });
-          (this.state.preferences as any).userNotes = existingNotes;
-          console.log('[Orchestrator] User note added:', notesResponse.trim());
+          this.state.preferences.userNotes = existingNotes;
         }
         break;
 
       case 'subreddits':
         const subreddits = response as { id: string; label: string }[];
-        (this.state.preferences as any).selectedSubreddits = subreddits.map(s => s.id);
-        (this.state.preferences as any).subredditsComplete = true; // Mark as answered
+        this.state.preferences.selectedSubreddits = subreddits.map(s => s.id);
+        this.state.preferences.subredditsComplete = true; // Mark as answered
         break;
 
       case 'pace':
@@ -3482,6 +3461,11 @@ export class QuickPlanOrchestrator {
 
       case 'activities':
         const activities = response as { id: string; label: string; isCustom?: boolean }[];
+        if (!activities || activities.length === 0) {
+          // Don't process empty activities — the question will re-appear
+          this.addSnooMessage("Please select at least one activity so I can plan a great trip for you!", 'idle');
+          return;
+        }
         const activityTypes = activities.map(a => a.id);
         const childAges = this.state.preferences.childAges || [];
 
@@ -3491,8 +3475,7 @@ export class QuickPlanOrchestrator {
 
           if (filtered.restricted.length > 0) {
             // Store warnings to show user in next message
-            (this.state as any).activityWarnings = filtered.warnings;
-            console.log('[Orchestrator] Activity warnings for child ages:', filtered.warnings);
+            this.state.activityWarnings = filtered.warnings;
           }
         }
 
@@ -3512,7 +3495,7 @@ export class QuickPlanOrchestrator {
         // Sanitize: strip HTML tags from free-text input
         const vibe = (response as string).replace(/<[^>]*>/g, '');
         // BUG FIX: Store the vibe text itself so the field is marked as answered
-        (this.state.preferences as any).vibe = vibe || '';
+        this.state.preferences.vibe = vibe || '';
 
         // Parse must-dos and hard-nos from free text
         this.state.preferences.mustDos = [];
@@ -3523,13 +3506,11 @@ export class QuickPlanOrchestrator {
           this.state.preferences.mustDos.push(vibe);
         }
         this.setConfidence('vibe', 'complete');
-        console.log('[Orchestrator] Vibe/must-dos set:', vibe);
         break;
 
       case 'activitySkillLevel':
         const skillLevel = response as { id: string; label: string };
         this.state.preferences.activitySkillLevel = skillLevel.id as 'beginner' | 'intermediate' | 'advanced';
-        console.log('[Orchestrator] Activity skill level set:', skillLevel.id);
         break;
 
       case 'areas':
@@ -3540,7 +3521,7 @@ export class QuickPlanOrchestrator {
 
       case 'hotelPreferences':
         const hotelPrefs = response as { id: string; label: string }[];
-        (this.state.preferences as any).hotelPreferences = hotelPrefs.map(p => p.id);
+        this.state.preferences.hotelPreferences = hotelPrefs.map(p => p.id);
         // Also set specific flags for common preferences
         this.state.preferences.adultsOnlyPreferred = hotelPrefs.some(p => p.id === 'adults_only');
         this.state.preferences.allInclusivePreferred = hotelPrefs.some(p => p.id === 'all_inclusive');
@@ -3548,7 +3529,6 @@ export class QuickPlanOrchestrator {
           .filter(p => ['boutique', 'quiet', 'family'].includes(p.id))
           .map(p => p.id);
         // Bug fix: add logging for debugging
-        console.log('[Orchestrator] Hotel preferences set:', hotelPrefs.map(p => p.id));
         break;
 
       case 'split':
@@ -3556,63 +3536,45 @@ export class QuickPlanOrchestrator {
         // Bug fix: validate split has valid stops and set state properly
         if (splitResponse && splitResponse.stops && splitResponse.stops.length > 0) {
           this.state.preferences.selectedSplit = splitResponse;
-          console.log('[Orchestrator] Split selected:', splitResponse.id, 'with', splitResponse.stops.length, 'stops');
         } else {
-          console.warn('[Orchestrator] Invalid split response, missing stops');
         }
         break;
 
       case 'hotels':
         const hotel = response as HotelCandidate;
         // Get the current area from the question config
-        const currentAreaId = (this.state.currentQuestion?.inputConfig as any)?.areaId;
-
-        console.log(`[Orchestrator] Hotel response received:`, {
-          hotelName: hotel?.name,
-          currentAreaId,
-          questionConfig: this.state.currentQuestion?.inputConfig,
-        });
+        const currentAreaId = this.state.currentQuestion?.inputConfig?.areaId;
 
         if (!currentAreaId) {
           console.error('[Orchestrator] No areaId in hotel question config - using first unselected area');
           // Fallback: find first area without a hotel
           const areas = this.state.preferences.selectedAreas || [];
-          const selectedHotels = (this.state.preferences as any).selectedHotels || {};
+          const selectedHotels = this.state.preferences.selectedHotels || {};
           const fallbackArea = areas.find(a => !selectedHotels[a.id] && this.state.discoveredData.hotels.has(a.id));
           if (fallbackArea) {
-            (this.state.preferences as any).selectedHotels = selectedHotels;
-            (this.state.preferences as any).selectedHotels[fallbackArea.id] = hotel;
-            console.log(`[Orchestrator] Used fallback area: ${fallbackArea.id}`);
+            this.state.preferences.selectedHotels = selectedHotels;
+            this.state.preferences.selectedHotels[fallbackArea.id] = hotel;
           }
         } else if (hotel) {
           // Initialize selectedHotels if needed
-          if (!(this.state.preferences as any).selectedHotels) {
-            (this.state.preferences as any).selectedHotels = {};
+          if (!this.state.preferences.selectedHotels) {
+            this.state.preferences.selectedHotels = {};
           }
-          (this.state.preferences as any).selectedHotels[currentAreaId] = hotel;
-          console.log(`[Orchestrator] Stored hotel "${hotel.name}" for area ${currentAreaId}`);
+          this.state.preferences.selectedHotels[currentAreaId] = hotel;
         }
 
         // Always check completion status after handling
         const allAreas = this.state.preferences.selectedAreas || [];
-        const allSelectedHotels = (this.state.preferences as any).selectedHotels || {};
+        const allSelectedHotels = this.state.preferences.selectedHotels || {};
         const areasNeedingHotels = allAreas.filter(a =>
           !allSelectedHotels[a.id] && this.state.discoveredData.hotels.has(a.id) &&
           (this.state.discoveredData.hotels.get(a.id)?.length || 0) > 0
         );
 
-        console.log(`[Orchestrator] Hotel status:`, {
-          totalAreas: allAreas.length,
-          selectedHotels: Object.keys(allSelectedHotels),
-          areasStillNeedingHotels: areasNeedingHotels.map(a => a.id),
-        });
-
         if (areasNeedingHotels.length === 0) {
           this.setConfidence('hotels', 'complete');
-          console.log('[Orchestrator] All areas have hotels selected');
         } else {
           this.setConfidence('hotels', 'partial');
-          console.log(`[Orchestrator] ${areasNeedingHotels.length} areas still need hotels`);
         }
         break;
 
@@ -3620,120 +3582,103 @@ export class QuickPlanOrchestrator {
         const dining = response as { id: string };
         // Store diningMode as-is (plan, list, or none)
         this.state.preferences.diningMode = dining.id as 'none' | 'list' | 'plan';
-        this.setConfidence('dining', 'complete');
-        console.log('[Orchestrator] Dining mode set to:', dining.id);
+        // BUG FIX: Don't mark dining as complete yet if user wants dining help
+        // We still need to ask about dietary restrictions and cuisine preferences
+        // Only mark complete if user chose 'none' (skip dining)
+        if (dining.id === 'none') {
+          this.setConfidence('dining', 'complete');
+          // Also set dietary restrictions to 'none' so we don't ask about it
+          this.state.preferences.dietaryRestrictions = ['none'];
+        } else {
+          // User wants dining help - set to 'confirmed' to signal the question was answered
+          // but not yet complete (still need dietary restrictions and cuisine)
+          this.setConfidence('dining', 'confirmed');
+        }
         break;
 
       case 'dietaryRestrictions':
         const dietaryPrefs = response as { id: string; label: string }[];
         // Filter out 'none' if selected with other options
         const restrictions = dietaryPrefs.map(d => d.id).filter(id => id !== 'none');
-        (this.state.preferences as any).dietaryRestrictions = restrictions.length > 0 ? restrictions : ['none'];
-        console.log('[Orchestrator] Dietary restrictions set:', (this.state.preferences as any).dietaryRestrictions);
+        this.state.preferences.dietaryRestrictions = restrictions.length > 0 ? restrictions : ['none'];
         break;
 
       case 'cuisinePreferences':
         const cuisinePrefs = response as { id: string; label: string }[];
-        (this.state.preferences as any).cuisinePreferences = cuisinePrefs.map(c => c.id);
-        console.log('[Orchestrator] Cuisine preferences set:', (this.state.preferences as any).cuisinePreferences);
+        this.state.preferences.cuisinePreferences = cuisinePrefs.map(c => c.id);
+        // BUG FIX: Mark dining as complete after cuisine preferences are set
+        // This signals that all dining questions have been answered
+        this.setConfidence('dining', 'complete');
         break;
 
       case 'restaurants':
         const restaurants = response as RestaurantCandidate[];
         // Get the current cuisine type from the question config
-        let currentCuisineType = (this.state.currentQuestion?.inputConfig as any)?.cuisineType;
-
-        console.log(`[Orchestrator] Restaurant response received:`, {
-          restaurantCount: restaurants?.length,
-          cuisineType: currentCuisineType,
-        });
+        let currentCuisineType = this.state.currentQuestion?.inputConfig?.cuisineType;
 
         // Bug fix: fallback to find first cuisine type without selections
         if (!currentCuisineType) {
-          console.warn('[Orchestrator] No cuisineType in restaurant question config - finding fallback');
-          const allCuisines = (this.state.preferences as any).cuisinePreferences || [];
-          const selectedRests = (this.state.preferences as any).selectedRestaurants || {};
+          const allCuisines = this.state.preferences.cuisinePreferences || [];
+          const selectedRests = this.state.preferences.selectedRestaurants || {};
           currentCuisineType = allCuisines.find((c: string) => !selectedRests[c]) || 'general';
-          console.log(`[Orchestrator] Using fallback cuisineType: ${currentCuisineType}`);
         }
 
         if (restaurants && restaurants.length > 0) {
           // Initialize selectedRestaurants if needed
-          if (!(this.state.preferences as any).selectedRestaurants) {
-            (this.state.preferences as any).selectedRestaurants = {};
+          if (!this.state.preferences.selectedRestaurants) {
+            this.state.preferences.selectedRestaurants = {};
           }
-          (this.state.preferences as any).selectedRestaurants[currentCuisineType] = restaurants;
-          console.log(`[Orchestrator] Stored ${restaurants.length} restaurants for cuisine ${currentCuisineType}`);
+          this.state.preferences.selectedRestaurants[currentCuisineType] = restaurants;
         }
 
         // Check if all cuisine types have restaurant selections (or no restaurants available)
-        const allCuisinePrefs = (this.state.preferences as any).cuisinePreferences || [];
-        const allSelectedRestaurants = (this.state.preferences as any).selectedRestaurants || {};
+        const allCuisinePrefs = this.state.preferences.cuisinePreferences || [];
+        const allSelectedRestaurants = this.state.preferences.selectedRestaurants || {};
         const cuisinesNeedingRestaurants = allCuisinePrefs.filter((cuisine: string) =>
           !allSelectedRestaurants[cuisine] &&
           this.state.discoveredData.restaurants.has(cuisine) &&
           (this.state.discoveredData.restaurants.get(cuisine)?.length || 0) > 0
         );
 
-        console.log(`[Orchestrator] Restaurant status:`, {
-          totalCuisines: allCuisinePrefs.length,
-          selectedRestaurants: Object.keys(allSelectedRestaurants),
-          cuisinesStillNeeding: cuisinesNeedingRestaurants,
-        });
-
         // If no more cuisines need restaurant selection, we're done with restaurants
         if (cuisinesNeedingRestaurants.length === 0) {
-          console.log('[Orchestrator] All cuisines have restaurants selected (or none available)');
         }
         break;
 
       case 'experiences':
-        const experiences = response as any[];
-        let currentActivityType = (this.state.currentQuestion?.inputConfig as any)?.activityType;
-
-        console.log(`[Orchestrator] Experience response received:`, {
-          experienceCount: experiences?.length,
-          activityType: currentActivityType,
-        });
+        const experiences = response as VerifiedActivity[];
+        let currentActivityType = this.state.currentQuestion?.inputConfig?.activityType;
 
         // Bug fix: fallback to find first activity type without selections
         if (!currentActivityType) {
-          console.warn('[Orchestrator] No activityType in experience question config - finding fallback');
           const allActivities = (this.state.preferences.selectedActivities || []).map(a => a.type);
-          const selectedExps = (this.state.preferences as any).selectedExperiences || {};
+          const selectedExps = this.state.preferences.selectedExperiences || {};
           currentActivityType = allActivities.find((a: string) => !selectedExps[a]) || 'general';
-          console.log(`[Orchestrator] Using fallback activityType: ${currentActivityType}`);
         }
 
         if (experiences && experiences.length > 0) {
-          if (!(this.state.preferences as any).selectedExperiences) {
-            (this.state.preferences as any).selectedExperiences = {};
+          if (!this.state.preferences.selectedExperiences) {
+            this.state.preferences.selectedExperiences = {};
           }
-          (this.state.preferences as any).selectedExperiences[currentActivityType] = experiences;
-          console.log(`[Orchestrator] Stored ${experiences.length} experiences for activity ${currentActivityType}`);
+          this.state.preferences.selectedExperiences[currentActivityType] = experiences;
         } else {
           // User skipped - mark as done for this activity
-          if (!(this.state.preferences as any).selectedExperiences) {
-            (this.state.preferences as any).selectedExperiences = {};
+          if (!this.state.preferences.selectedExperiences) {
+            this.state.preferences.selectedExperiences = {};
           }
-          (this.state.preferences as any).selectedExperiences[currentActivityType] = [];
+          this.state.preferences.selectedExperiences[currentActivityType] = [];
         }
 
         // Check if all activity types have experience selections
         const allActivityTypes = (this.state.preferences.selectedActivities || []).map(a => a.type);
-        const allSelectedExperiences = (this.state.preferences as any).selectedExperiences || {};
-        const experiencesMap = (this.state.discoveredData as any).experiences;
+        const allSelectedExperiences = this.state.preferences.selectedExperiences || {};
+        const experiencesMap = this.state.discoveredData.experiences;
         const activitiesNeedingExperiences = allActivityTypes.filter((activity: string) =>
           !allSelectedExperiences[activity] &&
           experiencesMap?.has(activity) &&
           (experiencesMap?.get(activity)?.length || 0) > 0
         );
 
-        console.log(`[Orchestrator] Experience status:`, {
-          totalActivities: allActivityTypes.length,
-          selectedExperiences: Object.keys(allSelectedExperiences),
-          activitiesStillNeeding: activitiesNeedingExperiences,
-        });
         break;
 
       case 'satisfaction':
@@ -3852,7 +3797,7 @@ Ask something that would help personalize their experience. Keep it casual.`;
   }
 
   setDiscoveredExperiences(activityType: string, experiences: any[]): void {
-    (this.state.discoveredData as any).experiences.set(activityType, experiences);
+    this.state.discoveredData.experiences.set(activityType, experiences);
   }
 
   setItinerary(itinerary: OrchestratorState['itinerary']): void {
@@ -3874,15 +3819,25 @@ Ask something that would help personalize their experience. Keep it casual.`;
     for (const reason of reasons) {
       switch (reason) {
         case 'wrong_areas':
-          // Go back to area discovery
+          // Go back to area discovery - clear areas, split, and hotel selections
+          // so they are re-discovered and re-selected from scratch
           this.setConfidence('areas', 'unknown');
           this.state.discoveredData.areas = [];
+          this.state.preferences.selectedAreas = [];
+          this.state.preferences.selectedSplit = null;
+          this.state.preferences.selectedHotels = {};
+          this.setConfidence('hotels', 'unknown');
+          // BUG FIX: Also clear discovered hotels so they are re-fetched for new areas
+          this.state.discoveredData.hotels.clear();
+          // BUG FIX: Reset enrichment status so the enrichment pipeline re-triggers
+          this.setEnrichmentStatus('areas', 'pending');
+          this.setEnrichmentStatus('hotels', 'pending');
           targetPhases.push('enriching');
           break;
 
         case 'wrong_vibe':
           // Clear vibe preference (stored as .vibe, not .vibes) to re-ask
-          (this.state.preferences as any).vibe = undefined;
+          this.state.preferences.vibe = undefined;
           this.setConfidence('vibe', 'unknown');
           targetPhases.push('gathering');
           break;
@@ -3897,7 +3852,7 @@ Ask something that would help personalize their experience. Keep it casual.`;
         case 'hotel_wrong':
           // Go back to hotel selection — keep discovered hotels, only clear selections
           this.setConfidence('hotels', 'unknown');
-          (this.state.preferences as any).selectedHotels = {};
+          this.state.preferences.selectedHotels = {};
           targetPhases.push('enriching');
           break;
 
@@ -3905,8 +3860,14 @@ Ask something that would help personalize their experience. Keep it casual.`;
           // Clear restaurant selections and cuisine prefs — keep dining mode and dietary restrictions
           // User will re-answer cuisine preferences, which triggers restaurant re-fetch
           this.state.discoveredData.restaurants.clear();
-          (this.state.preferences as any).selectedRestaurants = undefined;
-          (this.state.preferences as any).cuisinePreferences = undefined;
+          this.state.preferences.selectedRestaurants = undefined;
+          this.state.preferences.cuisinePreferences = undefined;
+          // BUG FIX (R4): Set dining confidence to 'confirmed' (not 'unknown') so the
+          // top-level dining question ("Do you want dining help?") is NOT re-asked.
+          // The user already chose 'plan' — we only need to re-ask cuisinePreferences
+          // (which was cleared above). Setting to 'unknown' would incorrectly re-trigger
+          // the dining yes/no question per getMissingRequiredFields line 2345.
+          this.setConfidence('dining', 'confirmed');
           targetPhases.push('enriching');
           break;
 
@@ -3928,16 +3889,26 @@ Ask something that would help personalize their experience. Keep it casual.`;
 
         case 'surf_days_wrong':
           // Clear surfing details so user can re-specify (keep activity selections intact)
-          (this.state.preferences as any).surfingDetails = undefined;
+          this.state.preferences.surfingDetails = undefined;
           targetPhases.push('gathering');
           break;
 
         case 'budget_exceeded':
-          // Bump budget up by 25% and regenerate
+          // User says trip costs too much - reduce budget max by 25% and regenerate
+          // to trigger cheaper hotel/activity selections
           if (this.state.preferences.budgetPerNight) {
-            this.state.preferences.budgetPerNight.max = Math.round(this.state.preferences.budgetPerNight.max * 1.25);
+            this.state.preferences.budgetPerNight.max = Math.round(this.state.preferences.budgetPerNight.max * 0.75);
           }
-          targetPhases.push('generating');
+          // Also clear hotel selections so cheaper options are picked
+          this.state.preferences.selectedHotels = {};
+          this.setConfidence('hotels', 'unknown');
+          // BUG FIX (R4): Also clear discovered hotels and reset enrichment status
+          // so the enrichment pipeline re-fetches hotels with the new lower budget.
+          // Without this, the old expensive hotels remain in discoveredData and
+          // enrichmentStatus stays 'done', so no re-fetch occurs.
+          this.state.discoveredData.hotels.clear();
+          this.setEnrichmentStatus('hotels', 'pending');
+          targetPhases.push('enriching');
           break;
 
         default:
@@ -3951,7 +3922,7 @@ Ask something that would help personalize their experience. Keep it casual.`;
 
     // Set phase to the earliest needed to address all selected reasons
     const earliest = PHASE_ORDER.find(p => targetPhases.includes(p)) || 'generating';
-    this.state.phase = earliest as any;
+    this.state.phase = earliest as OrchestratorState['phase'];
 
     // Add a message acknowledging the feedback
     this.addSnooMessage(
@@ -4004,12 +3975,21 @@ Ask something that would help personalize their experience. Keep it casual.`;
       currentQuestion: this.state.currentQuestion,
       itinerary: this.state.itinerary,
       seasonalWarnings: this.state.seasonalWarnings,
-      questionHistory: (this.state as any).questionHistory,
+      questionHistory: this.state.questionHistory,
     };
   }
 
   static fromJSON(json: ReturnType<QuickPlanOrchestrator['toJSON']>): QuickPlanOrchestrator {
-    const data = json as any;
+    const data = json as Record<string, unknown> & {
+      discoveredData: {
+        areas: AreaCandidate[];
+        hotels: [string, HotelCandidate[]][];
+        activities: VerifiedActivity[];
+        restaurants: [string, RestaurantCandidate[]][];
+        experiences?: [string, VerifiedActivity[]][];
+      };
+      questionHistory?: string[];
+    };
     const orchestrator = new QuickPlanOrchestrator({
       ...data,
       discoveredData: {
@@ -4021,7 +4001,7 @@ Ask something that would help personalize their experience. Keep it casual.`;
       },
     });
     if (data.questionHistory) {
-      (orchestrator.state as any).questionHistory = data.questionHistory;
+      orchestrator.state.questionHistory = data.questionHistory;
     }
     return orchestrator;
   }

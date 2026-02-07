@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import { NextResponse } from 'next/server';
-import { isValidDateString, toDate, isAfter, isFuture } from './date-utils';
+import { isValidDateString, toDate, isAfter, isFuture, getTodayString } from './date-utils';
 
 // ============================================================================
 // CONSTANTS
@@ -115,8 +115,8 @@ export const dateStringSchema = z
  * Uses centralized date utilities for timezone-safe comparison
  */
 export const futureDateSchema = dateStringSchema.refine((val) => {
-  return isFuture(val) || val === new Date().toISOString().split('T')[0];
-}, 'Date must be in the future');
+  return isFuture(val) || val === getTodayString();
+}, 'Date must be today or in the future');
 
 /**
  * Rating validation (0-5 scale)
@@ -126,7 +126,7 @@ export const ratingSchema = z.number().min(0).max(5);
 /**
  * Price/budget validation (non-negative)
  */
-export const priceSchema = z.number().min(0).max(100000);
+export const priceSchema = z.number().min(0).max(999999);
 
 /**
  * Positive integer validation
@@ -211,9 +211,7 @@ export const hotelsPostSchema = z.object({
 }).refine(
   (data) => {
     if (data.checkIn && data.checkOut) {
-      const checkIn = new Date(data.checkIn);
-      const checkOut = new Date(data.checkOut);
-      return checkOut > checkIn;
+      return isAfter(data.checkOut, data.checkIn);
     }
     return true;
   },
@@ -301,7 +299,7 @@ export const discoverAreasPostSchema = z.object({
   preferences: z.object({
     startDate: z.union([z.string(), z.date()]).optional().nullable(),
     endDate: z.union([z.string(), z.date()]).optional().nullable(),
-    tripLength: z.number().int().min(1).max(90).optional(),
+    tripLength: z.number().int().min(1).max(60).optional(),
     adults: adultsSchema.optional(),
     children: childrenSchema.optional(),
     childAges: z.array(z.number().int().min(0).max(17)).max(20).optional(),
@@ -376,9 +374,12 @@ export function sanitizeString(input: string): string {
     .replace(/\0/g, '')
     // Remove control characters (except newlines and tabs)
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    // Encode HTML special characters
+    // Encode HTML special characters (& must be first to avoid double-encoding)
+    .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
     // Trim whitespace
     .trim();
 }

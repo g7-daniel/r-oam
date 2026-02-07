@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/Skeleton';
 import { parseAPIErrorResponse, getUserFriendlyMessage } from '@/lib/errors';
 import { dedupedFetch } from '@/lib/request-dedup';
+import { clientEnv } from '@/lib/env';
 
 // ============================================================================
 // DYNAMIC IMPORTS FOR CODE SPLITTING
@@ -126,7 +127,6 @@ export default function ReplyCard({ type, config, onSubmit, onAddNote, disabled 
   const CardComponent = cardVariants[type];
 
   if (!CardComponent) {
-    console.warn(`Unknown reply card type: ${type}`);
     return null;
   }
 
@@ -174,7 +174,7 @@ function OptionalNotesInput({ field, placeholder, onSubmit, disabled }: Optional
       <button
         onClick={() => setIsExpanded(true)}
         disabled={disabled}
-        className="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 mt-3 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+        className="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 mt-3 flex items-center gap-1.5 transition-colors disabled:opacity-50 min-h-[44px] py-2 hover:bg-slate-50 dark:hover:bg-slate-700/30 rounded-lg px-2 -mx-2 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
       >
         <MessageCircle className="w-4 h-4" />
         Anything specific Snoo should know?
@@ -193,7 +193,8 @@ function OptionalNotesInput({ field, placeholder, onSubmit, disabled }: Optional
         onChange={(e) => setNote(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
-        className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+        aria-label="Additional notes"
+        className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm resize-none placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent dark:focus:ring-offset-slate-800 transition-shadow"
         rows={2}
       />
       <div className="flex gap-2">
@@ -206,7 +207,7 @@ function OptionalNotesInput({ field, placeholder, onSubmit, disabled }: Optional
             setNote('');
           }}
           disabled={disabled}
-          className="text-sm px-3 py-1.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
+          className="text-sm px-4 py-2.5 min-h-[44px] bg-orange-500 text-white rounded-lg hover:bg-orange-600 active:bg-orange-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 shadow-sm hover:shadow-md"
         >
           {note.trim() ? 'Add note' : 'Skip'}
         </button>
@@ -216,7 +217,8 @@ function OptionalNotesInput({ field, placeholder, onSubmit, disabled }: Optional
             setNote('');
           }}
           disabled={disabled}
-          className="text-sm px-3 py-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
+          aria-label="Cancel note"
+          className="text-sm px-4 py-2.5 min-h-[44px] text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg active:scale-[0.98] transition-all disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
         >
           Cancel
         </button>
@@ -299,11 +301,11 @@ function ChipsCard({ config, onSubmit, disabled }: CardProps) {
             disabled={disabled}
             role="radio"
             aria-checked={selected === option.id}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+            className={`px-4 py-2.5 min-h-[44px] rounded-xl text-sm font-medium transition-all ${
               selected === option.id
-                ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/20'
-                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 hover:shadow-sm'
-            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/20 ring-2 ring-orange-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-800'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 hover:shadow-sm active:scale-[0.97]'
+            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''} focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800`}
           >
             {option.icon && <span className="mr-2" aria-hidden="true">{option.icon}</span>}
             {option.label}
@@ -313,7 +315,7 @@ function ChipsCard({ config, onSubmit, disabled }: CardProps) {
           <button
             onClick={() => setShowCustom(true)}
             disabled={disabled}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 ${
+            className={`px-4 py-2.5 min-h-[44px] rounded-xl text-sm font-medium transition-all bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 ${
               disabled ? 'opacity-50 cursor-not-allowed' : ''
             }`}
           >
@@ -336,12 +338,14 @@ function ChipsCard({ config, onSubmit, disabled }: CardProps) {
               onChange={(e) => setCustomText(e.target.value)}
               placeholder={config.customTextPlaceholder || 'Type your answer...'}
               onKeyDown={(e) => e.key === 'Enter' && handleCustomSubmit()}
-              className="flex-1 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+              aria-label="Type a custom answer"
+              className="flex-1 px-4 py-3 min-h-[44px] rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent dark:focus:ring-offset-slate-800 transition-shadow"
             />
             <button
               onClick={handleCustomSubmit}
               disabled={!customText.trim()}
-              className="px-4 py-2 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Submit custom answer"
+              className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 active:bg-orange-700 active:scale-[0.95] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 transition-all"
             >
               <Check className="w-4 h-4" />
             </button>
@@ -455,11 +459,11 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
             onClick={() => toggleOption(option.id)}
             disabled={disabled}
             aria-pressed={selected.has(option.id)}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+            className={`px-4 py-2.5 min-h-[44px] rounded-xl text-sm font-medium transition-all ${
               selected.has(option.id)
-                ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/20'
-                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 hover:shadow-sm'
-            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/20 ring-2 ring-orange-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-800'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 hover:shadow-sm active:scale-[0.97]'
+            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''} focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800`}
           >
             {selected.has(option.id) && <Check className="w-3.5 h-3.5 mr-1.5 inline" aria-hidden="true" />}
             {option.icon && <span className="mr-2" aria-hidden="true">{option.icon}</span>}
@@ -475,15 +479,15 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
             <span
               key={item}
               role="listitem"
-              className="px-3 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-sm flex items-center gap-1"
+              className="pl-3 pr-1 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-sm flex items-center gap-1 shadow-sm"
             >
               {item}
               <button
                 onClick={() => removeCustomItem(item)}
-                className="hover:text-orange-900 focus:outline-none focus:ring-2 focus:ring-orange-500 rounded-full p-0.5"
+                className="hover:text-orange-900 dark:hover:text-orange-200 focus:outline-none focus:ring-2 focus:ring-orange-500 rounded-full w-7 h-7 min-w-[28px] min-h-[28px] flex items-center justify-center transition-all hover:bg-orange-200 dark:hover:bg-orange-800/50 active:scale-95"
                 aria-label={`Remove ${item}`}
               >
-                <X className="w-3 h-3" aria-hidden="true" />
+                <X className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
             </span>
           ))}
@@ -501,15 +505,15 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
             onChange={(e) => setCustomText(e.target.value)}
             placeholder={config.customTextPlaceholder || 'Add your own...'}
             onKeyDown={(e) => e.key === 'Enter' && addCustomItem()}
-            className="flex-1 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+            className="flex-1 px-4 py-3 min-h-[44px] rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent dark:focus:ring-offset-slate-800 transition-shadow"
           />
           <button
             onClick={addCustomItem}
             disabled={!customText.trim()}
-            className="px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-sm hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
+            className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-lg bg-orange-500 text-white text-sm hover:bg-orange-600 active:bg-orange-700 active:scale-[0.95] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:disabled:bg-slate-700 dark:disabled:text-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 flex items-center justify-center transition-all shadow-sm"
             aria-label="Add custom item"
           >
-            <Plus className="w-4 h-4" aria-hidden="true" />
+            <Plus className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
       )}
@@ -526,7 +530,7 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
 
       {/* Inline error message */}
       {touched && error && (
-        <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">
+        <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm border border-red-200 dark:border-red-800">
           <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
           <span>{error}</span>
         </div>
@@ -534,7 +538,7 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
 
       {/* Selection count indicator */}
       {maxSelection && totalSelected > 0 && (
-        <p className="text-xs text-slate-500 dark:text-slate-400 text-center">
+        <p className="text-xs text-slate-600 dark:text-slate-400 text-center font-medium">
           {totalSelected} of {maxSelection} selected
         </p>
       )}
@@ -543,7 +547,7 @@ function ChipsMultiCard({ config, onSubmit, onAddNote, disabled }: CardProps) {
       <button
         onClick={handleSubmit}
         disabled={disabled || (touched && !hasSelection && required)}
-        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+        className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
       >
         Continue
         <ChevronRight className="w-4 h-4 inline ml-1.5" aria-hidden="true" />
@@ -644,14 +648,17 @@ function SliderCard({ config, onSubmit, disabled }: CardProps) {
             aria-valuetext={formatValue(value)}
             aria-label={isBudgetSlider ? 'Budget per night' : 'Value selection'}
             className="relative w-full h-3 bg-transparent rounded-lg appearance-none cursor-pointer z-10
-              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-7 [&::-webkit-slider-thumb]:h-7
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-8 [&::-webkit-slider-thumb]:h-8
               [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
               [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:cursor-pointer
               [&::-webkit-slider-thumb]:border-4 [&::-webkit-slider-thumb]:border-orange-500
               [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:hover:scale-110
-              [&::-moz-range-thumb]:w-7 [&::-moz-range-thumb]:h-7 [&::-moz-range-thumb]:rounded-full
+              [&::-webkit-slider-thumb]:active:scale-125
+              [&::-webkit-slider-thumb]:-mt-[10px]
+              [&::-moz-range-thumb]:w-8 [&::-moz-range-thumb]:h-8 [&::-moz-range-thumb]:rounded-full
               [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-4 [&::-moz-range-thumb]:border-orange-500
-              [&::-moz-range-thumb]:shadow-lg"
+              [&::-moz-range-thumb]:shadow-lg
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800 rounded-lg"
           />
         </div>
         <div className="flex justify-between mt-2 text-xs text-slate-400">
@@ -676,7 +683,7 @@ function SliderCard({ config, onSubmit, disabled }: CardProps) {
       <button
         onClick={handleSubmit}
         disabled={disabled}
-        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+        className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
       >
         Continue
         <ChevronRight className="w-4 h-4 inline ml-1.5" aria-hidden="true" />
@@ -768,7 +775,7 @@ function DateRangeCard({ config, onSubmit, disabled }: CardProps) {
 
       {/* Inline error message */}
       {touched && error && (
-        <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">
+        <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm border border-red-200 dark:border-red-800">
           <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
           <span>{error}</span>
         </div>
@@ -776,27 +783,28 @@ function DateRangeCard({ config, onSubmit, disabled }: CardProps) {
 
       {/* Helpful hint when no dates selected */}
       {!startDate && !endDate && !touched && (
-        <p className="text-sm text-slate-500 dark:text-slate-400 text-center">
-          Click above to select your travel dates
+        <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-2">
+          <Calendar className="w-4 h-4 inline mr-1.5 opacity-70" />
+          Tap above to select your travel dates
         </p>
       )}
 
       {/* Flexible checkbox */}
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="flex items-center gap-3 cursor-pointer min-h-[44px] py-2 px-3 -mx-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
         <input
           type="checkbox"
           checked={flexibleDates}
           onChange={(e) => setFlexibleDates(e.target.checked)}
-          className="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-500"
+          className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-orange-500 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer"
           aria-describedby="flexible-dates-description"
         />
-        <span id="flexible-dates-description" className="text-sm text-slate-600 dark:text-slate-400">My dates are flexible (+/- a few days)</span>
+        <span id="flexible-dates-description" className="text-sm text-slate-700 dark:text-slate-300 select-none">My dates are flexible (+/- a few days)</span>
       </label>
 
       <button
         onClick={handleSubmit}
         disabled={disabled || (touched && !isValid)}
-        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+        className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
       >
         Continue
         <ChevronRight className="w-4 h-4 inline ml-1.5" aria-hidden="true" />
@@ -958,17 +966,17 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
       ) : (
         /* Fallback search input */
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 dark:text-slate-500 pointer-events-none" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search for a destination..."
+            placeholder="Where do you want to go?"
             disabled={disabled}
-            className="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+            className="w-full pl-11 pr-12 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-shadow"
           />
           {isLoading && (
-            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 animate-spin" />
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-orange-500 animate-spin pointer-events-none" />
           )}
         </div>
       )}
@@ -989,7 +997,7 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
               key={destination.placeId}
               onClick={() => handleFallbackSelect(destination)}
               disabled={disabled}
-              className="w-full p-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left transition-colors"
+              className="w-full p-3 min-h-[48px] flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left transition-colors focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-700/50"
             >
               {destination.imageUrl && (
                 <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
@@ -1028,7 +1036,7 @@ function DestinationCard({ config, onSubmit, disabled }: CardProps) {
                 key={dest.name}
                 onClick={() => handleQuickPick(dest)}
                 disabled={disabled}
-                className="group relative h-20 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="group relative h-20 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
               >
                 <Image
                   src={dest.imageUrl}
@@ -1159,7 +1167,7 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
           </div>
           <div>
             <p className="font-semibold text-slate-900 dark:text-white">Adults</p>
-            <p className="text-xs text-slate-500">Age 18+</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Age 18+</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -1167,16 +1175,16 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
             onClick={() => updateAdults(adults - 1)}
             disabled={disabled || adults <= 1}
             aria-label="Decrease adults"
-            className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-95 shadow-sm"
           >
             <Minus className="w-4 h-4" aria-hidden="true" />
           </button>
-          <span className="w-8 text-center font-semibold text-slate-900 dark:text-white" aria-live="polite">{adults}</span>
+          <span className="w-10 text-center font-semibold text-slate-900 dark:text-white tabular-nums text-lg" aria-live="polite">{adults}</span>
           <button
             onClick={() => updateAdults(adults + 1)}
             disabled={disabled || adults >= MAX_ADULTS || totalPeople >= MAX_TOTAL_TRAVELERS}
             aria-label="Increase adults"
-            className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-95 shadow-sm"
           >
             <Plus className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -1191,7 +1199,7 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
           </div>
           <div>
             <p className="font-semibold text-slate-900 dark:text-white">Children</p>
-            <p className="text-xs text-slate-500">Age 0-17</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Age 0-17</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -1199,16 +1207,16 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
             onClick={removeChild}
             disabled={disabled || children <= 0}
             aria-label="Decrease children"
-            className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-95 shadow-sm"
           >
             <Minus className="w-4 h-4" aria-hidden="true" />
           </button>
-          <span className="w-8 text-center font-semibold text-slate-900 dark:text-white" aria-live="polite">{children}</span>
+          <span className="w-10 text-center font-semibold text-slate-900 dark:text-white tabular-nums text-lg" aria-live="polite">{children}</span>
           <button
             onClick={addChild}
             disabled={disabled || children >= MAX_CHILDREN || totalPeople >= MAX_TOTAL_TRAVELERS}
             aria-label="Increase children"
-            className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-95 shadow-sm"
           >
             <Plus className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -1229,7 +1237,7 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
                 onChange={(e) => updateChildAge(index, Number(e.target.value))}
                 disabled={disabled}
                 aria-label={`Age of child ${index + 1}`}
-                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                className="px-3 py-2.5 min-h-[44px] rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent"
               >
                 {Array.from({ length: 18 }, (_, i) => (
                   <option key={i} value={i}>
@@ -1244,7 +1252,7 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
 
       {/* Inline error message */}
       {error && (
-        <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">
+        <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm border border-red-200 dark:border-red-800">
           <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
           <span>{error}</span>
         </div>
@@ -1252,14 +1260,14 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
 
       {/* Room estimate for large groups */}
       {isLargeGroup && !error && (
-        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
+        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
           <div className="flex items-start gap-2">
             <span className="text-lg" aria-hidden="true">🏨</span>
             <div>
-              <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
+              <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">
                 Large group ({totalPeople} travelers)
               </p>
-              <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
+              <p className="text-xs text-blue-800 dark:text-blue-300 mt-0.5">
                 You&apos;ll likely need {estimatedRooms} room{estimatedRooms > 1 ? 's' : ''}.
                 {totalPeople > 8 && ' Consider booking a villa or multiple apartments for better value.'}
               </p>
@@ -1271,7 +1279,7 @@ function PartyCard({ config, onSubmit, disabled }: CardProps) {
       <button
         onClick={handleSubmit}
         disabled={disabled || !isValid}
-        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+        className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 active:from-orange-700 active:to-orange-600 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shadow-sm shadow-orange-500/20 hover:shadow-md hover:shadow-orange-500/25 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
       >
         Continue
         <ChevronRight className="w-4 h-4 inline ml-1.5" aria-hidden="true" />
@@ -1344,9 +1352,16 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
 
   if (hotels.length === 0) {
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center">
-        <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-        <p className="text-slate-500 dark:text-slate-400">No hotels available</p>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6 text-slate-400" />
+        </div>
+        <div>
+          <p className="text-slate-700 dark:text-slate-300 font-medium">No hotels available</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            We could not find hotels matching your criteria. Try adjusting your budget or dates.
+          </p>
+        </div>
       </div>
     );
   }
@@ -1358,9 +1373,9 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
         <div className="p-4 sm:p-5 bg-gradient-to-r from-orange-500 to-amber-500 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-bold text-lg sm:text-xl flex items-center gap-2">
+              <h3 className="font-bold text-lg sm:text-xl flex items-center gap-2 flex-wrap">
                 <span>Select Your Hotel</span>
-                {areaName && <span className="font-normal opacity-90">in {areaName}</span>}
+                {areaName && <span className="font-normal opacity-90 text-base sm:text-lg">in {areaName}</span>}
               </h3>
               <p className="text-orange-100 text-sm mt-1.5">
                 {hotels.length} hotels available
@@ -1382,7 +1397,7 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
               tabIndex={0}
               aria-label={`Select ${hotel.name}`}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelect(hotel); } }}
-              className={`flex gap-4 p-3.5 rounded-xl border-2 transition-all cursor-pointer ${
+              className={`flex gap-4 p-3.5 rounded-xl border-2 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 ${
                 selected === hotel.id
                   ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20 shadow-md shadow-orange-500/10'
                   : 'border-slate-200 dark:border-slate-700 hover:border-orange-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:shadow-sm'
@@ -1462,7 +1477,7 @@ function HotelsCard({ config, onSubmit, disabled }: CardProps) {
           <button
             onClick={() => setShowBrowser(true)}
             disabled={disabled}
-            className="w-full py-3.5 px-4 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl font-semibold transition-all shadow-md hover:shadow-lg hover:shadow-orange-500/20 flex items-center justify-center gap-2"
+            className="w-full py-3.5 px-4 min-h-[48px] bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl font-semibold transition-all shadow-md hover:shadow-lg hover:shadow-orange-500/20 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
           >
             <Search className="w-5 h-5" />
             Browse All {hotels.length} Hotels
@@ -1632,7 +1647,7 @@ function HotelQuestionsInput({
           <button
             key={q.label}
             onClick={() => handleQuestion(q)}
-            className={`text-xs px-2.5 py-1.5 rounded-full transition-colors ${
+            className={`text-xs px-3 py-2 min-h-[44px] rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-1 ${
               activeLabel === q.label
                 ? 'bg-orange-500 text-white'
                 : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
@@ -1661,7 +1676,7 @@ function HotelQuestionsInput({
             {activeAnswer.hotel && (
               <button
                 onClick={() => setActiveAnswer(null)}
-                className="mt-1.5 text-xs text-orange-600 dark:text-orange-400 hover:underline"
+                className="mt-1.5 text-xs text-orange-600 dark:text-orange-400 hover:underline min-h-[32px] py-1 px-2 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
               >
                 ✓ Got it
               </button>
@@ -1787,12 +1802,19 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
 
   if (restaurants.length === 0) {
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center">
-        <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-        <p className="text-slate-500 dark:text-slate-400">No {cuisineLabel.toLowerCase()} restaurants found near your hotels</p>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6 text-slate-400" />
+        </div>
+        <div>
+          <p className="text-slate-700 dark:text-slate-300 font-medium">No {cuisineLabel.toLowerCase()} restaurants found</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            We could not find nearby options for this cuisine type.
+          </p>
+        </div>
         <button
           onClick={() => onSubmit([])}
-          className="mt-3 px-4 py-2 text-sm text-orange-500 hover:text-orange-600"
+          className="mt-2 px-6 py-2.5 min-h-[44px] text-sm text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-semibold rounded-xl hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-all active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
         >
           Skip this cuisine
         </button>
@@ -1836,13 +1858,15 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
                     <button
                       onClick={() => toggleSelect(restaurant.id)}
                       disabled={disabled}
-                      className={`w-5 h-5 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center ${
-                        selected.has(restaurant.id)
-                          ? 'border-orange-500 bg-orange-500'
-                          : 'border-slate-300 dark:border-slate-600'
-                      }`}
+                      aria-label={`${selected.has(restaurant.id) ? 'Deselect' : 'Select'} ${restaurant.name}`}
+                      className={`w-7 h-7 min-w-[28px] min-h-[28px] rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all
+                        before:content-[''] before:absolute before:inset-[-10px] relative shadow-sm
+                        ${selected.has(restaurant.id)
+                          ? 'border-orange-500 bg-orange-500 shadow-orange-500/20'
+                          : 'border-slate-300 dark:border-slate-600 hover:border-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/10'
+                      } focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-1`}
                     >
-                      {selected.has(restaurant.id) && <Check className="w-3 h-3 text-white" />}
+                      {selected.has(restaurant.id) && <Check className="w-4 h-4 text-white" />}
                     </button>
                     {/* Restaurant thumbnail image */}
                     <div
@@ -1867,15 +1891,16 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
                         </h4>
                         <button
                           onClick={(e) => openDetail(restaurant, e)}
-                          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full transition-colors flex-shrink-0"
+                          className="p-2 min-w-[40px] min-h-[40px] hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full transition-all active:scale-95 flex-shrink-0 flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-1"
                           title="View details"
+                          aria-label={`View details for ${restaurant.name}`}
                         >
-                          <Info className="w-3.5 h-3.5 text-slate-400" />
+                          <Info className="w-4 h-4 text-slate-400" />
                         </button>
                       </div>
                       {/* Address line */}
                       {restaurant.address && (
-                        <p className="text-xs text-slate-400 dark:text-slate-400 truncate mt-0.5 flex items-center gap-1">
+                        <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5 flex items-center gap-1">
                           <MapPin className="w-3 h-3 flex-shrink-0" />
                           <span className="truncate">{restaurant.address}</span>
                         </p>
@@ -1885,10 +1910,11 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
                           href={restaurant.googleMapsUrl || `https://www.google.com/maps/place/?q=place_id:${restaurant.placeId}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-0.5 inline-flex items-center gap-1"
+                          className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-0.5 inline-flex items-center gap-1 min-h-[44px] py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                           onClick={(e) => e.stopPropagation()}
+                          aria-label={`View ${restaurant.name} on Google Maps (opens in new tab)`}
                         >
-                          <ExternalLink className="w-3 h-3" />
+                          <ExternalLink className="w-3 h-3" aria-hidden="true" />
                           View on Maps
                         </a>
                       )}
@@ -1948,7 +1974,7 @@ function RestaurantsCard({ config, onSubmit, disabled }: CardProps) {
           <button
             onClick={handleSubmit}
             disabled={disabled}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20"
+            className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
           >
             {selected.size > 0 ? `Add ${selected.size} restaurant${selected.size > 1 ? 's' : ''}` : 'Skip this cuisine'}
             <ChevronRight className="w-4 h-4 inline ml-1.5" />
@@ -2039,12 +2065,19 @@ function ActivitiesCard({ config, onSubmit, disabled }: CardProps) {
 
   if (activities.length === 0) {
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center">
-        <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-        <p className="text-slate-500 dark:text-slate-400">No {activityLabel.toLowerCase()} found near your hotels</p>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6 text-slate-400" />
+        </div>
+        <div>
+          <p className="text-slate-700 dark:text-slate-300 font-medium">No {activityLabel.toLowerCase()} found</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            We could not find nearby options for this activity type.
+          </p>
+        </div>
         <button
           onClick={() => onSubmit([])}
-          className="mt-3 px-4 py-2 text-sm text-orange-500 hover:text-orange-600"
+          className="mt-2 px-6 py-2.5 min-h-[44px] text-sm text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-semibold rounded-xl hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-all active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
         >
           Skip this activity
         </button>
@@ -2053,7 +2086,7 @@ function ActivitiesCard({ config, onSubmit, disabled }: CardProps) {
   }
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
       <div className="p-3 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-b border-slate-200 dark:border-slate-600">
         <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
           {emoji} {activityLabel} near your hotels
@@ -2085,12 +2118,12 @@ function ActivitiesCard({ config, onSubmit, disabled }: CardProps) {
                       : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
                   }`}
                 >
-                  <div className={`w-5 h-5 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center ${
+                  <div className={`w-7 h-7 min-w-[28px] min-h-[28px] rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all shadow-sm ${
                     selected.has(activity.id)
-                      ? 'border-orange-500 bg-orange-500'
-                      : 'border-slate-300 dark:border-slate-600'
+                      ? 'border-orange-500 bg-orange-500 shadow-orange-500/20'
+                      : 'border-slate-300 dark:border-slate-600 group-hover:border-orange-400 group-hover:bg-orange-50 dark:group-hover:bg-orange-900/10'
                   }`}>
-                    {selected.has(activity.id) && <Check className="w-3 h-3 text-white" />}
+                    {selected.has(activity.id) && <Check className="w-4 h-4 text-white" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
@@ -2110,7 +2143,7 @@ function ActivitiesCard({ config, onSubmit, disabled }: CardProps) {
                     )}
                     {/* Address line */}
                     {(activity as any).address && (
-                      <p className="text-xs text-slate-400 dark:text-slate-400 truncate mt-0.5">
+                      <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">
                         {(activity as any).address}
                       </p>
                     )}
@@ -2167,13 +2200,14 @@ function ActivitiesCard({ config, onSubmit, disabled }: CardProps) {
           </div>
         ))}
       </div>
-      <div className="p-3 border-t border-slate-200 dark:border-slate-600">
+      <div className="p-3 border-t border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/50">
         <button
           onClick={handleSubmit}
           disabled={disabled}
-          className="w-full py-2.5 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
         >
           {selected.size > 0 ? `Add ${selected.size} ${activityLabel}` : `Skip ${activityLabel}`}
+          <ChevronRight className="w-4 h-4 inline ml-1.5" aria-hidden="true" />
         </button>
       </div>
     </div>
@@ -2284,12 +2318,19 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
 
   if (experiences.length === 0) {
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center">
-        <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-        <p className="text-slate-500 dark:text-slate-400">No {activityLabel.toLowerCase()} experiences found near your hotels</p>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6 text-slate-400" />
+        </div>
+        <div>
+          <p className="text-slate-700 dark:text-slate-300 font-medium">No {activityLabel.toLowerCase()} experiences found</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            We could not find nearby experiences for this activity type.
+          </p>
+        </div>
         <button
           onClick={() => onSubmit([])}
-          className="mt-3 px-4 py-2 text-sm text-orange-500 hover:text-orange-600"
+          className="mt-2 px-6 py-2.5 min-h-[44px] text-sm text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-semibold rounded-xl hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-all active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
         >
           Skip this activity
         </button>
@@ -2332,13 +2373,15 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
                     <button
                       onClick={() => toggleSelect(experience.id)}
                       disabled={disabled}
-                      className={`w-5 h-5 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center ${
-                        selected.has(experience.id)
-                          ? 'border-blue-500 bg-blue-500'
-                          : 'border-slate-300 dark:border-slate-600'
-                      }`}
+                      aria-label={`${selected.has(experience.id) ? 'Deselect' : 'Select'} ${experience.name}`}
+                      className={`w-7 h-7 min-w-[28px] min-h-[28px] rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all
+                        before:content-[''] before:absolute before:inset-[-10px] relative shadow-sm
+                        ${selected.has(experience.id)
+                          ? 'border-blue-500 bg-blue-500 shadow-blue-500/20'
+                          : 'border-slate-300 dark:border-slate-600 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/10'
+                      } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
                     >
-                      {selected.has(experience.id) && <Check className="w-3 h-3 text-white" />}
+                      {selected.has(experience.id) && <Check className="w-4 h-4 text-white" />}
                     </button>
                     {/* Experience thumbnail image */}
                     <div
@@ -2363,10 +2406,11 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
                         </h4>
                         <button
                           onClick={(e) => openDetail(experience, e)}
-                          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full transition-colors flex-shrink-0"
+                          className="p-2 min-w-[40px] min-h-[40px] hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full transition-all active:scale-95 flex-shrink-0 flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                           title="View details"
+                          aria-label={`View details for ${experience.name}`}
                         >
-                          <Info className="w-3.5 h-3.5 text-slate-400" />
+                          <Info className="w-4 h-4 text-slate-400" />
                         </button>
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
@@ -2385,7 +2429,7 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
                         )}
                       </div>
                       {experience.address && (
-                        <p className="text-xs text-slate-400 dark:text-slate-400 mt-1 truncate flex items-center gap-1">
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 truncate flex items-center gap-1">
                           <MapPin className="w-3 h-3 flex-shrink-0" />
                           <span className="truncate">{experience.address}</span>
                         </p>
@@ -2395,10 +2439,11 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
                           href={experience.googleMapsUrl || `https://www.google.com/maps/place/?q=place_id:${experience.placeId}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 inline-flex items-center gap-1"
+                          className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 inline-flex items-center gap-1 min-h-[44px] py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                           onClick={(e) => e.stopPropagation()}
+                          aria-label={`View ${experience.name} on Google Maps (opens in new tab)`}
                         >
-                          <ExternalLink className="w-3 h-3" />
+                          <ExternalLink className="w-3 h-3" aria-hidden="true" />
                           View on Maps
                         </a>
                       )}
@@ -2426,7 +2471,7 @@ function ExperiencesCard({ config, onSubmit, disabled }: CardProps) {
           <button
             onClick={handleSubmit}
             disabled={disabled}
-            className="w-full py-2.5 rounded-xl bg-blue-500 text-white font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-blue-500 to-blue-400 text-white font-semibold hover:from-blue-600 hover:to-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-blue-500/20 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
           >
             {selected.size > 0 ? `Add ${selected.size} experience${selected.size > 1 ? 's' : ''}` : 'Skip this activity'}
           </button>
@@ -2494,19 +2539,19 @@ function TradeoffCard({ config, onSubmit, disabled }: CardProps) {
             key={option.id}
             onClick={() => handleSelect(option.id)}
             disabled={disabled}
-            className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+            className={`w-full p-4 rounded-xl border-2 text-left transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 ${
               selected === option.id
                 ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/10'
                 : 'border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500'
             }`}
           >
             <div className="flex items-start gap-3">
-              <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center ${
+              <div className={`w-6 h-6 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-colors ${
                 selected === option.id
                   ? 'border-orange-500 bg-orange-500'
                   : 'border-slate-300 dark:border-slate-600'
               }`}>
-                {selected === option.id && <Check className="w-3 h-3 text-white" />}
+                {selected === option.id && <Check className="w-3.5 h-3.5 text-white" />}
               </div>
               <div>
                 <p className="font-medium text-slate-900 dark:text-white">
@@ -2515,7 +2560,7 @@ function TradeoffCard({ config, onSubmit, disabled }: CardProps) {
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                   {option.description}
                 </p>
-                <p className="text-xs text-slate-400 dark:text-slate-400 mt-2">
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
                   Impact: {option.impact}
                 </p>
               </div>
@@ -2529,7 +2574,7 @@ function TradeoffCard({ config, onSubmit, disabled }: CardProps) {
             <button
               onClick={() => handleSelect('custom')}
               disabled={disabled}
-              className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+              className={`w-full p-4 rounded-xl border-2 text-left transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 ${
                 selected === 'custom'
                   ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/10'
                   : 'border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500'
@@ -2545,7 +2590,8 @@ function TradeoffCard({ config, onSubmit, disabled }: CardProps) {
                 value={customInput}
                 onChange={(e) => setCustomInput(e.target.value)}
                 placeholder="Describe your preference..."
-                className="mt-2 w-full p-3 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                aria-label="Describe your preference"
+                className="mt-2 w-full p-3 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm resize-none placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-orange-500 focus:border-transparent dark:focus:ring-offset-slate-800"
                 rows={3}
               />
             )}
@@ -2555,7 +2601,7 @@ function TradeoffCard({ config, onSubmit, disabled }: CardProps) {
         <button
           onClick={handleSubmit}
           disabled={disabled || !selected || (selected === 'custom' && !customInput.trim())}
-          className="w-full py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
         >
           Resolve tradeoff
         </button>
@@ -2572,8 +2618,18 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
   const areas = config.areaCandidates || [];
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const MAX_AREAS = 3;
+  const MAX_AREAS = (config as any).maxSelection || 3;
   const [limitReached, setLimitReached] = useState(false);
+  const limitTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeout on unmount to prevent setState on unmounted component
+  useEffect(() => {
+    return () => {
+      if (limitTimerRef.current) {
+        clearTimeout(limitTimerRef.current);
+      }
+    };
+  }, []);
 
   const toggleSelect = (areaId: string) => {
     if (disabled) return;
@@ -2587,7 +2643,8 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
     } else {
       // Flash limit warning
       setLimitReached(true);
-      setTimeout(() => setLimitReached(false), 2000);
+      if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
+      limitTimerRef.current = setTimeout(() => setLimitReached(false), 2000);
       return;
     }
     setSelected(newSelected);
@@ -2629,9 +2686,16 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
             <span className="font-medium">Areas</span>
           </div>
         </div>
-        <div className="p-4 text-center">
-          <AlertCircle className="w-8 h-8 text-blue-400 mx-auto mb-2" />
-          <p className="text-blue-600 dark:text-blue-400">No areas discovered</p>
+        <div className="p-6 text-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-6 h-6 text-blue-400" />
+          </div>
+          <div>
+            <p className="text-slate-700 dark:text-slate-300 font-medium">No areas discovered</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+              We were unable to find areas for this destination. This may be due to a data issue.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -2653,8 +2717,8 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
           selectedAreaIds={selected}
           onAreaClick={toggleSelect}
         />
-        <p className="text-xs text-slate-400 dark:text-slate-400 text-center">
-          Click markers to select areas
+        <p className="text-xs text-slate-400 dark:text-slate-500 text-center mt-2">
+          Tap markers to select areas
         </p>
       </div>
 
@@ -2664,19 +2728,19 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
             key={area.id}
             onClick={() => toggleSelect(area.id)}
             disabled={disabled || (selected.size >= 3 && !selected.has(area.id))}
-            className={`w-full p-4 text-left transition-colors ${
+            className={`w-full p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-orange-500 ${
               selected.has(area.id)
                 ? 'bg-orange-50 dark:bg-orange-900/20'
                 : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
             } ${selected.size >= 3 && !selected.has(area.id) ? 'opacity-50' : ''}`}
           >
             <div className="flex items-start gap-3">
-              <div className={`w-5 h-5 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center ${
+              <div className={`w-7 h-7 min-w-[28px] min-h-[28px] rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all shadow-sm ${
                 selected.has(area.id)
-                  ? 'border-orange-500 bg-orange-500'
-                  : 'border-slate-300 dark:border-slate-600'
+                  ? 'border-orange-500 bg-orange-500 shadow-orange-500/20'
+                  : 'border-slate-300 dark:border-slate-600 hover:border-orange-400'
               }`}>
-                {selected.has(area.id) && <Check className="w-3 h-3 text-white" />}
+                {selected.has(area.id) && <Check className="w-4 h-4 text-white" />}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
@@ -2714,12 +2778,12 @@ function AreasCard({ config, onSubmit, disabled }: CardProps) {
         <button
           onClick={handleSubmit}
           disabled={disabled || selected.size === 0}
-          className="w-full py-2.5 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
         >
           {selected.size > 0 ? `Continue with ${selected.size} area${selected.size > 1 ? 's' : ''}` : 'Select at least 1 area'}
         </button>
         {limitReached && (
-          <p className="text-xs text-amber-600 dark:text-amber-400 text-center mt-1">
+          <p className="text-xs text-amber-700 dark:text-amber-400 font-medium text-center mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
             Maximum {MAX_AREAS} areas — deselect one to choose a different area
           </p>
         )}
@@ -2754,7 +2818,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
       });
       setCustomNights(initial);
       setCustomOrder(areas.map((a: any) => a.id)); // Initialize order from areas
-      if (process.env.NODE_ENV === 'development') console.log('[SplitCard] Initialized customNights:', initial, 'areas:', areas.map((a: any) => a.name), 'tripLength:', tripLength);
+
     }
   }, [areas, tripLength]);
 
@@ -2846,35 +2910,29 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
         })),
         fitScore: 1.0,
       };
-      if (process.env.NODE_ENV === 'development') console.log('[SplitCard] Submitting custom split:', customSplit);
       onSubmit(customSplit);
     } else if (selected) {
       const selectedSplit = splits.find(s => s.id === selected);
-      if (process.env.NODE_ENV === 'development') console.log('[SplitCard] Submitting preset split:', selectedSplit);
       onSubmit(selectedSplit);
     }
   };
 
   // Debug (dev only)
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[SplitCard] Rendering:', {
-      splitsCount: splits.length,
-      areasCount: areas.length,
-      areaNames: areas.map((a: any) => a.name),
-      tripLength,
-      showCustom,
-      selected,
-      customConfirmed,
-      customNights,
-      totalCustomNights,
-    });
+  if (clientEnv.IS_DEVELOPMENT) {
   }
 
   if (splits.length === 0 && areas.length === 0) {
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center">
-        <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-        <p className="text-slate-500 dark:text-slate-400">No itinerary options available</p>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6 text-slate-400" />
+        </div>
+        <div>
+          <p className="text-slate-700 dark:text-slate-300 font-medium">No itinerary options available</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Select areas first to see how to split your time between them.
+          </p>
+        </div>
       </div>
     );
   }
@@ -2919,12 +2977,12 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
               );
             })}
           </div>
-          <div className="flex justify-between mt-1">
+          <div className="flex justify-between mt-1 gap-1 overflow-hidden">
             {orderedAreas.map((area: any, idx: number) => {
               const nights = customNights[area.id] ?? Math.floor(tripLength / areas.length);
               const colors = ['text-orange-600', 'text-blue-600', 'text-green-600', 'text-purple-600'];
               return (
-                <span key={area.id} className={`text-xs ${colors[idx % colors.length]} dark:opacity-80`}>
+                <span key={area.id} className={`text-xs ${colors[idx % colors.length]} dark:opacity-80 truncate min-w-0`}>
                   {area.name} ({nights}n)
                 </span>
               );
@@ -2960,7 +3018,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
               key={split.id}
               onClick={() => handleSelect(split.id)}
               disabled={disabled}
-              className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+              className={`w-full p-4 rounded-xl border-2 text-left transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 ${
                 selected === split.id
                   ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/10'
                   : 'border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500'
@@ -2996,7 +3054,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
                       </span>
                       {transitInfo && (
                         <span
-                          className="text-xs text-slate-400 dark:text-slate-400 flex items-center gap-0.5"
+                          className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-0.5"
                           title={transitInfo.details}
                         >
                           → {getInterAreaTransportIcon(transitInfo.mode)} {transitInfo.timeText} →
@@ -3025,7 +3083,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
           <button
             onClick={handleCustomClick}
             disabled={disabled}
-            className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+            className={`w-full p-4 rounded-xl border-2 text-left transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 ${
               selected === 'custom'
                 ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/10'
                 : 'border-dashed border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500'
@@ -3056,7 +3114,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
                 <button
                   onClick={swapAreas}
                   disabled={disabled}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-95 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ArrowUpDown className="w-4 h-4" />
                   Swap order
@@ -3085,22 +3143,24 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
                   <div className="flex items-center justify-between gap-2">
                     {/* Reorder controls for 3+ areas */}
                     {orderedAreas.length > 2 && (
-                      <div className="flex flex-col gap-0.5">
+                      <div className="flex flex-col gap-1">
                         <button
                           onClick={() => moveAreaUp(idx)}
                           disabled={disabled || idx === 0}
-                          className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-600 text-slate-500 dark:text-slate-400 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          aria-label={`Move ${area.name} up`}
+                          className="w-10 h-10 min-w-[40px] min-h-[40px] rounded-lg bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-95 shadow-sm"
                           title="Move up"
                         >
-                          <ArrowUp className="w-3.5 h-3.5" />
+                          <ArrowUp className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => moveAreaDown(idx)}
                           disabled={disabled || idx === orderedAreas.length - 1}
-                          className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-600 text-slate-500 dark:text-slate-400 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          aria-label={`Move ${area.name} down`}
+                          className="w-10 h-10 min-w-[40px] min-h-[40px] rounded-lg bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-95 shadow-sm"
                           title="Move down"
                         >
-                          <ArrowDown className="w-3.5 h-3.5" />
+                          <ArrowDown className="w-4 h-4" />
                         </button>
                       </div>
                     )}
@@ -3112,17 +3172,19 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
                       <button
                         onClick={() => adjustNights(area.id, -1)}
                         disabled={disabled || nightsForArea <= 1}
-                        className="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        aria-label={`Decrease nights in ${area.name}`}
+                        className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 active:scale-95"
                       >
                         <Minus className="w-4 h-4" />
                       </button>
-                      <span className="w-16 text-center font-bold text-slate-900 dark:text-white">
+                      <span className="w-16 text-center font-bold text-slate-900 dark:text-white tabular-nums">
                         {nightsForArea}n
                       </span>
                       <button
                         onClick={() => adjustNights(area.id, 1)}
                         disabled={disabled || nightsRemaining <= 0}
-                        className="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        aria-label={`Increase nights in ${area.name}`}
+                        className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-slate-300 dark:hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 active:scale-95"
                       >
                         <Plus className="w-4 h-4" />
                       </button>
@@ -3131,7 +3193,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
                   {/* Transit indicator to next area */}
                   {transitInfo && (
                     <div className="flex items-center justify-center py-2 my-1">
-                      <span className="text-xs text-slate-400 dark:text-slate-400 flex items-center gap-1 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-full">
+                      <span className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-full">
                         ↓ {getInterAreaTransportIcon(transitInfo.mode)} {transitInfo.timeText}
                       </span>
                     </div>
@@ -3154,7 +3216,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
               {isCustomValid && !customConfirmed && (
                 <button
                   onClick={handleConfirmCustom}
-                  className="w-full py-2.5 rounded-lg bg-green-500 text-white font-medium hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
+                  className="w-full py-3 min-h-[44px] rounded-lg bg-green-500 text-white font-medium hover:bg-green-600 transition-colors flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-[0.98]"
                 >
                   <Check className="w-4 h-4" />
                   Confirm this split
@@ -3177,7 +3239,7 @@ function SplitCard({ config, onSubmit, disabled }: CardProps) {
         <button
           onClick={handleSubmit}
           disabled={disabled || !canSubmit}
-          className="w-full py-2.5 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
         >
           {!selected
             ? 'Select a split option'
@@ -3251,7 +3313,7 @@ function SatisfactionCard({ config, onSubmit, disabled }: CardProps) {
             <button
               onClick={handleYes}
               disabled={disabled}
-              className="flex-1 py-3 rounded-xl bg-green-500 text-white font-medium hover:bg-green-600 disabled:opacity-50 transition-colors"
+              className="flex-1 py-3.5 min-h-[48px] rounded-xl bg-green-500 text-white font-semibold hover:bg-green-600 disabled:opacity-50 transition-all shadow-sm shadow-green-500/20 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-[0.98]"
             >
               <Check className="w-5 h-5 inline mr-2" />
               Yes, looks great!
@@ -3259,7 +3321,7 @@ function SatisfactionCard({ config, onSubmit, disabled }: CardProps) {
             <button
               onClick={() => setSatisfied(false)}
               disabled={disabled}
-              className="flex-1 py-3 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 transition-colors"
+              className="flex-1 py-3.5 min-h-[48px] rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 transition-all focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 dark:focus:ring-offset-slate-800 active:scale-[0.98]"
             >
               <AlertCircle className="w-5 h-5 inline mr-2" />
               Something&apos;s off
@@ -3277,25 +3339,36 @@ function SatisfactionCard({ config, onSubmit, disabled }: CardProps) {
               What would you like to change? (select all that apply)
             </p>
 
-            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Select reasons for dissatisfaction">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="group" aria-label="Select reasons for dissatisfaction">
               {DISSATISFACTION_OPTIONS.map((option) => (
                 <button
                   key={option.id}
                   onClick={() => toggleReason(option.id)}
                   disabled={disabled}
                   aria-pressed={selectedReasons.has(option.id)}
-                  className={`p-3 rounded-lg border text-left transition-all text-sm ${
+                  className={`p-3 min-h-[56px] rounded-lg border-2 text-left transition-all text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-1 ${
                     selectedReasons.has(option.id)
-                      ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20'
+                      ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20 shadow-sm shadow-orange-500/10'
                       : 'border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500'
                   }`}
                 >
-                  <p className="font-medium text-slate-900 dark:text-white">
-                    {option.label}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    {option.description}
-                  </p>
+                  <div className="flex items-start gap-2">
+                    <div className={`w-5 h-5 min-w-[20px] min-h-[20px] rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all shadow-sm ${
+                      selectedReasons.has(option.id)
+                        ? 'border-orange-500 bg-orange-500 shadow-orange-500/20'
+                        : 'border-slate-300 dark:border-slate-500'
+                    }`}>
+                      {selectedReasons.has(option.id) && <Check className="w-3.5 h-3.5 text-white" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-slate-900 dark:text-white">
+                        {option.label}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        {option.description}
+                      </p>
+                    </div>
+                  </div>
                 </button>
               ))}
             </div>
@@ -3305,7 +3378,8 @@ function SatisfactionCard({ config, onSubmit, disabled }: CardProps) {
                 value={customFeedback}
                 onChange={(e) => setCustomFeedback(e.target.value)}
                 placeholder="Any other details? (optional)"
-                className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                aria-label="Additional feedback details"
+                className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm resize-none placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-orange-500 focus:border-transparent dark:focus:ring-offset-slate-800"
                 rows={2}
               />
             </div>
@@ -3313,14 +3387,14 @@ function SatisfactionCard({ config, onSubmit, disabled }: CardProps) {
             <div className="flex gap-2">
               <button
                 onClick={() => setSatisfied(null)}
-                className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                className="px-5 py-3 min-h-[44px] rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
               >
                 Back
               </button>
               <button
                 onClick={handleSubmitFeedback}
                 disabled={disabled || selectedReasons.size === 0}
-                className="flex-1 py-2.5 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="flex-1 py-3 min-h-[44px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
               >
                 Fix these issues
               </button>
@@ -3410,7 +3484,7 @@ function TextCard({ config, onSubmit, disabled }: CardProps) {
           }}
           aria-invalid={touched && !!error}
           aria-describedby={error ? 'text-error' : undefined}
-          className={`w-full p-3 rounded-lg border bg-white dark:bg-slate-700 text-slate-900 dark:text-white resize-none transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 ${
+          className={`w-full p-3 rounded-lg border bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm resize-none placeholder-slate-400 dark:placeholder-slate-500 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 ${
             touched && error
               ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
               : 'border-slate-200 dark:border-slate-600 focus:border-orange-500 focus:ring-orange-500'
@@ -3440,7 +3514,7 @@ function TextCard({ config, onSubmit, disabled }: CardProps) {
         <button
           onClick={handleSubmit}
           disabled={disabled || (touched && !isValid && required)}
-          className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+          className="flex-1 py-3.5 min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-orange-400 text-white font-semibold hover:from-orange-600 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-500/20 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
         >
           {text.trim() ? 'Continue' : (required ? 'Required' : 'Skip')}
           <ChevronRight className="w-4 h-4 inline ml-1" aria-hidden="true" />

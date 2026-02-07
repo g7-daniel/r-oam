@@ -17,7 +17,7 @@ const DebugDrawer = dynamic(
   { ssr: false }
 );
 import type {
-  ChatMessage as ChatMessageType,
+  SnooChatMessage as ChatMessageType,
   QuestionConfig,
   DebugInfo,
   DebugEntry,
@@ -32,6 +32,7 @@ import { dedupedPost } from '@/lib/request-dedup';
 import { RotateCcw, Send, MessageCircle, ArrowLeft, SkipForward } from 'lucide-react';
 import { ProgressIndicatorCompact } from './ProgressIndicator';
 import { LoadingCard } from './LoadingMessage';
+import { clientEnv } from '@/lib/env';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -64,12 +65,17 @@ export default function QuickPlanChat() {
   const [isProcessing, setIsProcessing] = useState(false);
   const isProcessingRef = useRef(false); // Synchronous guard against double-submission
   const inputRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
   // Track timeouts for cleanup
   const startOverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Session counter to detect stale async operations after "Start Over"
+  const sessionIdRef = useRef(0);
+  // AbortController for in-flight fetch requests
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Cleanup timeouts on unmount
+  // Cleanup timeouts and abort in-flight requests on unmount
   useEffect(() => {
     return () => {
       if (startOverTimeoutRef.current) {
@@ -78,8 +84,25 @@ export default function QuickPlanChat() {
       if (navigationTimeoutRef.current) {
         clearTimeout(navigationTimeoutRef.current);
       }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, []);
+
+  // Auto-scroll to bottom when messages change or processing state changes
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    // Use requestAnimationFrame to ensure DOM has updated before scrolling
+    const rafId = requestAnimationFrame(() => {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'smooth',
+      });
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [messages, isProcessing, isTyping, phase]);
 
   // Free text input state
   const [freeTextInput, setFreeTextInput] = useState('');
@@ -97,22 +120,31 @@ export default function QuickPlanChat() {
     setSnooState('typing');
     setIsTyping(true);
 
-    // Small delay for effect
-    await new Promise(resolve => setTimeout(resolve, 500));
+    try {
+      // Small delay for effect
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Get first question (destination question already includes greeting)
-    const question = await orchestrator.selectNextQuestion();
-    if (question) {
-      setCurrentQuestion(question);
-      orchestrator.state.currentQuestion = question;
+      // Get first question (destination question already includes greeting)
+      const question = await orchestrator.selectNextQuestion();
+      if (question) {
+        setCurrentQuestion(question);
+        orchestrator.state.currentQuestion = question;
 
-      // Add the question message (which includes the greeting for destination)
-      orchestrator.addSnooMessage(question.snooMessage, 'idle');
+        // Add the question message (which includes the greeting for destination)
+        orchestrator.addSnooMessage(question.snooMessage, 'idle');
+        setMessages([...orchestrator.getMessages()]);
+      }
+    } catch (error) {
+      console.error('[QuickPlanChat] Failed to start conversation:', error);
+      orchestrator.addSnooMessage(
+        "I had a little trouble getting started. Please try refreshing the page.",
+        'concerned'
+      );
       setMessages([...orchestrator.getMessages()]);
+    } finally {
+      setIsTyping(false);
+      setSnooState('idle');
     }
-
-    setIsTyping(false);
-    setSnooState('idle');
   }, [orchestrator]);
 
   useEffect(() => {
@@ -120,8 +152,10 @@ export default function QuickPlanChat() {
     if (hasInitialized.current) return;
     hasInitialized.current = true;
 
-    // Start the conversation
-    startConversation();
+    // Start the conversation (promise handled internally via try/catch)
+    startConversation().catch(err => {
+      console.error('[QuickPlanChat] Unhandled error in startConversation:', err);
+    });
   }, [startConversation]);
 
   // ============================================================================
@@ -137,6 +171,13 @@ export default function QuickPlanChat() {
     if (navigationTimeoutRef.current) {
       clearTimeout(navigationTimeoutRef.current);
       navigationTimeoutRef.current = null;
+    }
+    // Increment session counter to invalidate any in-flight async operations
+    sessionIdRef.current += 1;
+    // Abort any in-flight fetch requests
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
     // Reset all state to initial values
     orchestrator.reset();
@@ -157,17 +198,19 @@ export default function QuickPlanChat() {
     });
     setIsTyping(false);
     setIsProcessing(false); isProcessingRef.current = false;
-
-    // Reset the initialization flag to allow restart
-    hasInitialized.current = false;
+    setFreeTextInput('');
+    setShowFreeTextInput(false);
+    setCurrentLoadingType(null);
 
     // Start fresh conversation with cleanup tracking
+    // Note: keep hasInitialized.current = true to prevent useEffect from double-starting
     if (startOverTimeoutRef.current) {
       clearTimeout(startOverTimeoutRef.current);
     }
     startOverTimeoutRef.current = setTimeout(() => {
-      hasInitialized.current = true;
-      startConversation();
+      startConversation().catch(err => {
+        console.error('[QuickPlanChat] Start over failed:', err);
+      });
     }, 100);
   }, [orchestrator, startConversation]);
 
@@ -188,9 +231,16 @@ export default function QuickPlanChat() {
     setIsProcessing(true);
     setSnooState('thinking');
 
+    // Capture session ID to detect stale responses after "Start Over"
+    const currentSessionId = sessionIdRef.current;
+
     // Add user message to transcript
     orchestrator.addUserMessage(userMessage);
     setMessages([...orchestrator.getMessages()]);
+
+    // Create abort controller for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       // Send to chat API for intelligent response
@@ -215,7 +265,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           ],
           temperature: 0.7,
         }),
+        signal: controller.signal,
       });
+
+      // Guard: if session changed while we were awaiting, discard result
+      if (sessionIdRef.current !== currentSessionId) return;
 
       if (response.ok) {
         const data = await response.json();
@@ -232,6 +286,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setMessages([...orchestrator.getMessages()]);
       }
     } catch (error) {
+      // Silently ignore aborted requests (e.g., from Start Over or unmount)
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      // Guard: if session changed, discard
+      if (sessionIdRef.current !== currentSessionId) return;
+
       console.error('[FreeText] Error processing message:', error);
       const friendlyMessage = getUserFriendlyMessage(error);
       console.error('[FreeText] User-friendly message:', friendlyMessage);
@@ -241,6 +300,8 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       setMessages([...orchestrator.getMessages()]);
     }
 
+    // Guard: if session changed during await, don't reset processing state
+    if (sessionIdRef.current !== currentSessionId) return;
     setIsProcessing(false); isProcessingRef.current = false;
     setSnooState('idle');
     setDebugLog([...orchestrator.getDebugLog()]);
@@ -253,7 +314,6 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   const handleAddNote = useCallback((field: string, note: string) => {
     if (!note || !note.trim()) return;
     orchestrator.addUserNote(field, note);
-    console.log(`[QuickPlanChat] Added note for ${field}: ${note.substring(0, 50)}...`);
   }, [orchestrator]);
 
   // FIX 4.2: Go Back functionality
@@ -262,36 +322,60 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     isProcessingRef.current = true;
     setIsProcessing(true);
 
-    const success = orchestrator.goToPreviousQuestion();
-    if (success) {
-      // goToPreviousQuestion may have reverted the phase — sync UI
-      const phaseAfterGoBack = orchestrator.getPhase();
-      if (phaseAfterGoBack !== phase) {
-        setPhase(phaseAfterGoBack);
-      }
+    // Capture session ID to detect stale responses after "Start Over"
+    const goBackSessionId = sessionIdRef.current;
 
-      // Get the new current question after going back.
-      // Save phase to detect unexpected transitions from selectNextQuestion side effects.
-      const phaseBefore = orchestrator.getPhase();
-      const question = await orchestrator.selectNextQuestion();
-      const phaseAfter = orchestrator.getPhase();
+    // BUG FIX: Abort any in-flight requests when going back
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
 
-      // Guard: if selectNextQuestion caused an unexpected phase advance, revert it.
-      // Going back should never advance the phase forward.
-      const PHASE_ORDER = ['gathering', 'enriching', 'generating', 'reviewing', 'satisfied'];
-      if (PHASE_ORDER.indexOf(phaseAfter) > PHASE_ORDER.indexOf(phaseBefore)) {
-        console.warn('[QuickPlanChat] Go-back caused unexpected phase advance:', phaseBefore, '->', phaseAfter, '- reverting');
-        (orchestrator as any).state.phase = phaseBefore;
-        setPhase(phaseBefore);
-      }
+    try {
+      const targetField = orchestrator.goToPreviousQuestion();
+      if (targetField) {
+        // goToPreviousQuestion may have reverted the phase — sync UI
+        const phaseAfterGoBack = orchestrator.getPhase();
+        if (phaseAfterGoBack !== phase) {
+          setPhase(phaseAfterGoBack);
+        }
 
-      if (question) {
-        setCurrentQuestion(question);
-        orchestrator.state.currentQuestion = question;
+        // Directly request the target field's question instead of relying on
+        // selectNextQuestion() which picks by global priority and may not
+        // return the field the user expects.
+        const phaseBefore = orchestrator.getPhase();
+        const question = await orchestrator.getQuestionConfigForField(targetField);
+        if (sessionIdRef.current !== goBackSessionId) {
+          setIsProcessing(false); isProcessingRef.current = false;
+          return;
+        }
+
+        // Guard: restore phase if createQuestionConfig caused an unexpected advance
+        const phaseAfter = orchestrator.getPhase();
+        const PHASE_ORDER = ['gathering', 'enriching', 'generating', 'reviewing', 'satisfied'];
+        if (PHASE_ORDER.indexOf(phaseAfter) > PHASE_ORDER.indexOf(phaseBefore)) {
+          (orchestrator as any).state.phase = phaseBefore;
+          setPhase(phaseBefore);
+        }
+
+        if (question) {
+          // Add the question message to the transcript so the user sees context
+          orchestrator.addSnooMessage(question.snooMessage, 'idle');
+          setMessages([...orchestrator.getMessages()]);
+          setCurrentQuestion(question);
+          orchestrator.state.currentQuestion = question;
+        }
       }
-      console.log('[QuickPlanChat] Went back to previous question');
-    } else {
-      console.log('[QuickPlanChat] Cannot go back - at first question');
+    } catch (error) {
+      // BUG FIX: Prevent permanently stuck UI if goBack fails
+      console.error('[QuickPlanChat] handleGoBack failed:', error);
+      if (sessionIdRef.current === goBackSessionId) {
+        orchestrator.addSnooMessage(
+          "Sorry, I had trouble going back. Please try again.",
+          'concerned'
+        );
+        setMessages([...orchestrator.getMessages()]);
+      }
     }
 
     setIsProcessing(false); isProcessingRef.current = false;
@@ -305,34 +389,151 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     setIsProcessing(true);
     setSnooState('thinking');
 
-    // Mark the current question as skipped first (validates the skip)
-    orchestrator.processUserResponse(currentQuestion.id, 'SKIP');
+    // Capture session ID to detect stale responses after "Start Over"
+    const skipSessionId = sessionIdRef.current;
+    const isSkipSessionStale = () => sessionIdRef.current !== skipSessionId;
 
-    // Only add transcript message after processUserResponse accepts the skip
-    orchestrator.addUserMessage('(Skipped)');
-    setMessages([...orchestrator.getMessages()]);
-    setCurrentQuestion(null);
+    try {
+      // Mark the current question as skipped first (validates the skip)
+      orchestrator.processUserResponse(currentQuestion.id, 'SKIP');
 
-    console.log('[QuickPlanChat] Skipped question:', currentQuestion.field);
-
-    // Get the next question
-    const nextQuestion = await orchestrator.selectNextQuestion();
-
-    if (nextQuestion) {
-      // Add Snoo's message for the next question
-      orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
+      // Only add transcript message after processUserResponse accepts the skip
+      orchestrator.addUserMessage('(Skipped)');
       setMessages([...orchestrator.getMessages()]);
-      setCurrentQuestion(nextQuestion);
-      orchestrator.state.currentQuestion = nextQuestion;
-    }
+      setCurrentQuestion(null);
 
-    setIsProcessing(false); isProcessingRef.current = false;
-    setSnooState('idle');
-    setDebugLog([...orchestrator.getDebugLog()]);
-  }, [orchestrator, currentQuestion]);
+      // Get the next question
+      const nextQuestion = await orchestrator.selectNextQuestion();
+      if (isSkipSessionStale()) {
+        // BUG FIX: Clean up state before returning on stale session
+        setIsProcessing(false); isProcessingRef.current = false;
+        setSnooState('idle');
+        return;
+      }
+
+      if (nextQuestion) {
+        // Add Snoo's message for the next question
+        orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
+        setMessages([...orchestrator.getMessages()]);
+        setCurrentQuestion(nextQuestion);
+        orchestrator.state.currentQuestion = nextQuestion;
+      } else {
+        // No next question -- check if a phase transition occurred
+        const currentPhase = orchestrator.getPhase();
+        if (currentPhase !== phase) {
+          setPhase(currentPhase);
+          if (currentPhase === 'enriching') {
+            await handleEnrichmentPhase();
+            if (isSkipSessionStale()) {
+              // BUG FIX: Clean up state before returning
+              setIsProcessing(false); isProcessingRef.current = false;
+              setSnooState('idle');
+              return;
+            }
+
+            // After enrichment, get the next question (e.g., areas selection)
+            const postEnrichmentQuestion = await orchestrator.selectNextQuestion();
+            if (isSkipSessionStale()) {
+              // BUG FIX: Clean up state before returning
+              setIsProcessing(false); isProcessingRef.current = false;
+              setSnooState('idle');
+              return;
+            }
+
+            // Guard: check if enrichment->generating transition happened
+            const postEnrichPhase = orchestrator.getPhase();
+            if (postEnrichPhase === 'generating') {
+              setPhase('generating');
+              const success = await handleGenerationPhase();
+              if (isSkipSessionStale()) {
+                // BUG FIX: Clean up state before returning
+                setIsProcessing(false); isProcessingRef.current = false;
+                setSnooState('idle');
+                return;
+              }
+              if (success) {
+                const reviewQ = await orchestrator.selectNextQuestion();
+                if (isSkipSessionStale()) {
+                  // BUG FIX: Clean up state before returning
+                  setIsProcessing(false); isProcessingRef.current = false;
+                  setSnooState('idle');
+                  return;
+                }
+                if (reviewQ) {
+                  orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
+                  setMessages([...orchestrator.getMessages()]);
+                  setCurrentQuestion(reviewQ);
+                  orchestrator.state.currentQuestion = reviewQ;
+                }
+              }
+              // BUG FIX: Clean up and return after handling generation phase
+              setIsProcessing(false); isProcessingRef.current = false;
+              setSnooState('idle');
+              setDebugLog([...orchestrator.getDebugLog()]);
+              return;
+            }
+
+            if (postEnrichmentQuestion) {
+              orchestrator.addSnooMessage(postEnrichmentQuestion.snooMessage, 'idle');
+              setMessages([...orchestrator.getMessages()]);
+              setCurrentQuestion(postEnrichmentQuestion);
+              orchestrator.state.currentQuestion = postEnrichmentQuestion;
+            }
+          } else if (currentPhase === 'generating') {
+            setPhase('generating');
+            const genSuccess = await handleGenerationPhase();
+            if (isSkipSessionStale()) {
+              // BUG FIX: Clean up state before returning
+              setIsProcessing(false); isProcessingRef.current = false;
+              setSnooState('idle');
+              return;
+            }
+            if (genSuccess) {
+              const reviewQ = await orchestrator.selectNextQuestion();
+              if (isSkipSessionStale()) {
+                setIsProcessing(false); isProcessingRef.current = false;
+                setSnooState('idle');
+                return;
+              }
+              if (reviewQ) {
+                orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
+                setMessages([...orchestrator.getMessages()]);
+                setCurrentQuestion(reviewQ);
+                orchestrator.state.currentQuestion = reviewQ;
+              }
+            }
+            // Clean up and return after handling generation phase
+            setIsProcessing(false); isProcessingRef.current = false;
+            setSnooState('idle');
+            setDebugLog([...orchestrator.getDebugLog()]);
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[QuickPlanChat] handleSkip failed:', error);
+      // BUG FIX: Check session staleness before showing error message
+      if (!isSkipSessionStale()) {
+        orchestrator.addSnooMessage(
+          "Sorry, I had trouble skipping that question. Please try again.",
+          'concerned'
+        );
+        setMessages([...orchestrator.getMessages()]);
+      }
+    } finally {
+      // BUG FIX: Only update state if session is still valid
+      if (!isSkipSessionStale()) {
+        setIsProcessing(false); isProcessingRef.current = false;
+        setSnooState('idle');
+        setDebugLog([...orchestrator.getDebugLog()]);
+      }
+    }
+  }, [orchestrator, currentQuestion, phase]);
 
   // Check if we can go back (have question history)
-  const canGoBack = orchestrator.getQuestionHistory().length > 1;
+  // History tracks answered questions; current displayed question is not in history.
+  // So length >= 1 means there's a previous answered question to go back to.
+  const canGoBack = orchestrator.getQuestionHistory().length >= 1;
 
   // Check if current question is skippable (optional)
   const canSkip = currentQuestion && !currentQuestion.required;
@@ -387,6 +588,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       }
       case 'activities': {
         const activities = value as { label: string }[];
+        if (!activities || activities.length === 0) return null;
         if (activities.length >= 4) {
           return `Wow, you want to do it all! I'll make sure we pack in lots of variety.`;
         } else if (activities.length === 1) {
@@ -403,8 +605,25 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         }
         return `Balanced pace - I'll mix in downtime with activities.`;
       }
+      case 'tripOccasion': {
+        const occasion = value as { id: string };
+        const occasionMessages: Record<string, string> = {
+          honeymoon: "A honeymoon! I'll find romantic and special spots to make it unforgettable.",
+          anniversary: "Happy anniversary! Let me find some extra-special spots to celebrate.",
+          birthday: "Birthday trip! I'll make sure there are some celebration-worthy moments.",
+          workation: "Workation mode! I'll look for places with great WiFi and co-working options.",
+          bachelor: "Let's plan an epic celebration! I'll find the best spots for your group.",
+          bachelorette: "Let's plan an epic celebration! I'll find the best spots for your group.",
+          family_reunion: "Family reunion - how fun! I'll find places that work for everyone.",
+          graduation: "Congratulations! Let's celebrate with an amazing trip.",
+          retirement: "What a milestone! Time to enjoy the trip of a lifetime.",
+          just_because: "The best trips need no occasion! Let's make it great.",
+        };
+        return occasionMessages[occasion.id] || null;
+      }
       case 'areas': {
         const areas = value as { name: string }[];
+        if (!areas || areas.length === 0) return null;
         if (areas.length === 1) {
           return `${areas[0].name} - great choice! Let me find the best hotels there.`;
         } else if (areas.length === 2) {
@@ -428,6 +647,26 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     setIsProcessing(true);
     setSnooState('thinking');
 
+    // Process the response early (trim string values to avoid whitespace-only inputs)
+    const processedValue = typeof value === 'string' ? (value.trim() || null) : value;
+    if (processedValue === null) {
+      // Empty/whitespace-only input on a non-required field should trigger skip
+      if (currentQuestion && !currentQuestion.required) {
+        isProcessingRef.current = false;
+        setIsProcessing(false);
+        setSnooState('idle');
+        await handleSkip();
+        return;
+      }
+      // Required field -- reject whitespace-only input
+      setIsProcessing(false); isProcessingRef.current = false;
+      setSnooState('idle');
+      return;
+    }
+
+    // Capture session ID to detect stale responses after "Start Over"
+    const currentSessionId = sessionIdRef.current;
+
     // Add user message to transcript
     const userMessageContent = formatUserResponse(value);
     orchestrator.addUserMessage(userMessageContent);
@@ -436,6 +675,9 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     // Store which field was just answered
     const answeredField = currentQuestion.field;
 
+    // Helper to check if this async operation has been superseded by a "Start Over"
+    const isSessionStale = () => sessionIdRef.current !== currentSessionId;
+
     // Generate and show acknowledgment message for key steps
     const acknowledgment = generateAcknowledgment(answeredField, value);
     if (acknowledgment) {
@@ -443,23 +685,15 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       setMessages([...orchestrator.getMessages()]);
       // Small pause to let user see the acknowledgment
       await new Promise(resolve => setTimeout(resolve, 600));
-    }
-
-    // Process the response (trim string values to avoid whitespace-only inputs)
-    const processedValue = typeof value === 'string' ? (value.trim() || null) : value;
-    if (processedValue === null) {
-      // Whitespace-only input — reset state and treat as if nothing was entered
-      setIsProcessing(false); isProcessingRef.current = false;
-      setSnooState('idle');
-      return;
+      if (isSessionStale()) return;
     }
     orchestrator.processUserResponse(currentQuestion.id, processedValue);
     setCurrentQuestion(null);
 
+    try {
     // CRITICAL: Handle satisfaction response (dissatisfaction needs special handling)
     if (answeredField === 'satisfaction') {
       const satisfactionResponse = value as { satisfied: boolean; reasons?: string[]; customFeedback?: string };
-      console.log('[QuickPlanChat] Satisfaction answered:', satisfactionResponse);
 
       if (satisfactionResponse.satisfied) {
         // User is happy - this is handled by the phase transition to 'satisfied' below
@@ -468,7 +702,6 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         // User is dissatisfied - orchestrator.processUserResponse already called handleDissatisfaction
         // which reset confidence levels and set the appropriate phase
         const currentPhase = orchestrator.getPhase();
-        console.log('[Dissatisfaction] Phase after handling:', currentPhase);
 
         // Add acknowledgment message
         const reasonLabels = satisfactionResponse.reasons?.map(r => {
@@ -496,24 +729,35 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
         // Small delay for the thinking message to show
         await new Promise(resolve => setTimeout(resolve, 500));
+        if (isSessionStale()) return;
 
         if (currentPhase === 'generating') {
           // Need to regenerate itinerary with new preferences
           setPhase('generating');
-          await handleGenerationPhase();
-          // After regeneration, show the itinerary again
-          setPhase('reviewing');
-          const satisfactionQuestion = await orchestrator.selectNextQuestion();
-          if (satisfactionQuestion) {
-            orchestrator.addSnooMessage(satisfactionQuestion.snooMessage, 'idle');
-            setMessages([...orchestrator.getMessages()]);
-            setCurrentQuestion(satisfactionQuestion);
-            orchestrator.state.currentQuestion = satisfactionQuestion;
+          const success = await handleGenerationPhase();
+          if (isSessionStale()) return;
+          // After successful regeneration, show the itinerary review again
+          if (success) {
+            const satisfactionQuestion = await orchestrator.selectNextQuestion();
+            if (isSessionStale()) return;
+            if (satisfactionQuestion) {
+              orchestrator.addSnooMessage(satisfactionQuestion.snooMessage, 'idle');
+              setMessages([...orchestrator.getMessages()]);
+              setCurrentQuestion(satisfactionQuestion);
+              orchestrator.state.currentQuestion = satisfactionQuestion;
+            }
           }
         } else if (currentPhase === 'gathering' || currentPhase === 'enriching') {
           // Need to go back and re-ask questions
           setPhase(currentPhase);
+          // If reverting to enriching phase (e.g., from wrong_areas or budget_exceeded),
+          // re-trigger the enrichment pipeline to re-fetch areas/hotels
+          if (currentPhase === 'enriching') {
+            await handleEnrichmentPhase();
+            if (isSessionStale()) return;
+          }
           const nextQuestion = await orchestrator.selectNextQuestion();
+          if (isSessionStale()) return;
           if (nextQuestion) {
             orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
             setMessages([...orchestrator.getMessages()]);
@@ -541,6 +785,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         );
         setMessages([...orchestrator.getMessages()]);
         await new Promise(resolve => setTimeout(resolve, 800));
+        if (isSessionStale()) return;
       }
 
       const state = orchestrator.getState();
@@ -571,27 +816,28 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         const hasSevereWarnings = warnings.some(w => w.severity === 'caution' || w.severity === 'warning');
 
         const warningMessage = hasSevereWarnings
-          ? `Heads up about your travel dates:\n\n${warningLines.join('\n\n')}\n\nIf you'd like to pick different dates, tap the **back** button. Otherwise, let's keep planning!`
+          ? `Heads up about your travel dates:\n\n${warningLines.join('\n\n')}\n\nIf you'd like to pick different dates, tap **Go back** below. Otherwise, let's keep planning!`
           : `Quick note about your dates:\n\n${warningLines.join('\n\n')}\n\nLet's keep planning!`;
 
         orchestrator.addSnooMessage(warningMessage, 'idle');
         setMessages([...orchestrator.getMessages()]);
         await new Promise(resolve => setTimeout(resolve, 800)); // Let user read the warning
+        if (isSessionStale()) return;
       }
     }
 
     // If dining was just answered and user selected "Help me find restaurants", ask about cuisines first
     if (answeredField === 'dining') {
       const diningMode = (value as any).id;
-      console.log('[QuickPlanChat] Dining answered:', diningMode);
 
       if (diningMode === 'plan') {
         // User wants restaurant help - next step is to ask about cuisine preferences
         // Give the orchestrator time to process the response before asking for next question
         await new Promise(resolve => setTimeout(resolve, 100));
+        if (isSessionStale()) return;
 
         const nextQuestion = await orchestrator.selectNextQuestion();
-        console.log('[Dining] After dining plan, next question:', nextQuestion?.field);
+        if (isSessionStale()) return;
 
         if (nextQuestion && (nextQuestion.field === 'cuisinePreferences' || nextQuestion.field === 'dietaryRestrictions')) {
           orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
@@ -604,7 +850,6 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           setDebugLog([...orchestrator.getDebugLog()]);
           return;
         } else {
-          console.warn('[Dining] Expected cuisinePreferences but got:', nextQuestion?.field);
         }
       }
       // If diningMode is 'none' or 'list', continue to generation
@@ -614,15 +859,12 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     if (answeredField === 'cuisinePreferences') {
       const cuisinePrefs = value as { id: string; label: string }[];
       const cuisineTypes = cuisinePrefs.map(c => c.id);
-      console.log('[QuickPlanChat] Cuisine preferences answered:', cuisineTypes);
 
       // PARALLELIZED: Fetch restaurants AND experiences concurrently to reduce loading time
       // Get activity types for parallel fetch
       const state = orchestrator.getState();
       const selectedActivities = state.preferences.selectedActivities || [];
       const activityTypes = selectedActivities.map(a => a.type);
-
-      console.log('[QuickPlanChat] Fetching restaurants and experiences in parallel');
 
       // Execute both fetches in parallel
       const fetchPromises: Promise<void>[] = [
@@ -633,15 +875,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       }
 
       await Promise.all(fetchPromises);
-      console.log('[QuickPlanChat] Parallel fetch complete');
+      if (isSessionStale()) return;
 
       // After fetches complete, get the next question — ONE call only to avoid double phase transition
       const nextQuestion = await orchestrator.selectNextQuestion();
-      console.log('[CuisinePrefs] After fetch, selectNextQuestion returned:', nextQuestion ? {
-        field: nextQuestion.field,
-        inputType: nextQuestion.inputType,
-        candidatesCount: (nextQuestion.inputConfig as any)?.candidates?.length || 0,
-      } : null);
+      if (isSessionStale()) return;
 
       if (nextQuestion) {
         // Show the question (restaurants, experiences, etc.)
@@ -658,18 +896,20 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
       // No question — check phase (may have transitioned to 'generating')
       const currentPhase = orchestrator.getPhase();
-      console.log('[CuisinePrefs] No question returned, phase:', currentPhase);
 
       if (currentPhase === 'generating') {
         setPhase('generating');
-        await handleGenerationPhase();
-        setPhase('reviewing');
-        const reviewQ = await orchestrator.selectNextQuestion();
-        if (reviewQ) {
-          orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
-          setMessages([...orchestrator.getMessages()]);
-          setCurrentQuestion(reviewQ);
-          orchestrator.state.currentQuestion = reviewQ;
+        const success = await handleGenerationPhase();
+        if (isSessionStale()) return;
+        if (success) {
+          const reviewQ = await orchestrator.selectNextQuestion();
+          if (isSessionStale()) return;
+          if (reviewQ) {
+            orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
+            setMessages([...orchestrator.getMessages()]);
+            setCurrentQuestion(reviewQ);
+            orchestrator.state.currentQuestion = reviewQ;
+          }
         }
         setIsTyping(false);
         setIsProcessing(false); isProcessingRef.current = false;
@@ -683,7 +923,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     if (answeredField === 'restaurants') {
       // Get the next question - could be more restaurant cuisines or experiences
       const nextQuestion = await orchestrator.selectNextQuestion();
-      console.log('[Restaurants answered] Next question:', nextQuestion?.field);
+      if (isSessionStale()) return;
 
       if (nextQuestion && nextQuestion.field === 'restaurants') {
         // More cuisines to show
@@ -696,15 +936,28 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setSnooState('idle');
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
-      } else if (!nextQuestion || nextQuestion.field !== 'experiences') {
-        // All restaurants done - fetch experiences
+      } else if (nextQuestion && nextQuestion.field === 'experiences') {
+        // Experiences question already queued up by orchestrator
+        orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
+        setMessages([...orchestrator.getMessages()]);
+        setCurrentQuestion(nextQuestion);
+        orchestrator.state.currentQuestion = nextQuestion;
+        setIsTyping(false);
+        setIsProcessing(false); isProcessingRef.current = false;
+        setSnooState('idle');
+        setDebugLog([...orchestrator.getDebugLog()]);
+        return;
+      } else {
+        // All restaurants done and no experiences queued - check if we need to fetch experiences
         const state = orchestrator.getState();
         const selectedActivities = state.preferences.selectedActivities || [];
         if (selectedActivities.length > 0) {
           const activityTypes = selectedActivities.map(a => a.type);
           await fetchExperiencesByType(activityTypes);
+          if (isSessionStale()) return;
 
           const experienceQuestion = await orchestrator.selectNextQuestion();
+          if (isSessionStale()) return;
           if (experienceQuestion && experienceQuestion.field === 'experiences') {
             orchestrator.addSnooMessage(experienceQuestion.snooMessage, 'idle');
             setMessages([...orchestrator.getMessages()]);
@@ -722,18 +975,26 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         if (currentPhaseAfterRestaurants === 'generating') {
           setPhase('generating');
           await handleGenerationPhase();
+          if (isSessionStale()) return;
           setIsTyping(false);
           setIsProcessing(false); isProcessingRef.current = false;
           setSnooState('idle');
           setDebugLog([...orchestrator.getDebugLog()]);
           return;
         }
-      } else if (nextQuestion) {
-        // Experiences or other question
-        orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
-        setMessages([...orchestrator.getMessages()]);
-        setCurrentQuestion(nextQuestion);
-        orchestrator.state.currentQuestion = nextQuestion;
+        // If nextQuestion exists (some other question type), show it
+        if (nextQuestion) {
+          orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
+          setMessages([...orchestrator.getMessages()]);
+          setCurrentQuestion(nextQuestion);
+          orchestrator.state.currentQuestion = nextQuestion;
+          setIsTyping(false);
+          setIsProcessing(false); isProcessingRef.current = false;
+          setSnooState('idle');
+          setDebugLog([...orchestrator.getDebugLog()]);
+          return;
+        }
+        // nextQuestion is null and phase isn't generating - clean up and return
         setIsTyping(false);
         setIsProcessing(false); isProcessingRef.current = false;
         setSnooState('idle');
@@ -745,7 +1006,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     // If experiences were just answered, check if we need more activity types
     if (answeredField === 'experiences') {
       const nextQuestion = await orchestrator.selectNextQuestion();
-      console.log('[Experiences answered] Next question:', nextQuestion?.field);
+      if (isSessionStale()) return;
 
       if (nextQuestion) {
         orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
@@ -763,6 +1024,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         if (currentPhase === 'generating') {
           setPhase('generating');
           await handleGenerationPhase();
+          if (isSessionStale()) return;
           setIsTyping(false);
           setIsProcessing(false); isProcessingRef.current = false;
           setSnooState('idle');
@@ -775,14 +1037,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     // If hotel preferences were just answered, fetch hotels for selected areas
     if (answeredField === 'hotelPreferences') {
       await fetchHotelsForAreas();
+      if (isSessionStale()) return;
 
       // After hotels are fetched, immediately get and show the hotel selection question
       const hotelQuestion = await orchestrator.selectNextQuestion();
-      console.log('[Hotels] After fetch, selectNextQuestion returned:', hotelQuestion ? {
-        field: hotelQuestion.field,
-        inputType: hotelQuestion.inputType,
-        candidatesCount: (hotelQuestion.inputConfig as any)?.candidates?.length || 0,
-      } : null);
+      if (isSessionStale()) return;
 
       if (hotelQuestion) {
         orchestrator.addSnooMessage(hotelQuestion.snooMessage, 'idle');
@@ -797,12 +1056,12 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       } else {
         // No hotel question returned - check if we should move to next phase
         const currentPhase = orchestrator.getPhase();
-        console.log('[Hotels] No question returned, phase:', currentPhase);
 
         if (currentPhase === 'generating') {
           // Move directly to generation
           setPhase('generating');
           await handleGenerationPhase();
+          if (isSessionStale()) return;
           setIsTyping(false);
           setIsProcessing(false); isProcessingRef.current = false;
           setSnooState('idle');
@@ -812,6 +1071,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
         // Otherwise, try to get the next question (might be dining, etc.)
         const nextQuestion = await orchestrator.selectNextQuestion();
+        if (isSessionStale()) return;
         if (nextQuestion) {
           orchestrator.addSnooMessage(nextQuestion.snooMessage, 'idle');
           setMessages([...orchestrator.getMessages()]);
@@ -828,19 +1088,14 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
     // Small delay for effect
     await new Promise(resolve => setTimeout(resolve, 300));
+    if (isSessionStale()) return;
 
     setSnooState('typing');
     setIsTyping(true);
 
-    console.log('[QuickPlanChat] Getting next question after answering:', answeredField);
-
     // Get next question (this may change the phase internally)
     const nextQuestion = await orchestrator.selectNextQuestion();
-
-    console.log('[QuickPlanChat] Got next question:', nextQuestion ? {
-      field: nextQuestion.field,
-      inputType: nextQuestion.inputType,
-    } : 'null');
+    if (isSessionStale()) return;
 
     // Check if phase changed after getting next question
     const currentPhase = orchestrator.getPhase();
@@ -851,22 +1106,27 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       if (currentPhase === 'enriching') {
         setIsTyping(false);
         await handleEnrichmentPhase();
+        if (isSessionStale()) return;
 
         // After enrichment, get the next question again
         const postEnrichmentQuestion = await orchestrator.selectNextQuestion();
+        if (isSessionStale()) return;
 
         // Guard: check if enrichment→generating transition happened (all enrichment fields done)
         const postEnrichPhase = orchestrator.getPhase();
         if (postEnrichPhase === 'generating') {
           setPhase('generating');
-          await handleGenerationPhase();
-          setPhase('reviewing');
-          const reviewQ = await orchestrator.selectNextQuestion();
-          if (reviewQ) {
-            orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
-            setMessages([...orchestrator.getMessages()]);
-            setCurrentQuestion(reviewQ);
-            orchestrator.state.currentQuestion = reviewQ;
+          const success = await handleGenerationPhase();
+          if (isSessionStale()) return;
+          if (success) {
+            const reviewQ = await orchestrator.selectNextQuestion();
+            if (isSessionStale()) return;
+            if (reviewQ) {
+              orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
+              setMessages([...orchestrator.getMessages()]);
+              setCurrentQuestion(reviewQ);
+              orchestrator.state.currentQuestion = reviewQ;
+            }
           }
           setIsProcessing(false); isProcessingRef.current = false;
           setSnooState('idle');
@@ -886,16 +1146,19 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
       } else if (currentPhase === 'generating') {
-        await handleGenerationPhase();
-        // After generation, show the itinerary review
-        setPhase('reviewing');
-        // Get the satisfaction question to show
-        const satisfactionQuestion = await orchestrator.selectNextQuestion();
-        if (satisfactionQuestion) {
-          orchestrator.addSnooMessage(satisfactionQuestion.snooMessage, 'idle');
-          setMessages([...orchestrator.getMessages()]);
-          setCurrentQuestion(satisfactionQuestion);
-          orchestrator.state.currentQuestion = satisfactionQuestion;
+        const success = await handleGenerationPhase();
+        if (isSessionStale()) return;
+        if (success) {
+          // After successful generation, show the itinerary review
+          // Get the satisfaction question to show
+          const satisfactionQuestion = await orchestrator.selectNextQuestion();
+          if (isSessionStale()) return;
+          if (satisfactionQuestion) {
+            orchestrator.addSnooMessage(satisfactionQuestion.snooMessage, 'idle');
+            setMessages([...orchestrator.getMessages()]);
+            setCurrentQuestion(satisfactionQuestion);
+            orchestrator.state.currentQuestion = satisfactionQuestion;
+          }
         }
         setIsTyping(false);
         setIsProcessing(false); isProcessingRef.current = false;
@@ -906,6 +1169,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         // Phase changed back to gathering (e.g., from dissatisfaction with hotels/dining)
         // Continue with the next question in the flow
         const gatherQuestion = await orchestrator.selectNextQuestion();
+        if (isSessionStale()) return;
         if (gatherQuestion) {
           orchestrator.addSnooMessage(gatherQuestion.snooMessage, 'idle');
           setMessages([...orchestrator.getMessages()]);
@@ -918,54 +1182,22 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         setDebugLog([...orchestrator.getDebugLog()]);
         return;
       } else if (currentPhase === 'satisfied') {
-        // Conversation complete - show celebration and navigate to itinerary
+        // Conversation complete - show celebration message
+        // Trip finalization and navigation are handled by the "Take me to my itinerary" button
+        // in ItineraryPreview to avoid generating duplicate trip IDs
         const celebrationMsg = await orchestrator.generateSnooMessage({ type: 'celebration' });
+        if (isSessionStale()) return;
         orchestrator.addSnooMessage(celebrationMsg, 'celebrating');
         setMessages([...orchestrator.getMessages()]);
         setSnooState('celebrating');
+        setIsTyping(false);
         setPhase('satisfied');
         setIsProcessing(false); isProcessingRef.current = false;
-
-        // Save trip data synchronously BEFORE the delay to prevent race conditions
-        let savedTripId: string | null = null;
-        try {
-          savedTripId = finalizeQuickPlanTrip(orchestrator.getState());
-          console.log('[QuickPlanChat] Trip saved successfully:', savedTripId);
-
-          // Verify localStorage was written
-          const stored = localStorage.getItem('wandercraft-trip-v2');
-          if (!stored) {
-            throw new Error('Trip data not saved to localStorage');
-          }
-        } catch (error) {
-          console.error('[QuickPlanChat] Failed to finalize trip:', error);
-          orchestrator.addSnooMessage(
-            "Oops! Something went wrong saving your trip. Please try clicking the button again.",
-            'idle'
-          );
-          setMessages([...orchestrator.getMessages()]);
-          setSnooState('idle');
-          setPhase('reviewing');
-          return;
-        }
-
-        // Navigate after a short delay for celebration — only if state hasn't been reset
-        if (navigationTimeoutRef.current) {
-          clearTimeout(navigationTimeoutRef.current);
-        }
-        const tripIdForNav = savedTripId;
-        navigationTimeoutRef.current = setTimeout(() => {
-          // Guard: if user clicked "Start Over" during the delay, don't navigate
-          if (orchestrator.getPhase() !== 'satisfied') {
-            console.log('[QuickPlanChat] Navigation cancelled — state was reset');
-            return;
-          }
-          window.location.href = `/plan/${tripIdForNav}`;
-        }, 1500); // Give user time to see the celebration message
-        return; // Don't continue processing - we're navigating away
+        return;
       }
     } else if (currentPhase === 'reviewing') {
       const reviewQ = await orchestrator.selectNextQuestion();
+      if (isSessionStale()) return;
       if (reviewQ) {
         orchestrator.addSnooMessage(reviewQ.snooMessage, 'idle');
         setMessages([...orchestrator.getMessages()]);
@@ -993,13 +1225,37 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
     // Update debug info
     setDebugLog([...orchestrator.getDebugLog()]);
-  }, [currentQuestion, isProcessing, orchestrator, phase]);
+
+    } catch (error) {
+      // BUG FIX: Catch unhandled errors in handleUserResponse to prevent permanently stuck UI.
+      // Without this, any thrown error (network, orchestrator bug, etc.) would leave
+      // isProcessing=true forever, making the chat completely unresponsive.
+      console.error('[QuickPlanChat] handleUserResponse failed:', error);
+
+      // Only show error message if session is still valid (not after Start Over)
+      if (sessionIdRef.current === currentSessionId) {
+        orchestrator.addSnooMessage(
+          "Sorry, I ran into a problem processing that. Please try again or tap Start Over if things seem stuck.",
+          'concerned'
+        );
+        setMessages([...orchestrator.getMessages()]);
+        setIsTyping(false);
+        setIsProcessing(false); isProcessingRef.current = false;
+        setSnooState('idle');
+        setDebugLog([...orchestrator.getDebugLog()]);
+      }
+    }
+  }, [currentQuestion, isProcessing, orchestrator, phase, handleSkip]);
 
   // ============================================================================
   // ENRICHMENT PHASE
   // ============================================================================
 
   const handleEnrichmentPhase = async () => {
+    // BUG FIX: Capture session ID at start to prevent stale operations
+    const enrichmentSessionId = sessionIdRef.current;
+    const isEnrichmentStale = () => sessionIdRef.current !== enrichmentSessionId;
+
     setSnooState('thinking');
     setCurrentLoadingType('area'); // Set loading state for areas discovery
 
@@ -1031,6 +1287,13 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         subreddits: selectedSubreddits,
       }, { cacheTTL: 5 * 60 * 1000, timeout: 60000 }); // Cache for 5 mins, 60s timeout
 
+      // BUG FIX: Check session staleness after async operation
+      if (isEnrichmentStale()) {
+        setCurrentLoadingType(null);
+        setSnooState('idle');
+        return;
+      }
+
       // Update status based on actual API results
       setEnrichmentStatus(prev => ({ ...prev, reddit: 'done', areas: 'done' }));
       setDebugInfo(prev => ({
@@ -1056,7 +1319,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         );
       } else {
         orchestrator.addSnooMessage(
-          `I couldn't find specific areas for ${destination}. I'll continue building your trip without area-specific suggestions — you can always add neighborhoods later in the full planner. If you'd like to try a different destination, tap the **back** button.`,
+          `I couldn't find specific areas for ${destination}. I'll continue building your trip without area-specific suggestions — you can always add neighborhoods later in the full planner. If you'd like to try a different destination, tap **Go back** below.`,
           'idle'
         );
       }
@@ -1072,6 +1335,14 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       if (error?.data) {
         console.error('[Enrichment] Error data:', error.data);
       }
+
+      // BUG FIX: Check session staleness before showing error
+      if (isEnrichmentStale()) {
+        setCurrentLoadingType(null);
+        setSnooState('idle');
+        return;
+      }
+
       const friendlyMessage = getUserFriendlyMessage(error);
 
       setEnrichmentStatus(prev => ({
@@ -1089,8 +1360,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       setMessages([...orchestrator.getMessages()]);
     }
 
-    await new Promise(resolve => setTimeout(resolve, 500));
-    setSnooState('idle');
+    // BUG FIX: Check session staleness before final state update
+    if (!isEnrichmentStale()) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setSnooState('idle');
+    }
   };
 
   // ============================================================================
@@ -1098,21 +1372,17 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   // ============================================================================
 
   const fetchHotelsForAreas = async () => {
+    // Capture session ID to prevent stale mutations after "Start Over"
+    const hotelSessionId = sessionIdRef.current;
+    const isHotelStale = () => sessionIdRef.current !== hotelSessionId;
+
     const state = orchestrator.getState();
     const selectedAreas = state.preferences.selectedAreas || [];
     const destContext = state.preferences.destinationContext;
     const destination = destContext?.canonicalName || destContext?.rawInput || '';
     const budget = state.preferences.budgetPerNight;
 
-    console.log('[Hotels] fetchHotelsForAreas called', {
-      selectedAreasCount: selectedAreas.length,
-      selectedAreaIds: selectedAreas.map(a => a.id),
-      destination,
-      budget,
-    });
-
     if (selectedAreas.length === 0) {
-      console.log('[Hotels] No areas selected, skipping hotel fetch');
       // Still show a message to the user
       orchestrator.addSnooMessage(
         `Looks like no areas were selected. Let me help you pick some areas first!`,
@@ -1136,7 +1406,6 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       // Use POST endpoint with all area IDs
       const areaIds = selectedAreas.map(a => a.id);
       const firstArea = selectedAreas[0];
-      console.log('[Hotels] Fetching hotels for areas:', areaIds, 'destination:', destination);
 
       // Format dates for Makcorps pricing API
       const formatDateForAPI = (date: Date | string | null | undefined): string | undefined => {
@@ -1158,8 +1427,8 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         areaIds,
         destination,
         preferences: {
-          budgetMin: budget?.min || 150,  // Default to store's initial budget
-          budgetMax: budget?.max || 350,  // Default to store's initial budget
+          budgetMin: budget?.min ?? 50,
+          budgetMax: budget?.max ?? 500,
           minRating: 4.0,
         },
         coordinates: firstArea ? {
@@ -1179,26 +1448,35 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         sustainabilityPreference,
       }, { cacheTTL: 3 * 60 * 1000, timeout: 45000 }); // Cache for 3 mins, 45s timeout
 
-      console.log('[Hotels] API response:', data);
+      // Guard: if session changed while we were awaiting, discard result
+      if (isHotelStale()) {
+        setCurrentLoadingType(null);
+        return;
+      }
 
-      // Store hotels for each area
+      // Store hotels for each area (always store, even empty — so the orchestrator
+      // knows the area was attempted and won't leave it in a limbo state)
       let totalHotels = 0;
+      const areasWithNoHotels: string[] = [];
       if (data.hotelsByArea) {
         for (const [areaId, hotels] of Object.entries(data.hotelsByArea)) {
           const hotelList = hotels as any[];
-          if (hotelList.length > 0) {
-            orchestrator.setDiscoveredHotels(areaId, hotelList);
-            totalHotels += hotelList.length;
-            console.log(`Found ${hotelList.length} hotels for area ${areaId}`);
+          orchestrator.setDiscoveredHotels(areaId, hotelList);
+          totalHotels += hotelList.length;
+          if (hotelList.length === 0) {
+            // Track areas with no results for user notification
+            const area = (orchestrator.getState().preferences.selectedAreas || [])
+              .find(a => a.id === areaId);
+            if (area) areasWithNoHotels.push(area.name);
           }
         }
       }
 
       if (totalHotels > 0) {
-        orchestrator.addSnooMessage(
-          `Found ${totalHotels} hotels across your selected areas!`,
-          'celebrating'
-        );
+        const foundMsg = areasWithNoHotels.length > 0
+          ? `Found ${totalHotels} hotels! (No matches in ${areasWithNoHotels.join(', ')} — I'll skip hotel picks there.)`
+          : `Found ${totalHotels} hotels across your selected areas!`;
+        orchestrator.addSnooMessage(foundMsg, 'celebrating');
       } else {
         // No hotels found - let user know and skip to next question
         orchestrator.addSnooMessage(
@@ -1215,6 +1493,13 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       setCurrentLoadingType(null); // Clear loading state
     } catch (error) {
       console.error('[Hotels] Fetch failed:', error);
+
+      // Guard: if session changed, discard error handling
+      if (isHotelStale()) {
+        setCurrentLoadingType(null);
+        return;
+      }
+
       const friendlyMessage = getUserFriendlyMessage(error);
 
       // Check for specific error types
@@ -1240,21 +1525,17 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   // ============================================================================
 
   const fetchRestaurantsByCuisine = async (cuisineTypes: string[]) => {
+    // Capture session ID to prevent stale mutations after "Start Over"
+    const restaurantSessionId = sessionIdRef.current;
+    const isRestaurantStale = () => sessionIdRef.current !== restaurantSessionId;
+
     const state = orchestrator.getState();
     const selectedAreas = state.preferences.selectedAreas || [];
     const destContext = state.preferences.destinationContext;
     const destination = destContext?.canonicalName || destContext?.rawInput || '';
     const selectedHotels = (state.preferences as any).selectedHotels || {};
 
-    console.log('[Restaurants] fetchRestaurantsByCuisine called', {
-      cuisineTypes,
-      selectedAreasCount: selectedAreas.length,
-      selectedHotelCount: Object.keys(selectedHotels).length,
-      destination,
-    });
-
     if (cuisineTypes.length === 0) {
-      console.log('[Restaurants] No cuisines selected, skipping restaurant fetch');
       return;
     }
 
@@ -1291,7 +1572,6 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
       // Get dietary restrictions from state
       const dietaryRestrictions = (state.preferences as any).dietaryRestrictions || [];
-      console.log('[Restaurants] Fetching restaurants for cuisines:', cuisineTypes, 'with hotels:', hotelsData, 'dietary:', dietaryRestrictions);
 
       // Use deduplicated fetch to prevent duplicate API calls on rapid clicks
       const data = await dedupedPost<{
@@ -1309,7 +1589,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         dietaryRestrictions, // Pass dietary restrictions to API
       }, { cacheTTL: 5 * 60 * 1000, timeout: 45000 }); // Cache for 5 mins, 45s timeout
 
-      console.log('[Restaurants] API response:', data);
+      // Guard: if session changed while we were awaiting, discard result
+      if (isRestaurantStale()) {
+        setCurrentLoadingType(null);
+        return;
+      }
 
       // Store restaurants by cuisine type
       let totalRestaurants = 0;
@@ -1320,7 +1604,6 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
             // Use setDiscoveredRestaurants but keyed by cuisine instead of area
             orchestrator.setDiscoveredRestaurants(cuisine, restaurantList);
             totalRestaurants += restaurantList.length;
-            console.log(`Found ${restaurantList.length} ${cuisine} restaurants`);
           }
         }
       }
@@ -1346,6 +1629,13 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       setCurrentLoadingType(null); // Clear loading state
     } catch (error) {
       console.error('[Restaurants] Fetch failed:', error);
+
+      // Guard: if session changed, discard error handling
+      if (isRestaurantStale()) {
+        setCurrentLoadingType(null);
+        return;
+      }
+
       const friendlyMessage = getUserFriendlyMessage(error);
 
       // Check for specific error types
@@ -1370,21 +1660,17 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   // ============================================================================
 
   const fetchExperiencesByType = async (activityTypes: string[]) => {
+    // Capture session ID to prevent stale mutations after "Start Over"
+    const experienceSessionId = sessionIdRef.current;
+    const isExperienceStale = () => sessionIdRef.current !== experienceSessionId;
+
     const state = orchestrator.getState();
     const selectedAreas = state.preferences.selectedAreas || [];
     const destContext = state.preferences.destinationContext;
     const destination = destContext?.canonicalName || destContext?.rawInput || '';
     const selectedHotels = (state.preferences as any).selectedHotels || {};
 
-    console.log('[Experiences] fetchExperiencesByType called', {
-      activityTypes,
-      selectedAreasCount: selectedAreas.length,
-      selectedHotelCount: Object.keys(selectedHotels).length,
-      destination,
-    });
-
     if (activityTypes.length === 0) {
-      console.log('[Experiences] No activities selected, skipping experience fetch');
       return;
     }
 
@@ -1426,8 +1712,6 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         }
       }
 
-      console.log('[Experiences] Fetching experiences for activities:', activityTypes, 'with hotels:', hotelsData);
-
       // Use deduplicated fetch to prevent duplicate API calls on rapid clicks
       const data = await dedupedPost<{
         experiencesByType?: Record<string, any[]>;
@@ -1443,7 +1727,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         })),
       }, { cacheTTL: 5 * 60 * 1000, timeout: 45000 }); // Cache for 5 mins, 45s timeout
 
-      console.log('[Experiences] API response:', data);
+      // Guard: if session changed while we were awaiting, discard result
+      if (isExperienceStale()) {
+        setCurrentLoadingType(null);
+        return;
+      }
 
       // Store experiences by activity type
       let totalExperiences = 0;
@@ -1453,7 +1741,6 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           if (experienceList.length > 0) {
             orchestrator.setDiscoveredExperiences(activity, experienceList);
             totalExperiences += experienceList.length;
-            console.log(`Found ${experienceList.length} ${activity} experiences`);
           }
         }
       }
@@ -1479,6 +1766,13 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       setCurrentLoadingType(null); // Clear loading state
     } catch (error) {
       console.error('[Experiences] Fetch failed:', error);
+
+      // Guard: if session changed, discard error handling
+      if (isExperienceStale()) {
+        setCurrentLoadingType(null);
+        return;
+      }
+
       const friendlyMessage = getUserFriendlyMessage(error);
 
       // Check for specific error types
@@ -1502,7 +1796,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   // GENERATION PHASE
   // ============================================================================
 
-  const handleGenerationPhase = async () => {
+  const handleGenerationPhase = async (): Promise<boolean> => {
+    // BUG FIX: Capture session ID at start to prevent stale operations
+    const generationSessionId = sessionIdRef.current;
+    const isGenerationStale = () => sessionIdRef.current !== generationSessionId;
+
     setSnooState('thinking');
     setCurrentLoadingType('itinerary'); // Set loading state for itinerary generation
 
@@ -1551,6 +1849,8 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       })),
     };
 
+    let generationSucceeded = false;
+
     try {
       // Use deduplicated fetch to prevent duplicate API calls on rapid clicks
       const data = await dedupedPost<{
@@ -1561,6 +1861,13 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         hotels: hotelsObj,
         restaurants: restaurantsObj,
       }, { cacheTTL: 2 * 60 * 1000, timeout: 90000 }); // Cache for 2 mins, 90s timeout for complex generation
+
+      // BUG FIX: Check session staleness after async operation
+      if (isGenerationStale()) {
+        setCurrentLoadingType(null);
+        setSnooState('idle');
+        return false;
+      }
 
       if (data.itinerary) {
         orchestrator.setItinerary(data.itinerary);
@@ -1574,8 +1881,17 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           'celebrating'
         );
       }
+      generationSucceeded = true;
     } catch (error) {
       console.error('[Generation] Itinerary generation error:', error);
+
+      // BUG FIX: Check session staleness before showing error
+      if (isGenerationStale()) {
+        setCurrentLoadingType(null);
+        setSnooState('idle');
+        return false;
+      }
+
       const friendlyMessage = getUserFriendlyMessage(error);
 
       // Check for specific error types
@@ -1597,16 +1913,34 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       orchestrator.addSnooMessage(message, 'concerned');
     }
 
+    // BUG FIX: Check session staleness before final state updates
+    if (isGenerationStale()) {
+      setCurrentLoadingType(null);
+      setSnooState('idle');
+      return false;
+    }
+
     setMessages([...orchestrator.getMessages()]);
-    setSnooState('celebrating');
     setCurrentLoadingType(null); // Clear loading state
 
-    await new Promise(resolve => setTimeout(resolve, 500));
-    setSnooState('idle');
+    if (generationSucceeded) {
+      setSnooState('celebrating');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      // BUG FIX: Check again after timeout
+      if (isGenerationStale()) {
+        setSnooState('idle');
+        return false;
+      }
+      setSnooState('idle');
+      // Transition to reviewing phase so itinerary is displayed
+      setPhase('reviewing');
+    } else {
+      // On error, keep the 'generating' phase so the UI doesn't show
+      // an empty "Reviewing" screen. The error message is already displayed.
+      setSnooState('idle');
+    }
 
-    // BUG #5 FIX: Transition to reviewing phase so itinerary is displayed
-    setPhase('reviewing');
-    console.log('[QuickPlanChat] Transitioned to reviewing phase');
+    return generationSucceeded;
   };
 
   // ============================================================================
@@ -1614,17 +1948,17 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
   // ============================================================================
 
   return (
-    <div className="flex items-center justify-center min-h-[calc(100vh-80px)] p-2 sm:p-4 md:p-6">
-      {/* Centered chat frame - responsive width and height */}
-      <div className="w-full max-w-2xl h-[calc(100vh-100px)] sm:h-[calc(100vh-120px)] max-h-[800px] bg-white dark:bg-slate-800 rounded-xl sm:rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
+    <div className="flex items-center justify-center min-h-[calc(100dvh-80px)] p-2 sm:p-4 md:p-6 bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 safe-area-inset-top">
+      {/* Centered chat frame - responsive width and height; dvh for accurate mobile viewport */}
+      <div className="w-full max-w-2xl h-[calc(100dvh-100px)] sm:h-[calc(100dvh-120px)] max-h-[900px] bg-white dark:bg-slate-800 rounded-xl sm:rounded-2xl shadow-xl shadow-slate-300/40 dark:shadow-none border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
         {/* Chat header - responsive padding */}
-        <div className="flex-shrink-0 px-3 sm:px-6 py-3 sm:py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+        <div className="flex-shrink-0 px-3 sm:px-6 py-3 sm:py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-b from-slate-50 to-white dark:from-slate-800/80 dark:to-slate-800/50">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 sm:gap-3">
               <SnooAgent state={snooState} size="sm" showLabel={false} />
-              <div>
-                <h2 className="font-semibold text-slate-900 dark:text-white text-sm">Snoo</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">Your AI travel buddy</p>
+              <div className="min-w-0">
+                <h2 className="font-semibold text-slate-900 dark:text-white text-sm leading-tight">Snoo</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block truncate leading-tight">Your AI travel buddy</p>
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
@@ -1634,8 +1968,9 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
               <button
                 onClick={handleStartOver}
                 disabled={isProcessing}
-                className="flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] sm:min-w-0 px-2 sm:px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center justify-center gap-1.5 min-h-[44px] min-w-[44px] sm:min-w-0 px-2 sm:px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-all duration-150 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800"
                 title="Start over from the beginning"
+                aria-label="Start over from the beginning"
               >
                 <RotateCcw className="w-4 h-4" />
                 <span className="hidden sm:inline">Start Over</span>
@@ -1643,13 +1978,13 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
             </div>
           </div>
           {/* Mobile progress indicator */}
-          <div className="sm:hidden mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
+          <div className="sm:hidden mt-2 pt-2 border-t border-slate-100 dark:border-slate-700">
             <ProgressIndicatorCompact currentPhase={phase} />
           </div>
         </div>
 
-        {/* Chat transcript - scrollable middle section */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Chat transcript - scrollable middle section with iOS momentum */}
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overscroll-contain" style={{ WebkitOverflowScrolling: 'touch' }}>
           {messages.length === 0 ? (
             <EmptyTranscript />
           ) : (
@@ -1683,8 +2018,8 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
           )}
         </div>
 
-        {/* Reply card area - anchored at bottom, responsive padding */}
-        <div className="flex-shrink-0 border-t border-slate-200 dark:border-slate-700 bg-gradient-to-b from-slate-50 to-white dark:from-slate-900/50 dark:to-slate-800/50 p-3 sm:p-5">
+        {/* Reply card area - anchored at bottom, responsive padding, safe area for mobile home indicator */}
+        <div className="flex-shrink-0 border-t border-slate-200 dark:border-slate-700 bg-gradient-to-b from-slate-50/80 to-white dark:from-slate-900/60 dark:to-slate-800/60 p-3 sm:p-5 pb-3 shadow-[0_-2px_10px_-3px_rgba(0,0,0,0.05)] dark:shadow-none safe-area-inset-bottom" role="region" aria-label="Chat controls">
           <AnimatePresence mode="wait">
             {currentQuestion && !isProcessing && (
               <div ref={inputRef}>
@@ -1693,21 +2028,23 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
                   {canGoBack ? (
                     <button
                       onClick={handleGoBack}
-                      className="flex items-center gap-1.5 min-h-[44px] px-2 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
+                      aria-label="Go back to previous question"
+                      className="flex items-center gap-1.5 min-h-[44px] px-3 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg transition-all duration-150 active:scale-95 active:bg-slate-200 dark:active:bg-slate-600/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800"
                     >
-                      <ArrowLeft className="w-4 h-4" />
-                      <span className="hidden xs:inline">Go back</span>
+                      <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+                      Go back
                     </button>
                   ) : (
-                    <div /> // Spacer
+                    <div />
                   )}
                   {canSkip && (
                     <button
                       onClick={handleSkip}
-                      className="flex items-center gap-1.5 min-h-[44px] px-2 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
+                      aria-label="Skip this question"
+                      className="flex items-center gap-1.5 min-h-[44px] px-3 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg transition-all duration-150 active:scale-95 active:bg-slate-200 dark:active:bg-slate-600/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800"
                     >
                       Skip
-                      <SkipForward className="w-4 h-4" />
+                      <SkipForward className="w-4 h-4" aria-hidden="true" />
                     </button>
                   )}
                 </div>
@@ -1724,25 +2061,41 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
           {/* Processing indicator with contextual loading */}
           {isProcessing && (
-            <div className="py-4 space-y-3">
+            <div className="py-4 space-y-3 animate-in fade-in duration-300" role="status" aria-label="Processing your request">
               {/* Main processing indicator */}
               <div className="flex items-center justify-center gap-3">
                 <SnooAgent state={snooState} size="sm" showLabel={true} />
               </div>
 
+              {/* Contextual status message */}
+              {!currentLoadingType && (
+                <p className="text-center text-sm text-slate-500 dark:text-slate-400 font-medium" aria-live="polite">
+                  {snooState === 'thinking' ? 'Thinking...' : snooState === 'typing' ? 'Typing...' : 'Processing...'}
+                </p>
+              )}
+
               {/* Contextual loading card when fetching data */}
               {currentLoadingType && (
-                <LoadingCard
-                  type={currentLoadingType}
-                  count={3}
-                />
+                <div className="space-y-2">
+                  <p className="text-center text-xs font-medium text-slate-500 dark:text-slate-400">
+                    {currentLoadingType === 'hotel' && 'Searching for the best hotels...'}
+                    {currentLoadingType === 'restaurant' && 'Finding nearby restaurants...'}
+                    {currentLoadingType === 'experience' && 'Discovering tours & activities...'}
+                    {currentLoadingType === 'area' && 'Researching neighborhoods...'}
+                    {currentLoadingType === 'itinerary' && 'Building your personalized itinerary...'}
+                  </p>
+                  <LoadingCard
+                    type={currentLoadingType}
+                    count={3}
+                  />
+                </div>
               )}
             </div>
           )}
 
-          {/* Free text input toggle and form - responsive */}
-          {!isProcessing && (
-            <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-slate-200 dark:border-slate-700">
+          {/* Free text input toggle and form - responsive; hide during satisfied phase */}
+          {!isProcessing && phase !== 'satisfied' && (
+            <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-slate-100 dark:border-slate-700/50">
               {showFreeTextInput ? (
                 <form onSubmit={handleFreeTextSubmit} className="space-y-2">
                   <div className="relative">
@@ -1755,22 +2108,32 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
                           setFreeTextInput(e.target.value);
                         }
                       }}
-                      placeholder="Ask Snoo anything or add context..."
+                      placeholder="e.g. Are there surf spots nearby? We need kid-friendly options..."
                       autoFocus
                       maxLength={500}
-                      aria-label="Message to Snoo"
-                      className={`w-full px-3 sm:px-4 py-3 sm:py-2 rounded-xl border bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-base sm:text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                      aria-label="Type a message to Snoo"
+                      aria-describedby="char-count-hint"
+                      className={`w-full px-3 sm:px-4 py-3 sm:py-2.5 pr-16 rounded-xl border bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-base sm:text-sm placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:border-transparent transition-all duration-150 ${
                         freeTextInput.length > 450
                           ? 'border-amber-400 focus:ring-amber-500'
                           : 'border-slate-300 dark:border-slate-600 focus:ring-orange-500'
                       }`}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setShowFreeTextInput(false);
+                          setFreeTextInput('');
+                        }
+                      }}
                     />
-                    {/* Character count - always visible */}
-                    <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs transition-colors ${
+                    {/* Character count - positioned in the padding area to avoid text overlap */}
+                    <span
+                      id="char-count-hint"
+                      aria-live={freeTextInput.length > 450 ? 'polite' : 'off'}
+                      className={`absolute right-3 top-1/2 -translate-y-1/2 text-[11px] tabular-nums select-none pointer-events-none transition-colors ${
                       freeTextInput.length > 450
-                        ? 'text-amber-500'
+                        ? 'text-amber-500 font-medium'
                         : freeTextInput.length > 400
-                        ? 'text-slate-500'
+                        ? 'text-slate-400 dark:text-slate-500'
                         : 'text-slate-300 dark:text-slate-600'
                     }`}>
                       {freeTextInput.length}/500
@@ -1788,18 +2151,20 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
                     <button
                       type="submit"
                       disabled={!freeTextInput.trim()}
-                      className="flex-1 sm:flex-none min-h-[44px] px-4 py-2 bg-orange-500 text-white rounded-xl font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                      aria-label="Send message"
+                      className="flex-1 sm:flex-none min-h-[44px] px-4 py-2 bg-orange-500 text-white rounded-xl font-medium hover:bg-orange-600 active:bg-orange-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 shadow-sm hover:shadow-md"
                     >
-                      <Send className="w-4 h-4" />
+                      <Send className="w-4 h-4" aria-hidden="true" />
                       <span className="sm:hidden">Send</span>
                     </button>
                     <button
                       type="button"
+                      aria-label="Cancel message"
                       onClick={() => {
                         setShowFreeTextInput(false);
                         setFreeTextInput('');
                       }}
-                      className="min-h-[44px] px-3 py-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-xl transition-colors"
+                      className="min-h-[44px] px-3 py-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-xl transition-all duration-150 active:scale-95 active:bg-slate-200 dark:active:bg-slate-600/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800"
                     >
                       Cancel
                     </button>
@@ -1808,10 +2173,11 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
               ) : (
                 <button
                   onClick={() => setShowFreeTextInput(true)}
-                  className="flex items-center justify-center gap-2 min-h-[44px] py-2 px-3 sm:w-full sm:py-2.5 text-sm text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+                  aria-label="Open text input to ask Snoo a question"
+                  className="flex items-center justify-center gap-2 w-full min-h-[44px] py-2.5 px-3 text-sm text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 transition-all duration-150 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/30 active:scale-[0.98] active:bg-slate-200 dark:active:bg-slate-600/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 border border-dashed border-slate-200 dark:border-slate-700 hover:border-orange-300 dark:hover:border-orange-800"
                 >
-                  <MessageCircle className="w-4 h-4 flex-shrink-0" />
-                  <span className="text-sm font-medium hidden sm:inline">Ask Snoo a question or add context</span>
+                  <MessageCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                  <span className="text-sm font-medium">Ask Snoo a question</span>
                 </button>
               )}
             </div>
@@ -1820,7 +2186,7 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       </div>
 
       {/* Debug button (dev mode only) */}
-      {process.env.NODE_ENV === 'development' && (
+      {clientEnv.IS_DEVELOPMENT && (
         <>
           <DebugButton onClick={() => setDebugOpen(true)} />
           <DebugDrawer
@@ -1945,6 +2311,7 @@ interface ItineraryPreviewProps {
 
 function ItineraryPreview({ orchestratorState, onNavigate }: ItineraryPreviewProps) {
   const [isNavigating, setIsNavigating] = useState(false);
+  const isNavigatingRef = useRef(false);
   const toast = useToast();
 
   const itinerary = orchestratorState.itinerary;
@@ -1952,8 +2319,17 @@ function ItineraryPreview({ orchestratorState, onNavigate }: ItineraryPreviewPro
 
   if (!itinerary || !itinerary.days) {
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center">
-        <p className="text-slate-500">No itinerary generated yet</p>
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-600 p-8 text-center">
+        <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 dark:text-slate-500">
+            <rect width="18" height="18" x="3" y="4" rx="2" ry="2"/>
+            <line x1="16" x2="16" y1="2" y2="6"/>
+            <line x1="8" x2="8" y1="2" y2="6"/>
+            <line x1="3" x2="21" y1="10" y2="10"/>
+          </svg>
+        </div>
+        <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">Your itinerary will appear here</p>
+        <p className="text-slate-400 dark:text-slate-500 text-xs mt-1">Answer a few more questions and we will build it for you</p>
       </div>
     );
   }
@@ -1962,6 +2338,9 @@ function ItineraryPreview({ orchestratorState, onNavigate }: ItineraryPreviewPro
   const stops = itinerary.stops || [];
 
   const handleTakeToItinerary = async () => {
+    // Synchronous ref guard to prevent rapid double-clicks
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
     // Cancel any auto-navigation timer to prevent double navigation
     onNavigate?.();
     setIsNavigating(true);
@@ -1969,7 +2348,6 @@ function ItineraryPreview({ orchestratorState, onNavigate }: ItineraryPreviewPro
     try {
       // Transform Quick Plan data into Trip format and save to store
       const tripId = finalizeQuickPlanTrip(orchestratorState);
-      console.log('[ItineraryPreview] Transformed and saved trip:', tripId);
 
       // Log summary of what was transferred
       const prefs = orchestratorState.preferences;
@@ -1977,14 +2355,6 @@ function ItineraryPreview({ orchestratorState, onNavigate }: ItineraryPreviewPro
       const selectedExperiences = (prefs as any).selectedExperiences || {};
       const restaurantCount = Object.values(selectedRestaurants).flat().length;
       const experienceCount = Object.values(selectedExperiences).flat().length;
-
-      console.log('[ItineraryPreview] Transfer summary:', {
-        destinations: prefs.selectedAreas?.length || 0,
-        hotels: Object.keys((prefs as any).selectedHotels || {}).length,
-        restaurants: restaurantCount,
-        experiences: experienceCount,
-        tripLength: prefs.tripLength || 0,
-      });
 
       // Navigate to the main planner
       window.location.href = `/plan/${tripId}`;
@@ -1995,110 +2365,126 @@ function ItineraryPreview({ orchestratorState, onNavigate }: ItineraryPreviewPro
         'There was an error saving your trip. Please try again.'
       );
       setIsNavigating(false);
+      isNavigatingRef.current = false;
     }
   };
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-lg shadow-slate-200/50 dark:shadow-none">
       {/* Header */}
-      <div className="p-5 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-b border-slate-200 dark:border-slate-700">
-        <h3 className="font-bold text-slate-900 dark:text-white text-xl">
+      <div className="p-4 sm:p-5 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-b border-orange-100 dark:border-slate-700">
+        <h3 className="font-bold text-slate-900 dark:text-white text-lg sm:text-xl leading-tight">
           Your Trip to {preferences.destinationContext?.canonicalName || 'Your Destination'}
         </h3>
-        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1.5 font-medium">
-          {days.length} days · {stops.length} {stops.length === 1 ? 'location' : 'locations'}
+        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1.5 font-medium flex items-center gap-1.5">
+          <span>{days.length} days</span>
+          <span className="text-slate-300 dark:text-slate-600" aria-hidden="true">&middot;</span>
+          <span>{stops.length} {stops.length === 1 ? 'location' : 'locations'}</span>
         </p>
       </div>
 
       {/* Stops summary */}
-      <div className="p-5 border-b border-slate-200 dark:border-slate-700">
-        <div className="flex flex-wrap gap-3">
+      <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-700">
+        <div className="flex flex-wrap gap-2 sm:gap-3">
           {stops.map((stop: any, idx: number) => (
             <div
               key={stop.areaId || idx}
-              className="flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-700/50 rounded-xl border border-slate-200 dark:border-slate-600 shadow-sm"
+              className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-700/50 rounded-xl border border-slate-200 dark:border-slate-600 shadow-sm hover:shadow-md hover:border-orange-200 dark:hover:border-orange-800/50 transition-all duration-200 min-w-0"
             >
-              <span className="w-7 h-7 flex items-center justify-center bg-gradient-to-br from-orange-500 to-amber-500 text-white rounded-full text-sm font-bold shadow-sm">
+              <span className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center bg-gradient-to-br from-orange-500 to-amber-500 text-white rounded-full text-xs sm:text-sm font-bold shadow-sm flex-shrink-0">
                 {idx + 1}
               </span>
-              <div>
-                <p className="font-semibold text-slate-900 dark:text-white text-sm">
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-900 dark:text-white text-sm truncate">
                   {stop.areaName || stop.area?.name || `Stop ${idx + 1}`}
                 </p>
-                <p className="text-xs text-slate-500 font-medium">{stop.nights} nights</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{stop.nights} nights</p>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Day-by-day */}
-      <div className="max-h-96 overflow-y-auto">
+      {/* Day-by-day with timeline visualization */}
+      <div className="max-h-[28rem] overflow-y-auto overscroll-contain relative" tabIndex={0} role="region" aria-label="Day-by-day itinerary details" style={{ WebkitOverflowScrolling: 'touch' }}>
         {days.map((day: any) => (
           <div
             key={day.dayNumber}
-            className="p-5 border-b border-slate-100 dark:border-slate-700 last:border-b-0 hover:bg-slate-50/50 dark:hover:bg-slate-700/20 transition-colors"
+            className="px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-100 dark:border-slate-700/50 last:border-b-0 hover:bg-slate-50/30 dark:hover:bg-slate-700/10 transition-colors"
           >
             <div className="flex items-center gap-2.5 mb-3">
               <span className="px-2.5 py-1 bg-gradient-to-r from-orange-100 to-amber-100 dark:from-orange-900/30 dark:to-amber-900/30 text-orange-700 dark:text-orange-400 rounded-lg text-xs font-bold">
                 Day {day.dayNumber}
               </span>
               {day.date && (
-                <span className="text-xs text-slate-500 font-medium">
+                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
                   {new Date(day.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
                 </span>
               )}
             </div>
 
-            <div className="space-y-2.5 ml-1">
+            {/* Timeline-style activity list */}
+            <div className="relative ml-1 pl-4 border-l-2 border-slate-200 dark:border-slate-600/50 space-y-1.5">
               {day.morning && (
-                <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors">
-                  <span className="text-xs text-slate-400 dark:text-slate-400 w-16 font-semibold uppercase tracking-wide pt-0.5">Morning</span>
+                <div className="relative flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-700/30 transition-colors group">
+                  <div className="absolute -left-[1.3rem] top-3.5 w-2.5 h-2.5 rounded-full bg-amber-400 dark:bg-amber-500 border-2 border-white dark:border-slate-800 shadow-sm" />
+                  <span className="text-[11px] text-amber-600 dark:text-amber-400 w-[4.5rem] flex-shrink-0 font-semibold uppercase tracking-wider pt-0.5">Morning</span>
                   <p className="text-sm text-slate-700 dark:text-slate-300 flex-1 leading-relaxed">{day.morning.description || day.morning.activity}</p>
                 </div>
               )}
               {day.afternoon && (
-                <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors">
-                  <span className="text-xs text-slate-400 dark:text-slate-400 w-16 font-semibold uppercase tracking-wide pt-0.5">Afternoon</span>
+                <div className="relative flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-700/30 transition-colors group">
+                  <div className="absolute -left-[1.3rem] top-3.5 w-2.5 h-2.5 rounded-full bg-orange-400 dark:bg-orange-500 border-2 border-white dark:border-slate-800 shadow-sm" />
+                  <span className="text-[11px] text-orange-600 dark:text-orange-400 w-[4.5rem] flex-shrink-0 font-semibold uppercase tracking-wider pt-0.5">Afternoon</span>
                   <p className="text-sm text-slate-700 dark:text-slate-300 flex-1 leading-relaxed">{day.afternoon.description || day.afternoon.activity}</p>
                 </div>
               )}
               {day.evening && (
-                <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors">
-                  <span className="text-xs text-slate-400 dark:text-slate-400 w-16 font-semibold uppercase tracking-wide pt-0.5">Evening</span>
+                <div className="relative flex items-start gap-3 p-2 rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-700/30 transition-colors group">
+                  <div className="absolute -left-[1.3rem] top-3.5 w-2.5 h-2.5 rounded-full bg-purple-400 dark:bg-purple-500 border-2 border-white dark:border-slate-800 shadow-sm" />
+                  <span className="text-[11px] text-purple-600 dark:text-purple-400 w-[4.5rem] flex-shrink-0 font-semibold uppercase tracking-wider pt-0.5">Evening</span>
                   <p className="text-sm text-slate-700 dark:text-slate-300 flex-1 leading-relaxed">{day.evening.description || day.evening.activity}</p>
                 </div>
               )}
               {!day.morning && !day.afternoon && !day.evening && (
-                <p className="text-sm text-slate-500 italic p-2">Free day to explore</p>
+                <div className="relative p-2.5">
+                  <div className="absolute -left-[1.3rem] top-3.5 w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-500 border-2 border-white dark:border-slate-800" />
+                  <p className="text-sm text-slate-500 dark:text-slate-400 italic">Free day to explore at your own pace</p>
+                </div>
               )}
             </div>
           </div>
         ))}
+        {/* Bottom gradient fade to indicate scrollable content */}
+        {days.length > 3 && (
+          <div className="sticky bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-white dark:from-slate-800 to-transparent pointer-events-none" />
+        )}
       </div>
 
       {/* Footer with action button */}
-      <div className="p-5 bg-gradient-to-b from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-800 border-t border-slate-200 dark:border-slate-700">
+      <div className="p-4 sm:p-5 bg-gradient-to-b from-slate-50 to-white dark:from-slate-800/50 dark:to-slate-800 border-t border-slate-200 dark:border-slate-700">
         <button
           onClick={handleTakeToItinerary}
           disabled={isNavigating}
-          className="w-full py-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold text-lg hover:from-orange-600 hover:to-amber-600 transition-all shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 transform hover:scale-[1.01] active:scale-[0.99]"
+          aria-busy={isNavigating}
+          aria-label={isNavigating ? 'Loading your itinerary, please wait' : 'Take me to my itinerary'}
+          className="w-full py-3.5 sm:py-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold text-base sm:text-lg hover:from-orange-600 hover:to-amber-600 transition-all duration-200 shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:shadow-lg flex items-center justify-center gap-2 transform hover:scale-[1.01] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-800 min-h-[48px]"
         >
           {isNavigating ? (
             <>
-              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              Loading your itinerary...
+              <span>Loading your itinerary...</span>
             </>
           ) : (
             <>
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <span>Take me to my itinerary</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="transition-transform group-hover:translate-x-0.5">
                 <path d="M5 12h14"/>
                 <path d="m12 5 7 7-7 7"/>
               </svg>
-              Take me to my itinerary
             </>
           )}
         </button>

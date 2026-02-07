@@ -10,8 +10,8 @@ const MapWithNoSSR = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-40 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center">
-        <span className="text-sm text-slate-500">Loading map...</span>
+      <div className="h-48 sm:h-56 md:h-64 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center transition-all duration-300 animate-pulse">
+        <span className="text-sm text-slate-500 dark:text-slate-400">Loading map...</span>
       </div>
     ),
   }
@@ -31,8 +31,20 @@ export default function AreasMapPreview({ areas, selectedAreaIds, onAreaClick }:
   }, []);
 
   // Filter areas with valid coordinates
+  // Reject (0,0) as it means "not geocoded", not an actual location
   const areasWithCoords = areas.filter(
-    a => a.centerLat && a.centerLng && !isNaN(a.centerLat) && !isNaN(a.centerLng)
+    a =>
+      a.centerLat != null &&
+      a.centerLng != null &&
+      !isNaN(a.centerLat) &&
+      !isNaN(a.centerLng) &&
+      isFinite(a.centerLat) &&
+      isFinite(a.centerLng) &&
+      a.centerLat >= -90 &&
+      a.centerLat <= 90 &&
+      a.centerLng >= -180 &&
+      a.centerLng <= 180 &&
+      !(a.centerLat === 0 && a.centerLng === 0)
   );
 
   if (areasWithCoords.length === 0) {
@@ -41,8 +53,8 @@ export default function AreasMapPreview({ areas, selectedAreaIds, onAreaClick }:
 
   if (!isClient) {
     return (
-      <div className="h-40 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center">
-        <span className="text-sm text-slate-500">Loading map...</span>
+      <div className="h-48 sm:h-56 md:h-64 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center transition-all duration-300 animate-pulse">
+        <span className="text-sm text-slate-500 dark:text-slate-400">Loading map...</span>
       </div>
     );
   }
