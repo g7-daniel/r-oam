@@ -118,6 +118,43 @@ export interface PetInfo {
 // Sustainability preference level
 export type SustainabilityPreference = 'standard' | 'eco_conscious' | 'eco_focused';
 
+// Special trip mode derived from occasion (sets vibeBoosts/vibeFilters/activityBoosts)
+export type SpecialMode =
+  | 'romantic'
+  | 'backpacker'
+  | 'adventure'
+  | 'wellness'
+  | 'family'
+  | 'workation'
+  | 'solo'
+  | 'social_trip'
+  | 'foodie'
+  | 'party'
+  | 'cultural'
+  | 'luxury'
+  | 'nature'
+  | 'photography'
+  | 'active';
+
+// Surf break difficulty type
+export type SurfBreakType = 'beginner' | 'intermediate' | 'advanced';
+
+// Multi-country logistics info
+export interface MultiCountryLogistics {
+  acknowledged: boolean;
+  userChoice: string;
+  countries: string[];
+  needsTransportHelp?: boolean;
+  needsVisaInfo?: boolean;
+  customNotes?: string;
+}
+
+// Pending event alert for display in next question
+export interface PendingEventAlert {
+  warning: string;
+  tip: string | null;
+}
+
 // ============================================================================
 // FREE-TEXT INPUT & SMART FOLLOW-UPS (Phase 1 Critical)
 // ============================================================================
@@ -137,10 +174,12 @@ export interface WorkationNeeds {
   needsCoworking?: boolean;
   needsQuietSpace?: boolean;
   needsReliablePower?: boolean;
+  customNotes?: string;
 }
 
 // Child-specific needs and concerns
 export interface ChildNeeds {
+  none?: boolean; // True when user indicates no special child needs
   scaredOfHeights?: boolean;
   scaredOfWater?: boolean;
   scaredOfDark?: boolean;
@@ -159,6 +198,7 @@ export interface SurfingDetails {
   wantsRental?: boolean;
   preferredWaveType?: 'beach_break' | 'reef_break' | 'point_break' | 'any';
   avoidCrowds?: boolean;
+  customNotes?: string;
 }
 
 // Safety context for special considerations
@@ -177,6 +217,11 @@ export interface ThemeParkPreferences {
   wantsCharacterDining?: boolean;
   hasGeniePlus?: boolean;
   preferredPace?: 'relaxed' | 'moderate' | 'aggressive';
+  thrillSeeker?: boolean;
+  relaxedPace?: boolean;
+  wantsMeetCharacters?: boolean;
+  avoidScary?: boolean;
+  customNotes?: string;
 }
 
 export interface TripPreferences {
@@ -287,6 +332,54 @@ export interface TripPreferences {
 
   // Lock status
   preferencesLocked: boolean;
+
+  // ============================================================================
+  // DYNAMICALLY SET BY ORCHESTRATOR
+  // ============================================================================
+
+  // Free-text vibe description (from vibe question)
+  vibe?: string;
+
+  // Special trip mode derived from occasion (controls vibeBoosts/vibeFilters/activityBoosts)
+  specialMode?: SpecialMode;
+
+  // Vibe/activity boost and filter lists (set by occasion mode)
+  vibeBoosts?: string[];
+  vibeFilters?: string[];
+  activityBoosts?: string[];
+
+  // Accommodation preferences (multiple types for backpacker/budget modes)
+  accommodationTypes?: string[];
+  accommodationRequirements?: string[];
+  suggestedAccommodationType?: string;
+
+  // Mode-specific flags
+  suggestUpgrade?: boolean;
+  optimizeForBudget?: boolean;
+  requireFamilyFriendly?: boolean;
+  requireWorkspace?: boolean;
+  prioritizeSafety?: boolean;
+  prioritizeGroupActivities?: boolean;
+  prioritizeDining?: boolean;
+  includeMichelinOptions?: boolean;
+  prioritizeAuthenticity?: boolean;
+  prioritizeEcoFriendly?: boolean;
+  prioritizeGoldenHour?: boolean;
+
+  // Surf-specific preferences (set after surfing details question)
+  surfSchoolRequired?: boolean;
+  surfBreakType?: SurfBreakType;
+  allowAdvancedSpots?: boolean;
+
+  // Theme park planning
+  preferLowCrowdTimes?: boolean;
+  parksPerDay?: number;
+
+  // Multi-country logistics
+  multiCountryLogistics?: MultiCountryLogistics;
+
+  // Dynamic skip tracking (set when optional questions are skipped)
+  [key: `${string}Skipped`]: boolean | undefined;
 }
 
 // ============================================================================
@@ -651,7 +744,7 @@ export interface QuickPlanDay {
 
   // Metadata
   isTransitDay: boolean;
-  transitInfo?: TransitInfo;
+  transitInfo?: QuickPlanTransitInfo;
   effortPoints: number;
   notes?: string;
 }
@@ -683,7 +776,7 @@ export interface DayBlock {
   evidence?: Evidence[];
 }
 
-export interface TransitInfo {
+export interface QuickPlanTransitInfo {
   from: string;
   to: string;
   mode: 'drive' | 'taxi' | 'bus' | 'flight' | 'ferry';
@@ -893,7 +986,7 @@ export interface ValidatePlaceResponse {
 export type SnooState = 'idle' | 'thinking' | 'typing' | 'celebrating' | 'concerned';
 
 // Chat message types
-export interface ChatMessage {
+export interface SnooChatMessage {
   id: string;
   type: 'snoo' | 'user' | 'system';
   content: string;
@@ -1053,11 +1146,24 @@ export interface OrchestratorState {
   };
 
   // Chat state
-  messages: ChatMessage[];
+  messages: SnooChatMessage[];
   currentQuestion: QuestionConfig | null;
 
   // Generated itinerary
   itinerary: QuickPlanItinerary | null;
+
+  // Question history for go-back functionality
+  questionHistory?: string[];
+
+  // Local events and warnings (set when dates overlap with events)
+  localEvents?: unknown[];
+  eventWarnings?: string[];
+  eventTips?: string[];
+
+  // Pending alerts for display in next question message
+  pendingEventAlert?: PendingEventAlert;
+  activityWarnings?: string[];
+  themeParkWarning?: string;
 
   // Debug info
   debugLog: DebugEntry[];
