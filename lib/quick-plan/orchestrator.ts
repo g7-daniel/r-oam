@@ -2519,8 +2519,12 @@ export class QuickPlanOrchestrator {
         return selected || !available || available.length === 0;
       });
 
+    // BUG FIX: Don't re-ask experiences if already skipped (confidence set to 'inferred')
+    const experiencesConf = (this.state.confidence as Record<string, ConfidenceLevel | undefined>).experiences;
+    const experiencesSkipped = experiencesConf !== undefined && experiencesConf !== 'unknown';
+
     const selectedActivities = this.state.preferences.selectedActivities || [];
-    if (diningIsComplete && restaurantsComplete && selectedActivities.length > 0) {
+    if (!experiencesSkipped && diningIsComplete && restaurantsComplete && selectedActivities.length > 0) {
       const activityTypes = selectedActivities.map(a => a.type);
       const selectedExperiences = this.state.preferences.selectedExperiences || {};
       const experiencesMap = this.state.discoveredData.experiences;

@@ -318,7 +318,9 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
 
   // FIX 4.2: Go Back functionality
   const handleGoBack = useCallback(async () => {
-    if (isProcessing || isProcessingRef.current) return;
+    // Only use the ref (always current) — isProcessing state can be stale in this
+    // useCallback closure because it's not in the dependency array.
+    if (isProcessingRef.current) return;
     isProcessingRef.current = true;
     setIsProcessing(true);
 
@@ -394,6 +396,8 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
     const isSkipSessionStale = () => sessionIdRef.current !== skipSessionId;
 
     try {
+      const skippedField = currentQuestion.field || currentQuestion.id;
+
       // Mark the current question as skipped first (validates the skip)
       orchestrator.processUserResponse(currentQuestion.id, 'SKIP');
 
@@ -401,6 +405,22 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
       orchestrator.addUserMessage('(Skipped)');
       setMessages([...orchestrator.getMessages()]);
       setCurrentQuestion(null);
+
+      // If dining was skipped, fetch experiences so they're available for the next question
+      // (normally fetched after cuisinePreferences, which won't be asked when dining is skipped)
+      if (skippedField === 'dining') {
+        const state = orchestrator.getState();
+        const selectedActivities = state.preferences.selectedActivities || [];
+        const activityTypes = selectedActivities.map(a => a.type);
+        if (activityTypes.length > 0) {
+          await fetchExperiencesByType(activityTypes);
+          if (isSkipSessionStale()) {
+            setIsProcessing(false); isProcessingRef.current = false;
+            setSnooState('idle');
+            return;
+          }
+        }
+      }
 
       // Get the next question
       const nextQuestion = await orchestrator.selectNextQuestion();
@@ -852,7 +872,18 @@ Respond helpfully and concisely (2-3 sentences max). If they're asking about som
         } else {
         }
       }
-      // If diningMode is 'none' or 'list', continue to generation
+      // If diningMode is 'none' or 'list', fetch experiences before continuing
+      // (experiences are normally fetched alongside restaurants after cuisinePreferences,
+      // but when dining is skipped/declined that path is never reached)
+      if (diningMode !== 'plan') {
+        const state = orchestrator.getState();
+        const selectedActivities = state.preferences.selectedActivities || [];
+        const activityTypes = selectedActivities.map(a => a.type);
+        if (activityTypes.length > 0) {
+          await fetchExperiencesByType(activityTypes);
+          if (isSessionStale()) return;
+        }
+      }
     }
 
     // If cuisine preferences were just answered, fetch restaurants by cuisine
