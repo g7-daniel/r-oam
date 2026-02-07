@@ -72,59 +72,79 @@ function getHotelFallbackImage(hotelName: string): string {
 }
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
+// Track in-flight token refresh to prevent concurrent duplicate requests
+let tokenRefreshPromise: Promise<string> | null = null;
 
 async function getAccessToken(): Promise<string> {
+  // Fast path: token is still valid
   if (cachedToken && Date.now() < cachedToken.expiresAt) {
     return cachedToken.token;
   }
 
-  if (!isConfigured.amadeus()) {
-    throw new Error(
-      'Amadeus credentials not configured. ' +
-      'Please set AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET in your .env.local file.'
-    );
+  // If a refresh is already in progress, wait for it instead of starting another
+  if (tokenRefreshPromise) {
+    return tokenRefreshPromise;
   }
 
-  const clientId = serverEnv.AMADEUS_CLIENT_ID;
-  const clientSecret = serverEnv.AMADEUS_CLIENT_SECRET;
+  // Start a new token refresh
+  tokenRefreshPromise = (async () => {
+    try {
+      if (!isConfigured.amadeus()) {
+        throw new Error(
+          'Amadeus credentials not configured. ' +
+          'Please set AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET in your .env.local file.'
+        );
+      }
 
-  // Use retry logic for token requests
-  const response = await withRetry(
-    () => fetchWithTimeout(`${AMADEUS_BASE_URL}/v1/security/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret,
-      }),
-    }, AMADEUS_TIMEOUT),
-    {
-      maxRetries: 3,
-      initialDelayMs: 1000,
-      onRetry: (attempt, delay) => {
-        console.log(`Amadeus token retry attempt ${attempt} after ${delay}ms`);
-      },
+      const clientId = serverEnv.AMADEUS_CLIENT_ID;
+      const clientSecret = serverEnv.AMADEUS_CLIENT_SECRET;
+
+      // Use retry logic for token requests
+      const response = await withRetry(
+        () => fetchWithTimeout(`${AMADEUS_BASE_URL}/v1/security/oauth2/token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            grant_type: 'client_credentials',
+            client_id: clientId,
+            client_secret: clientSecret,
+          }),
+        }, AMADEUS_TIMEOUT),
+        {
+          maxRetries: 3,
+          initialDelayMs: 1000,
+          onRetry: (attempt, delay) => {
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to get Amadeus token (${response.status}): ${errorText}`);
+      }
+
+      const data: AmadeusTokenResponse = await response.json();
+
+      // Use 5 minute buffer before expiry to avoid edge-case 401 errors
+      // Tokens typically last 30 minutes, so 5 min buffer is safe
+      // Guard against short-lived tokens: ensure at least 10 seconds of usable time
+      const TOKEN_EXPIRY_BUFFER_SECONDS = 300;
+      const effectiveLifetime = Math.max(data.expires_in - TOKEN_EXPIRY_BUFFER_SECONDS, 10);
+      cachedToken = {
+        token: data.access_token,
+        expiresAt: Date.now() + effectiveLifetime * 1000,
+      };
+
+      return cachedToken.token;
+    } finally {
+      // Clear the in-flight promise
+      tokenRefreshPromise = null;
     }
-  );
+  })();
 
-  if (!response.ok) {
-    throw new Error(`Failed to get Amadeus token: ${response.statusText}`);
-  }
-
-  const data: AmadeusTokenResponse = await response.json();
-
-  // Use 5 minute buffer before expiry to avoid edge-case 401 errors
-  // Tokens typically last 30 minutes, so 5 min buffer is safe
-  const TOKEN_EXPIRY_BUFFER_SECONDS = 300;
-  cachedToken = {
-    token: data.access_token,
-    expiresAt: Date.now() + (data.expires_in - TOKEN_EXPIRY_BUFFER_SECONDS) * 1000,
-  };
-
-  return cachedToken.token;
+  return tokenRefreshPromise;
 }
 
 // Round trip flight offer with both legs
@@ -181,14 +201,37 @@ export async function searchFlights(
     const errorData = await response.json().catch(() => ({}));
     console.error('Amadeus flight search error:', JSON.stringify(errorData, null, 2));
 
+    // Invalidate cached token on 401 so next request will re-authenticate
+    if (response.status === 401) {
+      cachedToken = null;
+    }
+
     // Extract meaningful error message from Amadeus response
     const errorMessage = errorData?.errors?.[0]?.detail ||
                          errorData?.errors?.[0]?.title ||
                          response.statusText;
-    throw new Error(`Flight search failed: ${errorMessage}`);
+
+    // Distinguish between client errors (bad params) and server errors
+    if (response.status >= 400 && response.status < 500) {
+      throw new Error(`Flight search failed - invalid request: ${errorMessage}`);
+    } else {
+      throw new Error(`Flight search failed - service error: ${errorMessage}`);
+    }
   }
 
-  const data: AmadeusFlightResponse = await response.json();
+  let data: AmadeusFlightResponse;
+  try {
+    data = await response.json();
+  } catch (parseError) {
+    console.error('Amadeus flight search - failed to parse JSON response:', parseError);
+    throw new Error('Flight search failed - invalid response format');
+  }
+
+  // Validate response structure
+  if (!data || !Array.isArray(data.data)) {
+    console.error('Amadeus flight search - unexpected response structure:', data);
+    throw new Error('Flight search failed - unexpected response format');
+  }
 
   // Exchange rates for currency conversion (same as hotels)
   const exchangeRates: Record<string, number> = {
@@ -217,8 +260,6 @@ export async function searchFlights(
     const currency = offer.price.currency;
     const exchangeRate = exchangeRates[currency] || 1;
     const priceInUSD = rawPrice * exchangeRate;
-
-    console.log(`Flight ${carrierCode}${firstSegment.number}: ${currency} ${rawPrice} = USD ${priceInUSD.toFixed(2)}`);
 
     return {
       id: offer.id,
@@ -278,13 +319,31 @@ export async function searchRoundTripFlights(
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     console.error('Amadeus round trip flight search error:', JSON.stringify(errorData, null, 2));
+
+    // Invalidate cached token on 401 so next request will re-authenticate
+    if (response.status === 401) {
+      cachedToken = null;
+    }
+
     const errorMessage = errorData?.errors?.[0]?.detail ||
                          errorData?.errors?.[0]?.title ||
                          response.statusText;
     throw new Error(`Round trip flight search failed: ${errorMessage}`);
   }
 
-  const data: AmadeusFlightResponse = await response.json();
+  let data: AmadeusFlightResponse;
+  try {
+    data = await response.json();
+  } catch (parseError) {
+    console.error('Amadeus round trip flight search - failed to parse JSON response:', parseError);
+    throw new Error('Round trip flight search failed - invalid response format');
+  }
+
+  // Validate response structure
+  if (!data || !Array.isArray(data.data)) {
+    console.error('Amadeus round trip flight search - unexpected response structure:', data);
+    throw new Error('Round trip flight search failed - unexpected response format');
+  }
 
   // Exchange rates for currency conversion
   const exchangeRates: Record<string, number> = {
@@ -343,8 +402,6 @@ export async function searchRoundTripFlights(
         };
       };
 
-      console.log(`Round trip ${offer.id}: ${currency} ${rawPrice} = USD ${totalPriceUSD.toFixed(2)} total`);
-
       return {
         id: offer.id,
         outbound: mapItinerary(outboundItinerary, data.dictionaries),
@@ -382,6 +439,10 @@ export async function searchHotels(
   );
 
   if (!hotelListResponse.ok) {
+    // Invalidate cached token on 401 so next request will re-authenticate
+    if (hotelListResponse.status === 401) {
+      cachedToken = null;
+    }
     const errorText = await hotelListResponse.text();
     console.error('Hotel list search failed:', errorText);
     throw new Error(`Hotel list search failed: ${errorText}`);
@@ -392,8 +453,6 @@ export async function searchHotels(
   // Get more hotel IDs to increase chances of finding available offers
   interface HotelListItem { hotelId: string }
   const hotelIds = (hotelListData.data as HotelListItem[] | undefined)?.slice(0, 50).map((h) => h.hotelId) || [];
-
-  console.log(`Amadeus hotel list: ${totalHotelsInCity} hotels found in ${params.cityCode}, checking ${hotelIds.length} for availability`);
 
   if (hotelIds.length === 0) {
     console.error('No hotels found in city:', params.cityCode);
@@ -420,6 +479,10 @@ export async function searchHotels(
   );
 
   if (!offersResponse.ok) {
+    // Invalidate cached token on 401 so next request will re-authenticate
+    if (offersResponse.status === 401) {
+      cachedToken = null;
+    }
     const errorText = await offersResponse.text();
     console.error('Hotel offers search failed:', errorText);
     throw new Error(`Hotel offers search failed: ${errorText}`);
@@ -428,16 +491,15 @@ export async function searchHotels(
   const offersData: AmadeusHotelResponse = await offersResponse.json();
 
   // Check if data exists
-  console.log(`Amadeus offers: ${offersData.data?.length || 0} hotels have availability (sandbox limitation - production has more)`);
   if (!offersData.data || !Array.isArray(offersData.data) || offersData.data.length === 0) {
     console.error('No hotel offers data returned from Amadeus');
     return [];
   }
 
-  const nights = Math.ceil(
+  const nights = Math.max(1, Math.ceil(
     (new Date(params.checkOutDate).getTime() - new Date(params.checkInDate).getTime()) /
       (1000 * 60 * 60 * 24)
-  );
+  ));
 
   // Get exchange rates from centralized service (with API fetch and caching)
   const exchangeRates = getExchangeRatesSync();
@@ -450,16 +512,19 @@ export async function searchHotels(
     // Convert to USD for consistent filtering/display
     const exchangeRate = exchangeRates[currency];
     if (!exchangeRate && currency !== 'USD') {
-      console.warn(`Unknown currency "${currency}" - using raw value without conversion`);
     }
     const priceInUSD = rawPrice * (exchangeRate || 1);
 
-    console.log(`Hotel ${hotel.name}: ${currency} ${rawPrice} = USD ${priceInUSD.toFixed(2)} (${nights} nights)`);
-
     // Calculate actual distance to destination center
+    // Validate coordinates before calculating distance
     const hotelLat = hotel.latitude || 0;
     const hotelLng = hotel.longitude || 0;
-    const distanceToCenter = (params.destinationLat && params.destinationLng && hotelLat && hotelLng)
+    const hasValidHotelCoords = hotelLat !== 0 && hotelLng !== 0 &&
+      Math.abs(hotelLat) <= 90 && Math.abs(hotelLng) <= 180;
+    const hasValidDestCoords = params.destinationLat && params.destinationLng &&
+      Math.abs(params.destinationLat) <= 90 && Math.abs(params.destinationLng) <= 180;
+
+    const distanceToCenter = (hasValidDestCoords && hasValidHotelCoords && params.destinationLat !== undefined && params.destinationLng !== undefined)
       ? calculateHaversineDistance(params.destinationLat, params.destinationLng, hotelLat, hotelLng)
       : 0;
 
@@ -489,7 +554,6 @@ export async function searchHotels(
       { lat: params.destinationLat, lng: params.destinationLng },
       100 // Max 100km from destination
     );
-    console.log(`Amadeus: Filtered ${beforeCount} -> ${hotels.length} hotels by distance (100km max)`);
   }
 
   return hotels;
@@ -517,6 +581,9 @@ export async function getHotelListByCity(cityCode: string): Promise<
   );
 
   if (!response.ok) {
+    if (response.status === 401) {
+      cachedToken = null;
+    }
     console.error('Failed to get hotel list:', await response.text());
     return [];
   }
@@ -540,6 +607,14 @@ export async function getHotelListByCity(cityCode: string): Promise<
 export async function getHotelListByGeocode(lat: number, lng: number, radiusKm: number = 50): Promise<
   { hotelId: string; name: string; latitude?: number; longitude?: number }[]
 > {
+  // Validate coordinates before making API call
+  if (typeof lat !== 'number' || typeof lng !== 'number' ||
+      isNaN(lat) || isNaN(lng) || !isFinite(lat) || !isFinite(lng) ||
+      Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    console.error(`Invalid coordinates for hotel geocode search: lat=${lat}, lng=${lng}`);
+    return [];
+  }
+
   const token = await getAccessToken();
 
   const params = new URLSearchParams({
@@ -559,6 +634,9 @@ export async function getHotelListByGeocode(lat: number, lng: number, radiusKm: 
   );
 
   if (!response.ok) {
+    if (response.status === 401) {
+      cachedToken = null;
+    }
     console.error('Failed to get hotel list by geocode:', await response.text());
     return [];
   }
@@ -570,7 +648,6 @@ export async function getHotelListByGeocode(lat: number, lng: number, radiusKm: 
   }
 
   const data = await response.json();
-  console.log(`Amadeus: Found ${data.data?.length || 0} hotels near (${lat}, ${lng})`);
   return ((data.data || []) as HotelGeoData[]).map((h) => ({
     hotelId: h.hotelId,
     name: h.name,
@@ -659,6 +736,9 @@ export async function getHotelPricesByIds(
   );
 
   if (!response.ok) {
+    if (response.status === 401) {
+      cachedToken = null;
+    }
     console.error('Failed to get hotel prices:', await response.text());
     return new Map();
   }
@@ -666,9 +746,9 @@ export async function getHotelPricesByIds(
   const data = await response.json();
   const priceMap = new Map<string, { pricePerNight: number; totalPrice: number; currency: string }>();
 
-  const nights = Math.ceil(
+  const nights = Math.max(1, Math.ceil(
     (new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) / (1000 * 60 * 60 * 24)
-  );
+  ));
 
   const exchangeRates: Record<string, number> = {
     USD: 1, EUR: 1.08, GBP: 1.27, JPY: 0.0067, CNY: 0.14,
@@ -712,25 +792,21 @@ export async function getAmadeusPricesForHotels(
 
       // If hotel has coordinates, search by geocode (more accurate)
       if (hotel.lat && hotel.lng) {
-        console.log(`Amadeus: Searching hotels near "${hotel.name}" at (${hotel.lat.toFixed(4)}, ${hotel.lng.toFixed(4)})`);
         hotelList = await getHotelListByGeocode(hotel.lat, hotel.lng, 30); // 30km radius
       }
 
       // Fall back to city code search if geocode didn't find anything
       if (hotelList.length === 0 && fallbackCityCode) {
-        console.log(`Amadeus: Falling back to city code ${fallbackCityCode} for "${hotel.name}"`);
         hotelList = await getHotelListByCity(fallbackCityCode);
       }
 
       if (hotelList.length === 0) {
-        console.log(`Amadeus: No hotels found near "${hotel.name}"`);
         continue;
       }
 
       // Try to match the hotel name
       const match = fuzzyMatchHotel(hotel.name, hotelList);
       if (match && match.score >= 50) {
-        console.log(`Amadeus: Matched "${hotel.name}" → "${match.name}" (score: ${match.score})`);
 
         // Get price for this hotel
         const prices = await getHotelPricesByIds([match.hotelId], checkInDate, checkOutDate, adults);
@@ -742,14 +818,11 @@ export async function getAmadeusPricesForHotels(
             totalPrice: price.totalPrice,
             amadeusName: match.name,
           });
-          console.log(`Amadeus: Real price for "${hotel.name}": $${price.pricePerNight.toFixed(0)}/night`);
         }
       } else {
-        console.log(`Amadeus: No match found for "${hotel.name}" in ${hotelList.length} nearby hotels`);
       }
     }
 
-    console.log(`Amadeus: Found real prices for ${results.size}/${hotels.length} Reddit hotels`);
   } catch (error) {
     console.error('Amadeus price lookup error:', error);
   }
@@ -800,13 +873,10 @@ export async function getFullHotelInventory(
   const allHotels: HotelBasicInfo[] = [];
   const seen = new Set<string>();
 
-  console.log(`Getting full hotel inventory for ${config.cityCodes.join(', ')}`);
-
   // Search each city code
   for (const cityCode of config.cityCodes) {
     try {
       const hotels = await getHotelListByCity(cityCode);
-      console.log(`  - ${cityCode}: ${hotels.length} hotels found`);
 
       for (const hotel of hotels) {
         // Skip duplicates
@@ -847,7 +917,6 @@ export async function getFullHotelInventory(
     return distA - distB;
   });
 
-  console.log(`Full inventory: ${allHotels.length} hotels in ${config.cityCodes.join(', ')}`);
   return allHotels;
 }
 
@@ -868,8 +937,6 @@ export async function getHotelOffersBatch(
   // Amadeus limits to ~20 hotels per request
   const BATCH_SIZE = 20;
   const batches = chunk(hotelIds, BATCH_SIZE);
-
-  console.log(`Getting prices for ${hotelIds.length} hotels in ${batches.length} batches`);
 
   const nights = Math.ceil(
     (new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) /
@@ -893,7 +960,6 @@ export async function getHotelOffersBatch(
     }
   }
 
-  console.log(`Got prices for ${results.size}/${hotelIds.length} hotels`);
   return results;
 }
 
@@ -1022,6 +1088,9 @@ export async function getAirportAutocomplete(query: string): Promise<
   );
 
   if (!response.ok) {
+    if (response.status === 401) {
+      cachedToken = null;
+    }
     return [];
   }
 

@@ -307,7 +307,7 @@ function checkBeachVsAdventure(preferences: TripPreferences): Tradeoff | null {
  * Check: Family-friendly vs Party atmosphere
  */
 function checkFamilyVsParty(preferences: TripPreferences): Tradeoff | null {
-  const hasYoungKids = preferences.children > 0 &&
+  const hasYoungKids = (preferences.children || 0) > 0 &&
     preferences.childAges?.some(age => age < 12);
 
   if (!preferences.hotelVibePreferences || preferences.hotelVibePreferences.length === 0) return null;
@@ -369,9 +369,9 @@ export function applyResolution(
 ): TripPreferences {
   const updated = { ...preferences };
 
-  // Add to resolved tradeoffs
+  // Add to resolved tradeoffs (guard against undefined array)
   updated.resolvedTradeoffs = [
-    ...updated.resolvedTradeoffs,
+    ...(updated.resolvedTradeoffs || []),
     {
       tradeoffId,
       selectedOptionId: optionId,
@@ -429,14 +429,14 @@ export function applyResolution(
  * Check if all detected tradeoffs have been resolved
  */
 export function allTradeoffsResolved(preferences: TripPreferences): boolean {
-  const resolvedIds = new Set(preferences.resolvedTradeoffs.map(r => r.tradeoffId));
-  return preferences.detectedTradeoffs.every(t => resolvedIds.has(t.id));
+  const resolvedIds = new Set((preferences.resolvedTradeoffs || []).map(r => r.tradeoffId));
+  return (preferences.detectedTradeoffs || []).every(t => resolvedIds.has(t.id));
 }
 
 /**
  * Get unresolved tradeoffs
  */
 export function getUnresolvedTradeoffs(preferences: TripPreferences): Tradeoff[] {
-  const resolvedIds = new Set(preferences.resolvedTradeoffs.map(r => r.tradeoffId));
-  return preferences.detectedTradeoffs.filter(t => !resolvedIds.has(t.id));
+  const resolvedIds = new Set((preferences.resolvedTradeoffs || []).map(r => r.tradeoffId));
+  return (preferences.detectedTradeoffs || []).filter(t => !resolvedIds.has(t.id));
 }

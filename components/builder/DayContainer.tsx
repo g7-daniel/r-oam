@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Droppable } from '@hello-pangea/dnd';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import ScheduledItem from './ScheduledItem';
 import AddPlaceSearch from './AddPlaceSearch';
 import {
@@ -48,7 +49,10 @@ export default function DayContainer({
   destinationId,
   hotelName,
 }: DayContainerProps) {
-  const { optimizeDay, autoFillDay } = useTripStore();
+  const { optimizeDay, autoFillDay } = useTripStore(useShallow((state) => ({
+    optimizeDay: state.optimizeDay,
+    autoFillDay: state.autoFillDay,
+  })));
   const [showAddPlace, setShowAddPlace] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
 
@@ -136,27 +140,29 @@ export default function DayContainer({
         {/* Expanded content */}
         {isExpanded && (
           <div className="border-t border-slate-100 dark:border-slate-700">
-            {/* Action buttons */}
-            {sortedItems.length > 0 && (
-              <div className="px-2 sm:px-4 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-700/50 flex items-center gap-1 sm:gap-2 border-b border-slate-100 dark:border-slate-700 overflow-x-auto">
-                <button
-                  onClick={handleAutoFill}
-                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap"
-                >
-                  <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                  <span className="hidden sm:inline">Auto-fill day</span>
-                  <span className="sm:hidden">Auto-fill</span>
-                </button>
+            {/* Action buttons - always show auto-fill, optimize only when items exist */}
+            <div className="px-2 sm:px-4 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-700/50 flex items-center gap-1 sm:gap-2 border-b border-slate-100 dark:border-slate-700 overflow-x-auto">
+              <button
+                onClick={handleAutoFill}
+                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 min-h-[44px] text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap"
+                aria-label="Auto-fill day with suggestions"
+              >
+                <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden sm:inline">Auto-fill day</span>
+                <span className="sm:hidden">Auto-fill</span>
+              </button>
+              {sortedItems.length >= 2 && (
                 <button
                   onClick={handleOptimize}
-                  disabled={sortedItems.length < 2 || isOptimizing}
-                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  disabled={isOptimizing}
+                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 min-h-[44px] text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  aria-label="Optimize route for this day"
                 >
                   <Route className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   {isOptimizing ? 'Optimizing...' : <><span className="hidden sm:inline">Optimize route</span><span className="sm:hidden">Optimize</span></>}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Droppable area for scheduled items */}
             <Droppable droppableId={`day-${dayIndex}`}>
@@ -165,20 +171,27 @@ export default function DayContainer({
                   ref={provided.innerRef}
                   {...provided.droppableProps}
                   className={clsx(
-                    'min-h-[80px] sm:min-h-[100px] p-2 sm:p-3 transition-colors',
-                    snapshot.isDraggingOver && 'bg-primary-50 dark:bg-primary-900/20'
+                    'min-h-[80px] sm:min-h-[100px] p-2 sm:p-3 transition-all duration-200',
+                    snapshot.isDraggingOver && 'bg-primary-50 dark:bg-primary-900/20 ring-2 ring-primary-300 dark:ring-primary-700 ring-inset'
                   )}
                 >
                   {sortedItems.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-4 sm:py-8 text-center">
-                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-2 sm:mb-3">
-                        <Plus className="w-5 h-5 sm:w-6 sm:h-6 text-slate-400" />
+                    <div className="flex flex-col items-center justify-center py-6 sm:py-8 text-center">
+                      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-3">
+                        <Plus className="w-6 h-6 text-slate-400 dark:text-slate-500" />
                       </div>
-                      <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mb-0.5 sm:mb-1">No places yet</p>
-                      <p className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500">
-                        <span className="hidden sm:inline">Drag places here or click "+ Add a place"</span>
-                        <span className="sm:hidden">Tap + to add places</span>
+                      <p className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">No places yet</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">
+                        <span className="hidden sm:inline">Drag places here from saved items, or add new ones below</span>
+                        <span className="sm:hidden">Tap "Add a place" below or use Auto-fill</span>
                       </p>
+                      <button
+                        onClick={handleAutoFill}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/50 rounded-lg transition-colors"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        Auto-fill with suggestions
+                      </button>
                     </div>
                   ) : (
                     <div className="space-y-1.5 sm:space-y-2">
@@ -211,7 +224,8 @@ export default function DayContainer({
             ) : (
               <button
                 onClick={() => setShowAddPlace(true)}
-                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-t border-slate-100 dark:border-slate-700 transition-colors"
+                className="w-full px-3 sm:px-4 py-3 min-h-[44px] flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-t border-slate-100 dark:border-slate-700 transition-colors"
+                aria-label="Add a place to this day"
               >
                 <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 Add a place

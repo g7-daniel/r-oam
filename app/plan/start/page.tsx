@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import {
@@ -59,7 +60,15 @@ export default function StartPage() {
     setTripTypeTags,
     setDestinationHeroImage,
     updateDestinationNights,
-  } = useTripStore();
+  } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    addDestination: state.addDestination,
+    removeDestination: state.removeDestination,
+    setDates: state.setDates,
+    setTripTypeTags: state.setTripTypeTags,
+    setDestinationHeroImage: state.setDestinationHeroImage,
+    updateDestinationNights: state.updateDestinationNights,
+  })));
   const { destinations, basics } = trip;
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -273,7 +282,6 @@ export default function StartPage() {
 
   const handleInviteTripmates = () => {
     // In production, this would send invites via API
-    console.log('Inviting:', inviteEmails.split(',').map(e => e.trim()));
     setShowInviteModal(false);
     setInviteEmails('');
   };
@@ -291,7 +299,7 @@ export default function StartPage() {
       <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-900">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-primary-200 dark:border-primary-800 border-t-primary-500 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-slate-400">Loading...</p>
+          <p className="text-slate-600 dark:text-slate-400">Loading...</p>
         </div>
       </div>
     );
@@ -352,7 +360,8 @@ export default function StartPage() {
                           type="button"
                           onClick={() => handleNightsChange(dest.destinationId, -1, dest.nights)}
                           disabled={dest.nights <= 1}
-                          className="w-6 h-6 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow-sm border border-slate-200 dark:border-slate-500 hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          className="w-10 h-10 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow-sm border border-slate-200 dark:border-slate-500 hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          aria-label="Decrease nights"
                         >
                           <span className="text-sm font-bold">−</span>
                         </button>
@@ -362,7 +371,8 @@ export default function StartPage() {
                         <button
                           type="button"
                           onClick={() => handleNightsChange(dest.destinationId, 1, dest.nights)}
-                          className="w-6 h-6 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow-sm border border-slate-200 dark:border-slate-500 hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          className="w-10 h-10 flex items-center justify-center rounded-full bg-white dark:bg-slate-600 text-slate-600 dark:text-slate-200 shadow-sm border border-slate-200 dark:border-slate-500 hover:bg-slate-100 dark:hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          aria-label="Increase nights"
                         >
                           <span className="text-sm font-bold">+</span>
                         </button>
@@ -374,7 +384,8 @@ export default function StartPage() {
                   <button
                     type="button"
                     onClick={() => removeDestination(dest.destinationId)}
-                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                    aria-label={`Remove ${dest.place.name}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -412,7 +423,8 @@ export default function StartPage() {
                       setShowSearch(false);
                       setSearchQuery('');
                     }}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg"
+                    aria-label="Close search"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -527,7 +539,7 @@ export default function StartPage() {
 
           {tripNights > 0 && (
             <div className="mt-3 text-center">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary-50 text-primary-700 rounded-full text-sm font-medium">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-full text-sm font-medium">
                 <Moon className="w-4 h-4" />
                 {tripNights} nights
               </span>
@@ -717,7 +729,8 @@ export default function StartPage() {
               <button
                 type="button"
                 onClick={() => setShowInviteModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                aria-label="Close invite modal"
               >
                 <X className="w-5 h-5" />
               </button>

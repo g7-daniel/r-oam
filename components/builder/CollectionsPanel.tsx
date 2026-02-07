@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import { Droppable, Draggable } from '@hello-pangea/dnd';
 import {
   MapPin,
@@ -21,7 +22,13 @@ import { handleImageError, getPlaceholderImage } from '@/lib/utils';
 type CollectionType = 'experiences' | 'restaurants' | string;
 
 export default function CollectionsPanel() {
-  const { trip, collections, removeFromCollection, customLists, createCustomList } = useTripStore();
+  const { trip, collections, removeFromCollection, customLists, createCustomList } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    collections: state.collections,
+    removeFromCollection: state.removeFromCollection,
+    customLists: state.customLists,
+    createCustomList: state.createCustomList,
+  })));
   const [activeCollection, setActiveCollection] = useState<CollectionType>('experiences');
   const [showNewListInput, setShowNewListInput] = useState(false);
   const [newListName, setNewListName] = useState('');
@@ -143,7 +150,7 @@ export default function CollectionsPanel() {
               value={newListName}
               onChange={(e) => setNewListName(e.target.value)}
               placeholder="List name..."
-              className="flex-1 px-3 py-1.5 text-sm border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 placeholder-slate-400"
+              className="flex-1 px-3 py-2 text-base border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 placeholder-slate-400"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleCreateList();
                 if (e.key === 'Escape') setShowNewListInput(false);
@@ -166,7 +173,7 @@ export default function CollectionsPanel() {
         ) : (
           <button
             onClick={() => setShowNewListInput(true)}
-            className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+            className="mt-2 flex items-center gap-1.5 min-h-[36px] px-2 -ml-2 text-xs text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
           >
             <FolderPlus className="w-3.5 h-3.5" />
             Create new list
@@ -187,16 +194,16 @@ export default function CollectionsPanel() {
           >
             {unscheduledItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center p-4">
-                <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-3">
+                <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-3">
                   {activeCollection === 'restaurants' ? (
-                    <Utensils className="w-6 h-6 text-slate-400" />
+                    <Utensils className="w-7 h-7 text-slate-400 dark:text-slate-500" />
                   ) : (
-                    <MapPin className="w-6 h-6 text-slate-400" />
+                    <MapPin className="w-7 h-7 text-slate-400 dark:text-slate-500" />
                   )}
                 </div>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">No saved places yet</p>
-                <p className="text-xs text-slate-400 dark:text-slate-500">
-                  Browse or ask Snoo for recommendations
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">No saved places yet</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 max-w-[200px]">
+                  Use the Browse tab to find places, or ask Snoo for recommendations
                 </p>
               </div>
             ) : (
@@ -216,10 +223,10 @@ export default function CollectionsPanel() {
                           snapshot.isDragging && 'shadow-lg border-primary-300 dark:border-primary-500 rotate-2'
                         )}
                       >
-                        {/* Drag handle - hidden on mobile */}
+                        {/* Drag handle */}
                         <div
                           {...provided.dragHandleProps}
-                          className="hidden sm:flex flex-shrink-0 p-1 text-slate-300 dark:text-slate-500 hover:text-slate-500 dark:hover:text-slate-300 cursor-grab"
+                          className="flex flex-shrink-0 p-1.5 text-slate-300 dark:text-slate-500 hover:text-slate-500 dark:hover:text-slate-300 cursor-grab active:cursor-grabbing min-w-[28px] min-h-[28px] items-center justify-center touch-manipulation"
                         >
                           <GripVertical className="w-4 h-4" />
                         </div>
@@ -275,9 +282,10 @@ export default function CollectionsPanel() {
                             {/* Remove button - always visible on mobile */}
                             <button
                               onClick={() => removeFromCollection(activeCollection, item.id)}
-                              className="sm:opacity-0 sm:group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-all flex-shrink-0"
+                              className="sm:opacity-0 sm:group-hover:opacity-100 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-all flex-shrink-0"
+                              aria-label={`Remove ${item.name}`}
                             >
-                              <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>

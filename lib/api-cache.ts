@@ -28,8 +28,8 @@ export interface CacheStats {
 class APICache {
   private cache = new Map<string, CacheEntry<unknown>>();
   private readonly defaultTTL = 5 * 60 * 1000; // 5 minutes default
-  // defaultStaleTTL is used when computing stale window for cache entries
   private readonly maxSize = 1000; // Max entries to prevent memory issues
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   // Statistics
   private stats = { hits: 0, misses: 0, staleHits: 0 };
@@ -37,7 +37,21 @@ class APICache {
   constructor(private name: string = 'default') {
     // Run cleanup every 5 minutes
     if (typeof setInterval !== 'undefined') {
-      setInterval(() => this.cleanup(), 5 * 60 * 1000);
+      this.cleanupInterval = setInterval(() => this.cleanup(), 5 * 60 * 1000);
+      // Unref the interval so it doesn't prevent Node.js from exiting
+      if (this.cleanupInterval && typeof this.cleanupInterval === 'object' && 'unref' in this.cleanupInterval) {
+        (this.cleanupInterval as NodeJS.Timeout).unref();
+      }
+    }
+  }
+
+  /**
+   * Stop the periodic cleanup timer to prevent memory leaks during HMR
+   */
+  destroy(): void {
+    if (this.cleanupInterval !== null) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
     }
   }
 
@@ -105,8 +119,11 @@ class APICache {
    * @param staleTTL - Time until data is considered stale (default: half of TTL)
    */
   set<T>(key: string, data: T, ttlMs: number = this.defaultTTL, staleTTL?: number): void {
-    // Enforce max size by removing oldest entries
-    if (this.cache.size >= this.maxSize) {
+    // Check if key already exists (update doesn't need eviction)
+    const exists = this.cache.has(key);
+
+    // Enforce max size by removing oldest entries only when adding NEW keys
+    if (!exists && this.cache.size >= this.maxSize) {
       this.evictOldest();
     }
 
@@ -143,7 +160,6 @@ class APICache {
       }
     }
     if (cleaned > 0) {
-      console.log(`[${this.name} Cache] Cleaned ${cleaned} expired entries`);
     }
   }
 
@@ -159,7 +175,6 @@ class APICache {
     for (let i = 0; i < toRemove && i < entries.length; i++) {
       this.cache.delete(entries[i][0]);
     }
-    console.log(`[${this.name} Cache] Evicted ${toRemove} oldest entries`);
   }
 
   /**
@@ -197,17 +212,28 @@ class APICache {
   }
 }
 
+// Guard against HMR creating duplicate instances with stale intervals
+const globalObj = (typeof globalThis !== 'undefined' ? globalThis : {}) as Record<string, any>;
+function getOrCreateCache(globalKey: string, name: string): APICache {
+  if (globalObj[globalKey]) {
+    (globalObj[globalKey] as APICache).destroy();
+  }
+  const instance = new APICache(name);
+  globalObj[globalKey] = instance;
+  return instance;
+}
+
 // Singleton instance for area discovery results
-export const areaDiscoveryCache = new APICache('areas');
+export const areaDiscoveryCache = getOrCreateCache('__areaDiscoveryCache__', 'areas');
 
 // Singleton instance for Google Places results
-export const placesCache = new APICache('places');
+export const placesCache = getOrCreateCache('__placesCache__', 'places');
 
 // Singleton instance for Reddit results
-export const redditCache = new APICache('reddit');
+export const redditCache = getOrCreateCache('__redditCache__', 'reddit');
 
 // Singleton instance for geocoding results (very stable data)
-export const geocodeCache = new APICache('geocode');
+export const geocodeCache = getOrCreateCache('__geocodeCache__', 'geocode');
 
 // Cache TTL constants (in milliseconds)
 export const CACHE_TTL = {
@@ -292,21 +318,57 @@ export async function fetchWithTimeout(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  // If the caller provided their own signal, forward its abort to our controller
+  // so both timeout and external cancellation work
+  const externalSignal = options.signal;
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason);
+    } else {
+      const onExternalAbort = () => controller.abort(externalSignal.reason);
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+      // Clean up listener when our controller aborts (timeout or completion)
+      controller.signal.addEventListener('abort', () => {
+        externalSignal.removeEventListener('abort', onExternalAbort);
+      }, { once: true });
+    }
+  }
+
   try {
     const response = await fetch(url, {
       ...options,
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
     return response;
   } catch (error) {
-    clearTimeout(timeoutId);
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`Request timed out after ${timeoutMs}ms: ${url}`);
+    // Better error messages for different failure types
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        // Distinguish between timeout and external cancellation
+        if (externalSignal?.aborted) {
+          throw error; // Re-throw as-is for external cancellation
+        }
+        const timeoutError = new Error(`Request timed out after ${timeoutMs}ms`);
+        timeoutError.name = 'TimeoutError';
+        throw timeoutError;
+      }
+
+      // Network errors - provide user-friendly message
+      if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+        const networkError = new Error('Network error: Please check your internet connection');
+        networkError.name = 'NetworkError';
+        throw networkError;
+      }
     }
+
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
+
+// Track in-flight background revalidations to prevent duplicate concurrent requests
+const pendingRevalidations = new Set<string>();
 
 /**
  * Fetch with caching and stale-while-revalidate pattern
@@ -324,13 +386,16 @@ export async function fetchWithCache<T>(
 
   // Cache hit (fresh or stale)
   if (!cached.isMiss && cached.data !== null) {
-    if (cached.isStale) {
+    if (cached.isStale && !pendingRevalidations.has(cacheKey)) {
       // Return stale data immediately, revalidate in background
-      // Fire-and-forget revalidation
+      // Guard against duplicate concurrent revalidations for same key
+      pendingRevalidations.add(cacheKey);
       fetcher().then(freshData => {
         cache.set(cacheKey, freshData, ttlMs, staleTTL);
       }).catch(err => {
         console.error(`[Cache] Background revalidation failed for ${cacheKey}:`, err);
+      }).finally(() => {
+        pendingRevalidations.delete(cacheKey);
       });
     }
     return { data: cached.data, fromCache: true, isStale: cached.isStale };

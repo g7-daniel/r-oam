@@ -53,10 +53,19 @@ const GALLERY_IMAGES = [
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { hotelId: string } }
+  { params }: { params: Promise<{ hotelId: string }> }
 ) {
   try {
-    const { hotelId } = params;
+    const { hotelId } = await params;
+
+    // Validate hotelId - should be alphanumeric/underscore/dash only
+    if (!hotelId || hotelId.length > 200 || !/^[a-zA-Z0-9_-]+$/.test(hotelId)) {
+      return NextResponse.json(
+        { error: 'Invalid hotel ID format' },
+        { status: 400 }
+      );
+    }
+
     const searchParams = request.nextUrl.searchParams;
 
     const hotelName = searchParams.get('name') || 'Hotel';
@@ -64,6 +73,17 @@ export async function GET(
     const basePrice = parseFloat(searchParams.get('basePrice') || '150');
     const nights = parseInt(searchParams.get('nights') || '3', 10);
     const stars = parseInt(searchParams.get('stars') || '4', 10);
+
+    // Validate numeric params
+    if (isNaN(basePrice) || basePrice < 0 || basePrice > 100000) {
+      return NextResponse.json({ error: 'Invalid basePrice parameter' }, { status: 400 });
+    }
+    if (isNaN(nights) || nights < 1 || nights > 365) {
+      return NextResponse.json({ error: 'Invalid nights parameter' }, { status: 400 });
+    }
+    if (isNaN(stars) || stars < 1 || stars > 5) {
+      return NextResponse.json({ error: 'Invalid stars parameter' }, { status: 400 });
+    }
     const amenities = searchParams.get('amenities')?.split(',') || [];
 
     // Fetch Reddit sentiment for this hotel
@@ -77,7 +97,6 @@ export async function GET(
       isRedditRecommended = sentiment.score > 0.2 && sentiment.mentionCount > 0;
       redditMentionCount = sentiment.mentionCount;
     } catch (error) {
-      console.warn('Failed to fetch Reddit data for hotel:', error);
     }
 
     // Generate room types with pricing

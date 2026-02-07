@@ -49,7 +49,7 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
           baseStyles,
           variants[variant],
           paddings[padding],
-          variant === 'interactive' && 'focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2',
+          variant === 'interactive' && 'focus:outline-none focus:ring-2 focus:ring-reddit focus:ring-offset-2 dark:focus:ring-offset-slate-900',
           className
         )}
         {...interactiveProps}

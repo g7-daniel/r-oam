@@ -4,6 +4,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import { serverEnv } from './env';
 
 // ============================================================================
 // ERROR TYPES
@@ -261,7 +262,7 @@ export function createErrorResponse(
       {
         error: error.code,
         message: userMessage,
-        details: process.env.NODE_ENV === 'development' ? error.details : undefined,
+        details: serverEnv.NODE_ENV === 'development' ? error.details : undefined,
       },
       { status: error.statusCode }
     );
@@ -404,6 +405,9 @@ export function assertValidCoordinates(
   if (lat === null || lat === undefined || lng === null || lng === undefined) {
     throw new ValidationError(`${fieldName} are required`);
   }
+  if (!isFinite(lat) || !isFinite(lng)) {
+    throw new ValidationError(`${fieldName}: latitude and longitude must be valid numbers`);
+  }
   if (lat < -90 || lat > 90) {
     throw new ValidationError(`${fieldName}: latitude must be between -90 and 90`);
   }
@@ -486,13 +490,26 @@ export async function safeFetch<T>(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  // If the caller provided their own signal, forward its abort to our controller
+  // so both timeout and external cancellation work
+  const externalSignal = fetchOptions.signal;
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason);
+    } else {
+      const onExternalAbort = () => controller.abort(externalSignal.reason);
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+      controller.signal.addEventListener('abort', () => {
+        externalSignal.removeEventListener('abort', onExternalAbort);
+      }, { once: true });
+    }
+  }
+
   try {
     const response = await fetch(url, {
       ...fetchOptions,
       signal: controller.signal,
     });
-
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorMessage = await parseAPIErrorResponse(response);
@@ -505,19 +522,23 @@ export async function safeFetch<T>(
     const data = await response.json() as T;
     return { data, error: null };
   } catch (error) {
-    clearTimeout(timeoutId);
-
     if (context) {
       logError(context, error);
     }
 
-    // Handle abort (timeout)
+    // Handle abort -- distinguish timeout from external cancellation
     if (error instanceof Error && error.name === 'AbortError') {
+      if (externalSignal?.aborted) {
+        // External cancellation (e.g., component unmount) -- not a timeout
+        return { data: null, error: 'Request was cancelled.' };
+      }
       return { data: null, error: 'The request took too long. Please try again.' };
     }
 
     // Handle other errors
     return { data: null, error: getUserFriendlyMessage(error) };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -551,11 +572,14 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error;
 
-      if (attempt < maxRetries - 1 && shouldRetry(error)) {
-        logError(context, error, { attempt: attempt + 1, nextRetryMs: currentDelay });
-        await new Promise(resolve => setTimeout(resolve, currentDelay));
-        currentDelay *= backoffMultiplier;
+      // If this is the last attempt or the error isn't retryable, stop immediately
+      if (attempt >= maxRetries - 1 || !shouldRetry(error)) {
+        break;
       }
+
+      logError(context, error, { attempt: attempt + 1, nextRetryMs: currentDelay });
+      await new Promise(resolve => setTimeout(resolve, currentDelay));
+      currentDelay *= backoffMultiplier;
     }
   }
 

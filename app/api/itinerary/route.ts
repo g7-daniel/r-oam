@@ -4,7 +4,15 @@ import type { ItineraryDay, ItineraryItem, TransitInfo } from '@/types';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON in request body' },
+        { status: 400 }
+      );
+    }
     const { itinerary, hotelLocation } = body;
 
     if (!itinerary || !Array.isArray(itinerary)) {
@@ -72,6 +80,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Validate coordinate format before parsing
+    if (!origin.match(/^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/) || !destination.match(/^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/)) {
+      return NextResponse.json(
+        { error: 'Invalid coordinates format. Expected: "lat,lng"' },
+        { status: 400 }
+      );
+    }
+
     // Parse coordinates
     const [originLat, originLng] = origin.split(',').map(Number);
     const [destLat, destLng] = destination.split(',').map(Number);
@@ -79,6 +95,21 @@ export async function GET(request: NextRequest) {
     if (isNaN(originLat) || isNaN(originLng) || isNaN(destLat) || isNaN(destLng)) {
       return NextResponse.json(
         { error: 'Invalid coordinates format' },
+        { status: 400 }
+      );
+    }
+
+    // Validate coordinate ranges
+    if (originLat < -90 || originLat > 90 || destLat < -90 || destLat > 90) {
+      return NextResponse.json(
+        { error: 'Latitude must be between -90 and 90' },
+        { status: 400 }
+      );
+    }
+
+    if (originLng < -180 || originLng > 180 || destLng < -180 || destLng > 180) {
+      return NextResponse.json(
+        { error: 'Longitude must be between -180 and 180' },
         { status: 400 }
       );
     }

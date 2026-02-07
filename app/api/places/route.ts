@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { searchPlaces, getExperiencesByCategory, getPhotoUrl, getPlaceDetails } from '@/lib/google-maps';
+import { searchPlaces, getExperiencesByCategory, getPlaceDetails } from '@/lib/google-maps';
 import type { Experience, ExperienceCategory } from '@/types';
 import { calculateHaversineDistance as getDistanceKm } from '@/lib/utils/geo';
 
 // Handle POST requests (some components might use POST)
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({
+        places: [],
+        error: 'Invalid JSON in request body'
+      }, { status: 400 });
+    }
     const { destination, category, query, lat, lng, radius } = body;
 
     // Extract destination from query if not provided directly
@@ -117,7 +125,7 @@ export async function POST(request: NextRequest) {
           lat: place.geometry?.location?.lat || 0,
           lng: place.geometry?.location?.lng || 0,
           imageUrl: place.photos?.[0]?.photo_reference
-            ? getPhotoUrl(place.photos[0].photo_reference, 400)
+            ? `/api/photo-proxy?ref=${encodeURIComponent(place.photos[0].photo_reference)}&maxwidth=400`
             : undefined,
         };
       });

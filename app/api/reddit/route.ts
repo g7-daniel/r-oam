@@ -13,7 +13,8 @@ export async function GET(request: NextRequest) {
   const airline = searchParams.get('airline');
   const hotel = searchParams.get('hotel');
   const city = searchParams.get('city');
-  const budget = parseInt(searchParams.get('budget') || '3000', 10);
+  const rawBudget = parseInt(searchParams.get('budget') || '3000', 10);
+  const budget = isNaN(rawBudget) || rawBudget < 0 ? 3000 : Math.min(rawBudget, 100000);
 
   try {
     if (destination) {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { cn, getPlaceholderImage, type PlaceholderType } from '@/lib/utils';
 
@@ -106,6 +106,16 @@ export function FallbackImage({
 }: FallbackImageProps) {
   const [hasError, setHasError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const prevSrcRef = useRef(src);
+
+  // Reset error/loading state when src changes so a new valid image can load
+  useEffect(() => {
+    if (prevSrcRef.current !== src) {
+      prevSrcRef.current = src;
+      setHasError(false);
+      setIsLoading(true);
+    }
+  }, [src]);
 
   const handleError = useCallback(() => {
     setHasError(true);

@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
   Send,
   Loader2,
@@ -44,7 +45,10 @@ interface Message {
 export default function AIAssistantPanel({ onCollapse: _onCollapse }: AIAssistantPanelProps) {
   // Note: onCollapse is passed but not yet used - available for future collapse functionality
   void _onCollapse;
-  const { trip, addToCollection } = useTripStore();
+  const { trip, addToCollection } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    addToCollection: state.addToCollection,
+  })));
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -191,10 +195,9 @@ export default function AIAssistantPanel({ onCollapse: _onCollapse }: AIAssistan
       durationMinutes: rec.estimatedDurationMinutes,
       destinationId: activeDestination?.destinationId,
       source: rec.source,
-      // Use imageQuery as a hint for generating an image URL if needed
-      imageUrl: rec.imageQuery
-        ? `https://source.unsplash.com/800x600/?${encodeURIComponent(rec.imageQuery)}`
-        : undefined,
+      // source.unsplash.com is defunct; imageUrl will be fetched via
+      // /api/unsplash-photo proxy when displayed, or fallback gradient is shown
+      imageUrl: undefined,
       cuisineType: rec.cuisineType,
       reservationRequired: rec.reservationRequired,
     };
@@ -341,7 +344,7 @@ export default function AIAssistantPanel({ onCollapse: _onCollapse }: AIAssistan
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask for recommendations..."
-            className="flex-1 px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder-slate-400"
+            className="flex-1 px-3 py-2 text-base border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder-slate-400"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -353,7 +356,8 @@ export default function AIAssistantPanel({ onCollapse: _onCollapse }: AIAssistan
           <button
             onClick={handleSend}
             disabled={!input.trim() || isLoading}
-            className="p-2 bg-primary-500 text-white rounded-xl hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center bg-primary-500 text-white rounded-xl hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            aria-label="Send message"
           >
             <Send className="w-4 h-4" />
           </button>

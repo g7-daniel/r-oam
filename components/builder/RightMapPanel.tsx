@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import { GoogleMap, useJsApiLoader, Marker, Polyline, InfoWindow } from '@react-google-maps/api';
 import { Loader2, Map, Calendar, Bookmark } from 'lucide-react';
 import clsx from 'clsx';
@@ -43,7 +44,11 @@ export default function RightMapPanel({
   mapView,
   setMapView,
 }: RightMapPanelProps) {
-  const { trip, scheduledItems, collections } = useTripStore();
+  const { trip, scheduledItems, collections } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    scheduledItems: state.scheduledItems,
+    collections: state.collections,
+  })));
   const [activeMarker, setActiveMarker] = useState<string | null>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const boundsRef = useRef<string>(''); // Track bounds to prevent unnecessary updates
@@ -183,15 +188,15 @@ export default function RightMapPanel({
 
   if (loadError) {
     return (
-      <div className="h-full flex items-center justify-center bg-slate-100">
-        <p className="text-slate-500">Error loading map</p>
+      <div className="h-full flex items-center justify-center bg-slate-100 dark:bg-slate-800">
+        <p className="text-slate-500 dark:text-slate-400">Error loading map</p>
       </div>
     );
   }
 
   if (!isLoaded) {
     return (
-      <div className="h-full flex items-center justify-center bg-slate-100">
+      <div className="h-full flex items-center justify-center bg-slate-100 dark:bg-slate-800">
         <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
       </div>
     );
@@ -200,15 +205,15 @@ export default function RightMapPanel({
   return (
     <div className="h-full flex flex-col">
       {/* Map view toggle */}
-      <div className="px-3 py-2 border-b border-slate-200 flex-shrink-0">
-        <div className="flex bg-slate-100 rounded-lg p-1">
+      <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+        <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
           <button
             onClick={() => setMapView('day')}
             className={clsx(
               'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
               mapView === 'day'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
+                ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
             )}
           >
             <Calendar className="w-3.5 h-3.5" />
@@ -219,8 +224,8 @@ export default function RightMapPanel({
             className={clsx(
               'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
               mapView === 'all'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
+                ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
             )}
           >
             <Map className="w-3.5 h-3.5" />
@@ -231,8 +236,8 @@ export default function RightMapPanel({
             className={clsx(
               'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
               mapView === 'saved'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
+                ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
             )}
           >
             <Bookmark className="w-3.5 h-3.5" />
@@ -243,24 +248,24 @@ export default function RightMapPanel({
 
       {/* Day selector (only show in day view) */}
       {mapView === 'day' && (
-        <div className="px-3 py-2 border-b border-slate-200 flex-shrink-0">
+        <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
           <div className="flex gap-1 overflow-x-auto pb-1">
             {dayTabs.map((dayIdx) => (
               <button
                 key={dayIdx}
                 onClick={() => setSelectedDayIndex(dayIdx)}
                 className={clsx(
-                  'px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+                  'min-h-[36px] min-w-[44px] px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
                   selectedDayIndex === dayIdx
                     ? 'bg-primary-500 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                 )}
               >
                 Day {dayIdx + 1}
               </button>
             ))}
             {totalDays > 10 && (
-              <span className="px-2 py-1 text-xs text-slate-400">
+              <span className="px-2 py-1 text-xs text-slate-400 dark:text-slate-500">
                 +{totalDays - 10} more
               </span>
             )}
@@ -357,8 +362,8 @@ export default function RightMapPanel({
       </div>
 
       {/* Legend */}
-      <div className="px-3 py-2 border-t border-slate-200 flex-shrink-0">
-        <div className="flex items-center justify-center gap-4 text-xs text-slate-500">
+      <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-700 flex-shrink-0">
+        <div className="flex items-center justify-center gap-4 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-1.5">
             <div className="w-3 h-3 rounded-full bg-sky-500" />
             <span>Experiences</span>

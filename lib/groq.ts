@@ -1,18 +1,24 @@
 import OpenAI from 'openai';
 import type { Stream } from 'openai/streaming';
-import { isConfigured } from './env';
+import { isConfigured, serverEnv } from './env';
 
 // Groq uses OpenAI-compatible API
-// Note: We use process.env directly here because this file may be imported
-// before env validation runs. The actual API calls check for the key.
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY || '',
-  baseURL: 'https://api.groq.com/openai/v1',
-});
+// Lazy-initialize to avoid calling serverEnv getters at module load time
+let _groq: OpenAI | null = null;
+function getGroqClient(): OpenAI {
+  if (!_groq) {
+    _groq = new OpenAI({
+      apiKey: serverEnv.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+      timeout: 30000, // 30 second timeout to prevent hanging requests
+    });
+  }
+  return _groq;
+}
 
 export const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
-export interface ChatMessage {
+export interface GroqMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
@@ -118,7 +124,7 @@ export class GroqApiError extends Error {
  * @throws {GroqApiError} When API call fails or returns no content
  */
 export async function chatCompletion(
-  messages: ChatMessage[],
+  messages: GroqMessage[],
   temperature: number = 0.7
 ): Promise<string> {
   if (!isConfigured.groq()) {
@@ -129,7 +135,7 @@ export async function chatCompletion(
   }
 
   try {
-    const response = await groq.chat.completions.create({
+    const response = await getGroqClient().chat.completions.create({
       model: GROQ_MODEL,
       messages,
       temperature,
@@ -177,7 +183,7 @@ export async function chatCompletion(
  * @throws {GroqApiError} When API call fails
  */
 export async function* streamChatCompletion(
-  messages: ChatMessage[],
+  messages: GroqMessage[],
   temperature: number = 0.7
 ): AsyncGenerator<string> {
   if (!isConfigured.groq()) {
@@ -188,7 +194,7 @@ export async function* streamChatCompletion(
   }
 
   try {
-    const stream = await groq.chat.completions.create({
+    const stream = await getGroqClient().chat.completions.create({
       model: GROQ_MODEL,
       messages,
       temperature,
@@ -258,4 +264,4 @@ export function isGroqConfigured(): boolean {
   return isConfigured.groq();
 }
 
-export default groq;
+export default getGroqClient;

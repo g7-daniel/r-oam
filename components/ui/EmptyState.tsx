@@ -115,7 +115,7 @@ export function EmptyState({
       {action && (
         <button
           onClick={action.onClick}
-          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
+          className="px-5 py-2.5 min-h-[44px] bg-reddit hover:bg-reddit-dark text-white rounded-full font-medium transition-colors shadow-reddit hover:shadow-reddit-hover focus:outline-none focus:ring-2 focus:ring-reddit focus:ring-offset-2 dark:focus:ring-offset-slate-900"
         >
           {action.label}
         </button>
@@ -146,7 +146,7 @@ export function InlineEmptyState({
       {action && (
         <button
           onClick={action.onClick}
-          className="mt-2 text-sm text-orange-500 hover:text-orange-600 font-medium focus:outline-none focus:ring-2 focus:ring-orange-500 rounded"
+          className="mt-2 text-sm text-reddit hover:text-reddit-dark dark:text-orange-400 dark:hover:text-orange-300 font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-reddit focus:ring-offset-2 dark:focus:ring-offset-slate-900 rounded"
         >
           {action.label}
         </button>

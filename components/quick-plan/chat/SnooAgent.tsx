@@ -42,9 +42,9 @@ const snooVariants = {
     },
   },
   typing: {
-    scale: [1, 0.98, 1],
+    scale: [1, 0.97, 1],
     transition: {
-      scale: { repeat: Infinity, duration: 0.3, ease: 'easeInOut' as const },
+      scale: { repeat: Infinity, duration: 0.8, ease: 'easeInOut' as const },
     },
   },
   celebrating: {
@@ -135,7 +135,7 @@ export default function SnooAgent({ state, size = 'md', showLabel = true }: Snoo
   return (
     <div className="flex flex-col items-center gap-2">
       <motion.div
-        className={`relative ${sizeClasses[size]}`}
+        className={`relative ${sizeClasses[size]} overflow-visible`}
         variants={variants}
         animate={state}
         initial="idle"
@@ -221,7 +221,7 @@ export default function SnooAgent({ state, size = 'md', showLabel = true }: Snoo
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
-              className="absolute -right-2 -top-2 flex gap-0.5"
+              className="absolute -right-1 -top-1 flex gap-0.5"
             >
               {[0, 1, 2].map((i) => (
                 <motion.div
@@ -281,23 +281,29 @@ export default function SnooAgent({ state, size = 'md', showLabel = true }: Snoo
 }
 
 // Typing indicator component (can be used separately)
+// Note: When used inside a chat bubble that already has padding, the indicator
+// provides only minimal internal spacing to avoid double-padding.
 export function TypingIndicator() {
   const prefersReducedMotion = usePrefersReducedMotion();
 
   return (
-    <div className="flex gap-1 items-center px-4 py-2">
-      {[0, 1, 2].map((i) => (
-        <motion.div
-          key={i}
-          className="w-2 h-2 bg-orange-400 rounded-full"
-          animate={prefersReducedMotion ? { opacity: [0.5, 1, 0.5] } : { y: [0, -6, 0] }}
-          transition={{
-            repeat: Infinity,
-            duration: 0.6,
-            delay: i * 0.15,
-          }}
-        />
-      ))}
+    <div className="flex gap-1.5 items-center min-h-[20px]" role="status" aria-label="Typing">
+      <div className="flex gap-1.5 items-center" aria-hidden="true">
+        {[0, 1, 2].map((i) => (
+          <motion.div
+            key={i}
+            className="w-2 h-2 bg-orange-400 dark:bg-orange-500 rounded-full"
+            animate={prefersReducedMotion ? { opacity: [0.4, 1, 0.4] } : { y: [0, -5, 0] }}
+            transition={{
+              repeat: Infinity,
+              duration: 0.7,
+              delay: i * 0.15,
+              ease: 'easeInOut',
+            }}
+          />
+        ))}
+      </div>
+      <span className="sr-only">Snoo is typing</span>
     </div>
   );
 }

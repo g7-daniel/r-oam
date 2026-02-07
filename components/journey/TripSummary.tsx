@@ -1,6 +1,7 @@
 'use client';
 
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
   Plane,
   Hotel,
@@ -19,7 +20,14 @@ interface TripSummaryProps {
 }
 
 export default function TripSummary({ className, compact = false }: TripSummaryProps) {
-  const { trip, getTotalBudgetSpent, getRemainingBudget, getFlightsSummary, experienceCart, diningReservations } = useTripStore();
+  const { trip, getTotalBudgetSpent, getRemainingBudget, getFlightsSummary, experienceCart, diningReservations } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    getTotalBudgetSpent: state.getTotalBudgetSpent,
+    getRemainingBudget: state.getRemainingBudget,
+    getFlightsSummary: state.getFlightsSummary,
+    experienceCart: state.experienceCart,
+    diningReservations: state.diningReservations,
+  })));
   const { basics, destinations, flights } = trip;
 
   const spent = getTotalBudgetSpent();
@@ -33,8 +41,8 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
 
   if (compact) {
     return (
-      <div className={clsx('bg-white border border-slate-200 rounded-xl p-4', className)}>
-        <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
+      <div className={clsx('bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4', className)}>
+        <h3 className="font-semibold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-primary-500" />
           Trip Summary
         </h3>
@@ -42,24 +50,24 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
         <div className="space-y-2 text-sm">
           {basics.originAirport && (
             <div className="flex items-center justify-between">
-              <span className="text-slate-500">From</span>
+              <span className="text-slate-500 dark:text-slate-400">From</span>
               <span className="font-medium">{basics.originAirport.city} ({basics.originAirport.iata})</span>
             </div>
           )}
           {basics.startDate && basics.endDate && (
             <div className="flex items-center justify-between">
-              <span className="text-slate-500">Dates</span>
+              <span className="text-slate-500 dark:text-slate-400">Dates</span>
               <span className="font-medium">
                 {formatDateRange(basics.startDate, basics.endDate)}
               </span>
             </div>
           )}
           <div className="flex items-center justify-between">
-            <span className="text-slate-500">Destinations</span>
+            <span className="text-slate-500 dark:text-slate-400">Destinations</span>
             <span className="font-medium">{destinations.length}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-slate-500">Budget</span>
+            <span className="text-slate-500 dark:text-slate-400">Budget</span>
             <span className="font-medium">${remaining.toLocaleString()} left</span>
           </div>
         </div>
@@ -68,7 +76,7 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
   }
 
   return (
-    <div className={clsx('bg-white border border-slate-200 rounded-xl overflow-hidden', className)}>
+    <div className={clsx('bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden', className)}>
       {/* Header */}
       <div className="p-4 bg-gradient-to-r from-primary-500 to-accent-500 text-white">
         <h3 className="font-semibold flex items-center gap-2">
@@ -88,16 +96,16 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
           {basics.originAirport && (
             <div className="flex items-center gap-2 text-sm">
               <Plane className="w-4 h-4 text-slate-400" />
-              <span className="text-slate-500">From:</span>
-              <span className="font-medium text-slate-900">
+              <span className="text-slate-500 dark:text-slate-400">From:</span>
+              <span className="font-medium text-slate-900 dark:text-white">
                 {basics.originAirport.city} ({basics.originAirport.iata})
               </span>
             </div>
           )}
           <div className="flex items-center gap-2 text-sm">
             <Users className="w-4 h-4 text-slate-400" />
-            <span className="text-slate-500">Travelers:</span>
-            <span className="font-medium text-slate-900">
+            <span className="text-slate-500 dark:text-slate-400">Travelers:</span>
+            <span className="font-medium text-slate-900 dark:text-white">
               {basics.travelers.adults} adult{basics.travelers.adults > 1 ? 's' : ''}
               {basics.travelers.children > 0 && `, ${basics.travelers.children} child${basics.travelers.children > 1 ? 'ren' : ''}`}
             </span>
@@ -105,12 +113,12 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
         </div>
 
         {/* Budget */}
-        <div className="p-3 bg-slate-50 rounded-lg">
+        <div className="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-slate-500">Budget</span>
+            <span className="text-sm text-slate-500 dark:text-slate-400">Budget</span>
             <span className="text-sm font-medium">${basics.totalBudgetUsd.toLocaleString()}</span>
           </div>
-          <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+          <div className="h-2 bg-slate-200 dark:bg-slate-600 rounded-full overflow-hidden">
             <div
               className={clsx(
                 'h-full transition-all',
@@ -120,8 +128,8 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
             />
           </div>
           <div className="flex items-center justify-between mt-2 text-xs">
-            <span className="text-slate-500">${spent.toLocaleString()} spent</span>
-            <span className={remaining >= 0 ? 'text-green-600' : 'text-red-600'}>
+            <span className="text-slate-500 dark:text-slate-400">${spent.toLocaleString()} spent</span>
+            <span className={remaining >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
               ${Math.abs(remaining).toLocaleString()} {remaining >= 0 ? 'remaining' : 'over'}
             </span>
           </div>
@@ -130,7 +138,7 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
         {/* Destinations */}
         {destinations.length > 0 && (
           <div>
-            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+            <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
               Destinations
             </h4>
             <div className="space-y-2">
@@ -140,13 +148,13 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
                 const hotelSelected = dest.hotels.selectedHotelId !== null;
 
                 return (
-                  <div key={dest.destinationId} className="p-2 bg-slate-50 rounded-lg">
+                  <div key={dest.destinationId} className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
                     <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-bold">
+                      <span className="w-5 h-5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 flex items-center justify-center text-xs font-bold">
                         {idx + 1}
                       </span>
-                      <span className="font-medium text-slate-900 flex-1">{dest.place.name}</span>
-                      <span className="text-xs text-slate-500">{dest.nights}n</span>
+                      <span className="font-medium text-slate-900 dark:text-white flex-1">{dest.place.name}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{dest.nights}n</span>
                     </div>
                     <div className="flex items-center gap-3 mt-1 ml-7 text-xs">
                       {dest.discovery.isComplete ? (
@@ -184,17 +192,17 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
         {/* Flights */}
         {flights.legs.length > 0 && (
           <div>
-            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+            <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
               Flights ({flightsSummary.completedLegs + flightsSummary.skippedLegs}/{flightsSummary.totalLegs})
             </h4>
             <div className="space-y-1">
               {flights.legs.map((leg) => (
                 <div
                   key={leg.legId}
-                  className="flex items-center gap-2 text-sm p-2 bg-slate-50 rounded-lg"
+                  className="flex items-center gap-2 text-sm p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg"
                 >
                   <Plane className="w-4 h-4 text-slate-400" />
-                  <span className="flex-1 text-slate-700">
+                  <span className="flex-1 text-slate-700 dark:text-slate-300">
                     {leg.from.iata} <ChevronRight className="w-3 h-3 inline" /> {leg.to.iata}
                   </span>
                   {leg.status === 'selected' && (
@@ -214,27 +222,27 @@ export default function TripSummary({ className, compact = false }: TripSummaryP
 
         {/* Totals */}
         {(experienceCart.length > 0 || totalExperiences > 0 || destinations.some((d) => d.hotels.selectedHotelId)) && (
-          <div className="pt-3 border-t border-slate-100">
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
             {experienceCart.length > 0 && (
               <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-500">🛒 In Cart</span>
+                <span className="text-slate-500 dark:text-slate-400">🛒 In Cart</span>
                 <span className="font-medium text-reddit">{experienceCart.length}</span>
               </div>
             )}
             {diningReservations.length > 0 && (
               <div className="flex items-center justify-between text-sm mt-1">
-                <span className="text-slate-500">🍴 Reservations</span>
+                <span className="text-slate-500 dark:text-slate-400">🍴 Reservations</span>
                 <span className="font-medium text-green-600">{diningReservations.length}</span>
               </div>
             )}
             {totalExperiences > 0 && (
               <div className="flex items-center justify-between text-sm mt-1">
-                <span className="text-slate-500">Experiences</span>
+                <span className="text-slate-500 dark:text-slate-400">Experiences</span>
                 <span className="font-medium">{totalExperiences}</span>
               </div>
             )}
             <div className="flex items-center justify-between text-sm mt-1">
-              <span className="text-slate-500">Hotels</span>
+              <span className="text-slate-500 dark:text-slate-400">Hotels</span>
               <span className="font-medium">
                 {destinations.filter((d) => d.hotels.selectedHotelId).length}/{destinations.length}
               </span>

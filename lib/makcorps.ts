@@ -6,10 +6,10 @@
  */
 
 import { fetchWithTimeout } from './api-cache';
-import { isConfigured } from './env';
+import { isConfigured, serverEnv } from './env';
 
 // Use lazy evaluation to avoid issues during module load
-const getMakcorpsApiKey = () => process.env.MAKCORPS_API_KEY || '';
+const getMakcorpsApiKey = () => serverEnv.MAKCORPS_API_KEY;
 const MAKCORPS_BASE_URL = 'https://api.makcorps.com';
 const MAKCORPS_TIMEOUT = 15000; // 15 second timeout
 
@@ -92,7 +92,6 @@ export async function mapCityToMakcorps(
   country?: string
 ): Promise<string | null> {
   if (!isConfigured.makcorps()) {
-    console.warn('[Makcorps] No API key configured. Set MAKCORPS_API_KEY in .env.local');
     return null;
   }
 
@@ -100,12 +99,15 @@ export async function mapCityToMakcorps(
     const searchQuery = country ? `${cityName}, ${country}` : cityName;
     const url = `${MAKCORPS_BASE_URL}/mapping?api_key=${getMakcorpsApiKey()}&name=${encodeURIComponent(searchQuery)}`;
 
-    console.log(`[Makcorps] Mapping city: "${searchQuery}"`);
     const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
+
+    if (!response.ok) {
+      return null;
+    }
+
     const data = await response.json();
 
-    if (!response.ok || data.error || (data.message && !Array.isArray(data))) {
-      console.warn(`[Makcorps] City mapping failed: ${data.message || response.status}`);
+    if (data.error || (data.message && !Array.isArray(data))) {
       return null;
     }
 
@@ -117,19 +119,16 @@ export async function mapCityToMakcorps(
       );
 
       if (cityMatch?.document_id) {
-        console.log(`[Makcorps] Found city: ${cityMatch.name} -> ${cityMatch.document_id}`);
         return cityMatch.document_id;
       }
 
       // Fallback to first result with document_id
       const firstMatch = items.find((item) => item.document_id);
       if (firstMatch?.document_id) {
-        console.log(`[Makcorps] Using fallback city mapping: ${firstMatch.document_id}`);
         return firstMatch.document_id;
       }
     }
 
-    console.log(`[Makcorps] No city mapping found for: ${searchQuery}`);
     return null;
   } catch (error) {
     console.error('[Makcorps] City mapping error:', error);
@@ -145,7 +144,6 @@ export async function mapHotelToMakcorps(
   city: string
 ): Promise<MakcorpsHotelMapping | null> {
   if (!isConfigured.makcorps()) {
-    console.warn('[Makcorps] No API key configured. Set MAKCORPS_API_KEY in .env.local');
     return null;
   }
 
@@ -153,12 +151,15 @@ export async function mapHotelToMakcorps(
     const searchQuery = `${hotelName}, ${city}`;
     const url = `${MAKCORPS_BASE_URL}/mapping?api_key=${getMakcorpsApiKey()}&name=${encodeURIComponent(searchQuery)}`;
 
-    console.log(`[Makcorps] Mapping hotel: "${searchQuery}"`);
     const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
+
+    if (!response.ok) {
+      return null;
+    }
+
     const data = await response.json();
 
-    if (!response.ok || data.error || (data.message && !Array.isArray(data))) {
-      console.warn(`[Makcorps] Hotel mapping failed: ${data.message || response.status}`);
+    if (data.error || (data.message && !Array.isArray(data))) {
       return null;
     }
 
@@ -169,7 +170,6 @@ export async function mapHotelToMakcorps(
       );
 
       if (hotelMatch?.document_id) {
-        console.log(`[Makcorps] Found hotel: ${hotelMatch.name} -> ${hotelMatch.document_id}`);
         return {
           documentId: hotelMatch.document_id,
           hotelName: hotelMatch.name || hotelName,
@@ -214,7 +214,6 @@ export async function getHotelsByCity(
   pagination: number = 0
 ): Promise<{ hotels: MakcorpsHotel[]; totalCount: number; totalPages: number }> {
   if (!isConfigured.makcorps()) {
-    console.warn('[Makcorps] No API key configured. Set MAKCORPS_API_KEY in .env.local');
     return { hotels: [], totalCount: 0, totalPages: 0 };
   }
 
@@ -229,17 +228,19 @@ export async function getHotelsByCity(
       `checkout=${checkOut}&` +
       `api_key=${getMakcorpsApiKey()}`;
 
-    console.log(`[Makcorps] Fetching hotels for city: ${cityId}, page ${pagination}`);
     const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
+
+    if (!response.ok) {
+      return { hotels: [], totalCount: 0, totalPages: 0 };
+    }
+
     const data = await response.json();
 
-    if (!response.ok || data.error || data.message) {
-      console.warn(`[Makcorps] City hotels failed: ${data.message || response.status}`);
+    if (data.error || data.message) {
       return { hotels: [], totalCount: 0, totalPages: 0 };
     }
 
     if (!Array.isArray(data)) {
-      console.warn('[Makcorps] Unexpected response format');
       return { hotels: [], totalCount: 0, totalPages: 0 };
     }
 
@@ -297,7 +298,6 @@ export async function getHotelsByCity(
       }
     }
 
-    console.log(`[Makcorps] Found ${hotels.length} hotels with prices (page ${pagination + 1}/${totalPages})`);
     return { hotels, totalCount, totalPages };
   } catch (error) {
     console.error('[Makcorps] City hotels error:', error);
@@ -328,12 +328,15 @@ export async function getHotelPricing(
       `cur=USD&` +
       `api_key=${getMakcorpsApiKey()}`;
 
-    console.log(`[Makcorps] Fetching /hotel prices for: ${hotelId}`);
     const response = await fetchWithTimeout(url, {}, MAKCORPS_TIMEOUT);
+
+    if (!response.ok) {
+      return [];
+    }
+
     const data = await response.json();
 
-    if (!response.ok || data.error || data.message) {
-      console.warn(`[Makcorps] Hotel pricing failed: ${data.message || response.status}`);
+    if (data.error || data.message) {
       return [];
     }
 
@@ -367,14 +370,12 @@ export async function getHotelPricing(
               tax,
               currency: 'USD'
             });
-            console.log(`[Makcorps] Price: ${vendor} = $${price} (+$${tax} tax)`);
           }
         }
       }
     }
 
     prices.sort((a, b) => a.price - b.price);
-    console.log(`[Makcorps] Total prices found: ${prices.length}`);
     return prices;
   } catch (error) {
     console.error('[Makcorps] Hotel pricing error:', error);
@@ -432,11 +433,8 @@ export async function getBatchPricingByCity(
   const results = new Map<string, { price: number; vendor: string; allPrices: MakcorpsPrice[] }>();
 
   if (!isConfigured.makcorps()) {
-    console.warn('[Makcorps] No API key, skipping batch pricing. Set MAKCORPS_API_KEY in .env.local');
     return results;
   }
-
-  console.log(`[Makcorps] Getting prices for ${hotelNames.length} hotels in ${cityName}`);
 
   // Process hotels in batches of 3 to respect rate limits
   const batchSize = 3;
@@ -448,7 +446,6 @@ export async function getBatchPricingByCity(
         // Search for this specific hotel
         const mapping = await mapHotelToMakcorps(hotelName, cityName);
         if (!mapping) {
-          console.log(`[Makcorps] No mapping for: ${hotelName}`);
           return;
         }
 
@@ -467,7 +464,6 @@ export async function getBatchPricingByCity(
             vendor: prices[0].vendor,
             allPrices: prices,
           });
-          console.log(`[Makcorps] ${hotelName}: $${prices[0].price} via ${prices[0].vendor}`);
         }
       } catch (e) {
         console.error(`[Makcorps] Failed for ${hotelName}:`, e);
@@ -480,7 +476,6 @@ export async function getBatchPricingByCity(
     }
   }
 
-  console.log(`[Makcorps] Got prices for ${results.size}/${hotelNames.length} hotels`);
   return results;
 }
 
@@ -497,11 +492,8 @@ export async function getBatchPricing(
   const results = new Map<string, { price: number; vendor: string; allPrices: MakcorpsPrice[] }>();
 
   if (!isConfigured.makcorps()) {
-    console.warn('[Makcorps] No API key, skipping batch pricing. Set MAKCORPS_API_KEY in .env.local');
     return results;
   }
-
-  console.log(`[Makcorps] Batch pricing for ${hotels.length} hotels (individual lookups)...`);
 
   // Process in small batches to respect rate limits
   const batchSize = 2;
@@ -531,7 +523,6 @@ export async function getBatchPricing(
             vendor: prices[0].vendor,
             allPrices: prices,
           });
-          console.log(`[Makcorps] ${hotel.name}: $${prices[0].price} via ${prices[0].vendor}`);
         }
       } catch (e) {
         console.error(`[Makcorps] Failed for ${hotel.name}:`, e);
@@ -544,6 +535,5 @@ export async function getBatchPricing(
     }
   }
 
-  console.log(`[Makcorps] Batch complete: ${results.size}/${hotels.length} hotels priced`);
   return results;
 }

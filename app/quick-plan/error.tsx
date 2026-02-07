@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, RefreshCw, Home, WifiOff, Clock, Bug } from 'lucide-react';
 import { formatErrorForBoundary, type FormattedError } from '@/lib/errors';
+import { clientEnv } from '@/lib/env';
 
 export default function QuickPlanError({
   error,
@@ -97,7 +98,7 @@ export default function QuickPlanError({
         </div>
 
         {/* Debug info for development */}
-        {process.env.NODE_ENV === 'development' && (
+        {clientEnv.IS_DEVELOPMENT && (
           <div className="mt-8">
             <button
               onClick={() => setShowDetails(!showDetails)}

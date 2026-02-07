@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { formatErrorForBoundary, type FormattedError } from '@/lib/errors';
 import { AlertCircle, RefreshCw, Home, WifiOff, Clock, Bug } from 'lucide-react';
+import { clientEnv } from '@/lib/env';
 
 export default function Error({
   error,
@@ -42,7 +43,11 @@ export default function Error({
   const showRefresh = formattedError?.showRefresh ?? true;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
+    <div
+      className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4"
+      role="alert"
+      aria-live="assertive"
+    >
       <div className="text-center max-w-md">
         <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
           {getIcon()}
@@ -57,44 +62,54 @@ export default function Error({
           {canRetry && (
             <button
               onClick={reset}
-              className="w-full px-6 py-3 bg-orange-500 text-white font-medium rounded-xl hover:bg-orange-600 transition-colors flex items-center justify-center gap-2"
+              className="w-full min-h-[44px] px-6 py-3 bg-reddit text-white font-medium rounded-full hover:bg-reddit-dark transition-all duration-300 flex items-center justify-center gap-2 shadow-reddit hover:shadow-reddit-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-reddit focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 hover:scale-105 active:scale-95"
+              aria-label="Try again"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className="w-4 h-4" aria-hidden="true" />
               Try again
             </button>
           )}
           {showRefresh && !canRetry && (
             <button
               onClick={() => window.location.reload()}
-              className="w-full px-6 py-3 bg-orange-500 text-white font-medium rounded-xl hover:bg-orange-600 transition-colors flex items-center justify-center gap-2"
+              className="w-full min-h-[44px] px-6 py-3 bg-reddit text-white font-medium rounded-full hover:bg-reddit-dark transition-all duration-300 flex items-center justify-center gap-2 shadow-reddit hover:shadow-reddit-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-reddit focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 hover:scale-105 active:scale-95"
+              aria-label="Refresh page"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className="w-4 h-4" aria-hidden="true" />
               Refresh page
             </button>
           )}
           <a
             href="/"
-            className="block w-full px-6 py-3 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="block w-full min-h-[44px] px-6 py-3 border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-reddit focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 hover:scale-105 active:scale-95"
+            aria-label="Return to home page"
           >
             <span className="flex items-center justify-center gap-2">
-              <Home className="w-4 h-4" />
+              <Home className="w-4 h-4" aria-hidden="true" />
               Go home
             </span>
           </a>
         </div>
 
         {/* Debug info for development */}
-        {process.env.NODE_ENV === 'development' && (
+        {clientEnv.IS_DEVELOPMENT && (
           <div className="mt-8">
             <button
               onClick={() => setShowDetails(!showDetails)}
-              className="text-xs text-slate-400 hover:text-slate-600 flex items-center justify-center gap-1 mx-auto"
+              className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex items-center justify-center gap-1 mx-auto transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-reddit focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 rounded px-2 py-1"
+              aria-expanded={showDetails}
+              aria-controls="error-details"
             >
-              <Bug className="w-3 h-3" />
+              <Bug className="w-3 h-3" aria-hidden="true" />
               {showDetails ? 'Hide' : 'Show'} Error Details
             </button>
             {showDetails && (
-              <div className="mt-4 p-4 bg-slate-100 dark:bg-slate-800 rounded-lg text-left overflow-auto max-h-48">
+              <div
+                id="error-details"
+                className="mt-4 p-4 bg-slate-100 dark:bg-slate-800 rounded-lg text-left overflow-auto max-h-48"
+                role="region"
+                aria-label="Error details"
+              >
                 <p className="text-xs font-mono text-slate-600 dark:text-slate-400 break-all">
                   <strong>Error:</strong> {error.message}
                 </p>

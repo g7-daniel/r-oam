@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { CollectionItem } from '@/stores/tripStore';
 import {
   Search,
@@ -59,7 +60,10 @@ interface PlaceResult {
 }
 
 export default function CategoryBrowser() {
-  const { trip, addToCollection } = useTripStore();
+  const { trip, addToCollection } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    addToCollection: state.addToCollection,
+  })));
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [places, setPlaces] = useState<PlaceResult[]>([]);
@@ -222,7 +226,7 @@ export default function CategoryBrowser() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={`Search places in ${destinationName}...`}
-              className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder-slate-400"
+              className="w-full pl-10 pr-4 py-2.5 text-base border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder-slate-400"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleSearch();
               }}
@@ -293,7 +297,7 @@ export default function CategoryBrowser() {
             setPlaces([]);
             setSearchQuery('');
           }}
-          className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
+          className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white min-h-[44px] px-2 -ml-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>{categoryData?.icon} {categoryData?.label || 'Search Results'}</span>
@@ -411,7 +415,7 @@ export default function CategoryBrowser() {
                     onClick={(e) => handleAddToCollection(e, place, isRestaurant ? 'restaurants' : 'experiences')}
                     disabled={isAdded}
                     className={clsx(
-                      'flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                      'flex-shrink-0 flex items-center gap-1 px-3 py-2 min-h-[36px] rounded-lg text-xs font-medium transition-colors',
                       isAdded
                         ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 cursor-default'
                         : 'bg-primary-500 text-white hover:bg-primary-600'

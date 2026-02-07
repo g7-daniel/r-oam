@@ -153,6 +153,20 @@ export function generateSkeleton(
   if (!selectedSplit || !selectedSplit.stops || selectedSplit.stops.length === 0) {
     // Default to top area for all nights
     const topArea = areas[0];
+    if (!topArea) {
+      // No areas available - create a minimal fallback
+      return {
+        stops: [{
+          areaId: 'default',
+          areaName: 'Destination',
+          nights: preferences.tripLength || 7,
+          arrivalDay: 1,
+          departureDay: (preferences.tripLength || 7) + 1,
+        }],
+        totalNights: preferences.tripLength || 7,
+        transferDays: [],
+      };
+    }
     return {
       stops: [{
         areaId: topArea.id,
@@ -321,7 +335,7 @@ function generateDayActivities(
   isTransferDay: boolean
 ): ScheduledActivity[] {
   const activities: ScheduledActivity[] = [];
-  const dailyBudget = PACE_DAILY_BUDGET[preferences.pace];
+  const dailyBudget = PACE_DAILY_BUDGET[preferences.pace || 'balanced'];
 
   // Reduce budget for transfer days
   const effectiveBudget = isTransferDay ? dailyBudget * 0.5 : dailyBudget;
@@ -421,7 +435,7 @@ function generateDayMeals(
 
   // Lunch - find a casual spot
   const lunchOptions = areaRestaurants.filter(r =>
-    r.priceLevel <= 2 || r.cuisine.includes('casual')
+    (r.priceLevel ?? 2) <= 2 || (r.cuisine || []).includes('casual')
   );
   const lunchSpot = lunchOptions[dayNum % Math.max(1, lunchOptions.length)];
 
@@ -432,7 +446,7 @@ function generateDayMeals(
       time: '12:30',
       name: lunchSpot.name,
       restaurantPlaceId: lunchSpot.placeId,
-      cuisine: lunchSpot.cuisine.join(', '),
+      cuisine: (lunchSpot.cuisine || []).join(', '),
       priceLevel: lunchSpot.priceLevel,
     });
   } else {
@@ -447,7 +461,7 @@ function generateDayMeals(
 
   // Dinner - pick from top restaurants
   const dinnerOptions = areaRestaurants.filter(r =>
-    r.googleRating >= 4.0 || r.redditScore > 0
+    (r.googleRating ?? 0) >= 4.0 || (r.redditScore ?? 0) > 0
   );
   const dinnerSpot = dinnerOptions[dayNum % Math.max(1, dinnerOptions.length)];
 
@@ -458,9 +472,9 @@ function generateDayMeals(
       time: '19:00',
       name: dinnerSpot.name,
       restaurantPlaceId: dinnerSpot.placeId,
-      cuisine: dinnerSpot.cuisine.join(', '),
+      cuisine: (dinnerSpot.cuisine || []).join(', '),
       priceLevel: dinnerSpot.priceLevel,
-      notes: dinnerSpot.evidence.length > 0
+      notes: (dinnerSpot.evidence || []).length > 0 && dinnerSpot.evidence[0].snippet
         ? `Recommended: "${dinnerSpot.evidence[0].snippet}"`
         : undefined,
     });

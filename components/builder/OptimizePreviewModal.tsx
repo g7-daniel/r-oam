@@ -56,25 +56,26 @@ export default function OptimizePreviewModal({
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl overflow-hidden">
+      <div className="relative w-full max-w-2xl bg-white dark:bg-slate-800 rounded-2xl shadow-xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center">
-              <Route className="w-5 h-5 text-primary-600" />
+            <div className="w-10 h-10 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center">
+              <Route className="w-5 h-5 text-primary-600 dark:text-primary-400" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                 Optimize Route for Day {dayIndex + 1}?
               </h2>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 Review the suggested order before applying
               </p>
             </div>
           </div>
           <button
             onClick={onCancel}
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+            aria-label="Close optimization preview"
           >
             <X className="w-5 h-5" />
           </button>
@@ -83,33 +84,33 @@ export default function OptimizePreviewModal({
         {/* Content */}
         <div className="p-6">
           {/* Comparison */}
-          <div className="grid grid-cols-2 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
             {/* Before */}
             <div>
-              <h3 className="text-sm font-medium text-slate-500 mb-3">BEFORE</h3>
+              <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-3">BEFORE</h3>
               <div className="space-y-2">
                 {optimization.originalOrder.map((id, idx) => (
                   <div
                     key={id}
-                    className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg"
+                    className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-700 rounded-lg"
                   >
-                    <span className="w-5 h-5 rounded-full bg-slate-300 text-white text-xs flex items-center justify-center font-medium">
+                    <span className="w-5 h-5 rounded-full bg-slate-300 dark:bg-slate-500 text-white text-xs flex items-center justify-center font-medium">
                       {idx + 1}
                     </span>
-                    <span className="text-sm text-slate-700 truncate">
+                    <span className="text-sm text-slate-700 dark:text-slate-200 truncate">
                       {getItemName(id)}
                     </span>
                   </div>
                 ))}
               </div>
-              <div className="mt-4 text-sm text-slate-500">
+              <div className="mt-4 text-sm text-slate-500 dark:text-slate-400">
                 Total: {formatDistance(optimization.originalDistanceKm)}
               </div>
             </div>
 
             {/* After */}
             <div>
-              <h3 className="text-sm font-medium text-slate-500 mb-3">AFTER</h3>
+              <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-3">AFTER</h3>
               <div className="space-y-2">
                 {optimization.optimizedOrder.map((id, idx) => {
                   const originalIdx = optimization.originalOrder.indexOf(id);
@@ -120,20 +121,20 @@ export default function OptimizePreviewModal({
                       key={id}
                       className={clsx(
                         'flex items-center gap-2 p-2 rounded-lg',
-                        moved ? 'bg-green-50 border border-green-200' : 'bg-slate-50'
+                        moved ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800' : 'bg-slate-50 dark:bg-slate-700'
                       )}
                     >
                       <span className={clsx(
                         'w-5 h-5 rounded-full text-white text-xs flex items-center justify-center font-medium',
-                        moved ? 'bg-green-500' : 'bg-slate-300'
+                        moved ? 'bg-green-500' : 'bg-slate-300 dark:bg-slate-500'
                       )}>
                         {idx + 1}
                       </span>
-                      <span className="text-sm text-slate-700 truncate">
+                      <span className="text-sm text-slate-700 dark:text-slate-200 truncate">
                         {getItemName(id)}
                       </span>
                       {moved && (
-                        <span className="ml-auto text-xs text-green-600">
+                        <span className="ml-auto text-xs text-green-600 dark:text-green-400">
                           moved
                         </span>
                       )}
@@ -141,11 +142,11 @@ export default function OptimizePreviewModal({
                   );
                 })}
               </div>
-              <div className="mt-4 text-sm text-green-600 font-medium">
+              <div className="mt-4 text-sm text-green-600 dark:text-green-400 font-medium">
                 Total: {formatDistance(optimization.optimizedDistanceKm)}
                 {worthwhile && (
                   <span className="ml-2">
-                    ✅ {optimization.distanceSavedPercent}% shorter
+                    {optimization.distanceSavedPercent}% shorter
                   </span>
                 )}
               </div>
@@ -154,20 +155,20 @@ export default function OptimizePreviewModal({
 
           {/* Summary */}
           {worthwhile ? (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
-              <div className="flex items-center gap-2 text-green-700">
+            <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-xl p-4 mb-6">
+              <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
                 <Check className="w-5 h-5" />
                 <span className="font-medium">
                   This optimization saves {formatDistance(optimization.distanceSavedKm)} ({optimization.distanceSavedPercent}%)
                 </span>
               </div>
-              <p className="text-sm text-green-600 mt-1">
+              <p className="text-sm text-green-600 dark:text-green-400 mt-1">
                 You'll save approximately {optimization.timeSavedMinutes} minutes of travel time.
               </p>
             </div>
           ) : (
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
-              <p className="text-sm text-slate-600">
+            <div className="bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl p-4 mb-6">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
                 The current order is already close to optimal. Changes would save less than 10%.
               </p>
             </div>
@@ -175,17 +176,17 @@ export default function OptimizePreviewModal({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
+        <div className="flex gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
           <button
             onClick={onCancel}
-            className="flex-1 px-4 py-2.5 text-slate-700 border border-slate-300 rounded-xl hover:bg-white transition-colors font-medium"
+            className="flex-1 px-4 py-2.5 min-h-[44px] text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-xl hover:bg-white dark:hover:bg-slate-800 transition-colors font-medium"
           >
             Cancel
           </button>
           <button
             onClick={() => onApply(optimization.optimizedOrder)}
             className={clsx(
-              'flex-1 px-4 py-2.5 rounded-xl font-medium transition-colors',
+              'flex-1 px-4 py-2.5 min-h-[44px] rounded-xl font-medium transition-colors',
               worthwhile
                 ? 'bg-primary-500 text-white hover:bg-primary-600'
                 : 'bg-slate-200 text-slate-700 hover:bg-slate-300'

@@ -39,6 +39,8 @@ model Hotel {
   @@index([city])
   @@index([lat, lng])
   @@index([name])
+  @@index([searchHub])  // Index for hub-based queries
+  @@index([indexedAt])  // Index for finding stale/old entries
 }
 
 model PriceCache {
@@ -56,8 +58,10 @@ model PriceCache {
   hasAvailability Boolean
 
   cachedAt        DateTime @default(now())
-  expiresAt       DateTime // 30 min TTL
+  expiresAt       DateTime // TTL-based expiration
 
   @@unique([placeId, checkIn, checkOut, adults])
+  @@index([placeId])  // Needed for batch lookups via `placeId: { in: [...] }`
   @@index([expiresAt])
+  @@index([placeId, expiresAt])  // Compound index for efficient cache lookups with TTL filtering
 }

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import CitySection from './CitySection';
 import DayContainer from './DayContainer';
 import { addDays, toDate } from '@/lib/date-utils';
@@ -20,7 +21,10 @@ export default function MainItinerary({
 }: MainItineraryProps) {
   // totalDays is available for pagination/display purposes
   void _totalDays;
-  const { trip, scheduledItems } = useTripStore();
+  const { trip, scheduledItems } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    scheduledItems: state.scheduledItems,
+  })));
   const { destinations, basics } = trip;
 
   const [expandedDays, setExpandedDays] = useState<Set<number>>(() => {

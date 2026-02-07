@@ -116,6 +116,7 @@ export function calculateTravelTime(
  * Format distance for display
  */
 export function formatDistance(distanceKm: number): string {
+  if (!isFinite(distanceKm) || distanceKm < 0) return '0 m';
   if (distanceKm < 1) {
     return `${Math.round(distanceKm * 1000)} m`;
   }
@@ -126,6 +127,7 @@ export function formatDistance(distanceKm: number): string {
  * Format distance in miles
  */
 export function formatDistanceMiles(distanceKm: number): string {
+  if (!isFinite(distanceKm) || distanceKm < 0) return '0 ft';
   const miles = distanceKm * 0.621371;
   if (miles < 0.1) {
     return `${Math.round(miles * 5280)} ft`;

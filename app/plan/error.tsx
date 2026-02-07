@@ -22,7 +22,7 @@ export default function PlanError({
         <p className="text-slate-600 dark:text-slate-400 mb-2">
           {error.message || 'An error occurred while loading the planner'}
         </p>
-        <p className="text-sm text-slate-500 dark:text-slate-500 mb-6">
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
           This might be due to corrupted trip data. Try resetting.
         </p>
         <div className="space-y-3">
@@ -36,19 +36,19 @@ export default function PlanError({
               }
               reset();
             }}
-            className="w-full px-6 py-3 bg-amber-500 text-white font-medium rounded-xl hover:bg-amber-600 transition-colors"
+            className="w-full px-6 py-3 min-h-[48px] bg-amber-500 text-white font-medium rounded-xl hover:bg-amber-600 transition-colors"
           >
             Reset Trip Data & Try Again
           </button>
           <button
             onClick={reset}
-            className="w-full px-6 py-3 bg-primary-500 text-white font-medium rounded-xl hover:bg-primary-600 transition-colors"
+            className="w-full px-6 py-3 min-h-[48px] bg-primary-500 text-white font-medium rounded-xl hover:bg-primary-600 transition-colors"
           >
             Try Again (Keep Data)
           </button>
           <a
             href="/"
-            className="block w-full px-6 py-3 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="block w-full px-6 py-3 min-h-[48px] flex items-center justify-center border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center"
           >
             Go Home
           </a>

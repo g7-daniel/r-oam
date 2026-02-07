@@ -49,17 +49,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Log received preferences for debugging
-    console.log('[Generate itinerary] Received preferences:', {
-      hasSelectedSplit: !!preferences.selectedSplit,
-      splitId: preferences.selectedSplit?.id,
-      splitName: preferences.selectedSplit?.name,
-      areasCount: preferences.selectedAreas?.length,
-      hasHotelPrefs: !!(preferences as any).hotelPreferences,
-      diningMode: preferences.diningMode,
-    });
 
     // Validate required fields - check for areas or stops
-    const splitAreas = (preferences.selectedSplit as any)?.areas || preferences.selectedSplit?.stops || [];
+    const splitAreas = preferences.selectedSplit?.stops || [];
     if (!preferences.selectedSplit || splitAreas.length === 0) {
       logError(context, new Error('No split areas'), { selectedSplit: preferences.selectedSplit });
       throw new ValidationError(

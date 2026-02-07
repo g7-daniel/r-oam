@@ -13,6 +13,7 @@ import {
   validateRequestBody,
   isValidCoordinate,
 } from '@/lib/api-validation';
+import { serverEnv } from '@/lib/env';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 const GOOGLE_API_TIMEOUT = 15000; // 15 second timeout
@@ -36,18 +37,10 @@ export async function POST(request: NextRequest) {
       dietaryRestrictions,
     } = validationResult.data;
 
-    console.log('[Restaurants API] Request:', {
-      cuisineTypes,
-      destination,
-      hotelCount: Object.keys(hotels || {}).length,
-      areasCount: areas?.length,
-      dietaryRestrictions,
-    });
-
     // Filter out 'none' from dietary restrictions
     const activeDietaryRestrictions = dietaryRestrictions.filter(r => r !== 'none');
 
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    const apiKey = serverEnv.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
       console.error('[Restaurants API] No Google Maps API key configured');
       return NextResponse.json({
@@ -78,11 +71,8 @@ export async function POST(request: NextRequest) {
           lng: area.centerLng,
         });
       } else {
-        console.warn(`[Restaurants API] Invalid coordinates for area ${area.name}, skipping`);
       }
     }
-
-    console.log('[Restaurants API] Hotel coordinates:', hotelCoords);
 
     // Fetch Reddit restaurant recommendations for enrichment (with caching)
     let redditRestaurants = new Map<string, { mentions: number; quote?: string; sentiment?: number }>();
@@ -94,7 +84,6 @@ export async function POST(request: NextRequest) {
       const cachedReddit = redditCache.get<typeof redditRestaurants>(redditCacheKey);
       if (cachedReddit) {
         redditRestaurants = cachedReddit;
-        console.log(`[Restaurants API] Using cached Reddit data (${redditRestaurants.size} mentions)`);
       } else {
         const redditRecs = await searchRestaurantRecommendations(destination, firstArea);
         for (const rec of redditRecs) {
@@ -106,14 +95,12 @@ export async function POST(request: NextRequest) {
         }
         // Cache the results
         redditCache.set(redditCacheKey, redditRestaurants, CACHE_TTL.REDDIT);
-        console.log(`[Restaurants API] Found ${redditRestaurants.size} Reddit restaurant mentions (cached)`);
       }
     } catch (e) {
       console.error('[Restaurants API] Reddit search failed:', e);
     }
 
     if (hotelCoords.length === 0) {
-      console.warn('[Restaurants API] No hotel/area coordinates available');
       return NextResponse.json({
         restaurantsByCuisine: {},
         totalCount: 0,
@@ -138,8 +125,6 @@ export async function POST(request: NextRequest) {
       ? `${dietaryPrefixes[activeDietaryRestrictions[0]]} `
       : '';
 
-    console.log('[Restaurants API] Dietary restrictions:', activeDietaryRestrictions, 'prefix:', dietaryPrefix || '(none)');
-
     // Cuisine type to Google Places search terms
     const cuisineSearchTerms: Record<string, string[]> = {
       italian: [`${dietaryPrefix}italian restaurant`, `${dietaryPrefix}pasta restaurant`, 'pizza restaurant'],
@@ -163,7 +148,6 @@ export async function POST(request: NextRequest) {
     // =================================================================
     // PARALLELIZED: Process all cuisine types concurrently using Promise.all
     // =================================================================
-    console.log(`[Restaurants API] Processing ${cuisineTypes.length} cuisine types in parallel`);
 
     // For global deduplication across cuisines, we track seen place IDs per cuisine
     // and dedupe after parallel execution
@@ -301,7 +285,6 @@ export async function POST(request: NextRequest) {
         return ((a as any).distanceFromHotel || 999) - ((b as any).distanceFromHotel || 999);
       });
 
-      console.log(`[Restaurants API] Found ${allRestaurants.length} ${cuisine} restaurants`);
       return { cuisine, restaurants: allRestaurants.slice(0, 8) }; // Top 8 per cuisine
     }));
 
@@ -315,7 +298,6 @@ export async function POST(request: NextRequest) {
         return true;
       });
       results[cuisine] = uniqueRestaurants;
-      console.log(`[Restaurants API] ${cuisine}: returning ${uniqueRestaurants.length} unique restaurants`);
     }
 
     const response = NextResponse.json({

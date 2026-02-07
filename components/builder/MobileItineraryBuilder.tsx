@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import LeftSidebar from './LeftSidebar';
 import MainItinerary from './MainItinerary';
 import RightMapPanel from './RightMapPanel';
@@ -40,10 +41,47 @@ export default function MobileItineraryBuilder({
     unscheduleItem,
     reorderScheduledItem,
     moveItemBetweenDays,
-  } = useTripStore();
+  } = useTripStore(useShallow((state) => ({
+    scheduleItem: state.scheduleItem,
+    unscheduleItem: state.unscheduleItem,
+    reorderScheduledItem: state.reorderScheduledItem,
+    moveItemBetweenDays: state.moveItemBetweenDays,
+  })));
 
   const [activeTab, setActiveTab] = useState<MobileTab>('itinerary');
   const [showAISheet, setShowAISheet] = useState(false);
+  const aiSheetRef = useRef<HTMLDivElement>(null);
+
+  // Escape key to close and focus trap for the AI sheet dialog
+  useEffect(() => {
+    if (!showAISheet) return;
+    const sheet = aiSheetRef.current;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowAISheet(false);
+        return;
+      }
+      if (e.key === 'Tab' && sheet) {
+        const focusable = sheet.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showAISheet]);
 
   // Handle drag end
   const handleDragEnd = (result: DropResult) => {
@@ -89,7 +127,7 @@ export default function MobileItineraryBuilder({
 
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
-      <div className="fixed inset-0 flex flex-col bg-slate-50 dark:bg-slate-900 z-30">
+      <div className="fixed inset-0 flex flex-col bg-slate-50 dark:bg-slate-900 z-fixed">
         {/* Compact header for mobile */}
         <TripHeader />
 
@@ -125,7 +163,7 @@ export default function MobileItineraryBuilder({
         </div>
 
         {/* Bottom tab bar - compact design */}
-        <div className="flex-shrink-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 safe-area-bottom">
+        <div className="flex-shrink-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 safe-area-inset-bottom">
           <div className="flex min-h-[56px]" role="tablist" aria-label="Main navigation">
             <button
               onClick={() => setActiveTab('browse')}
@@ -195,10 +233,12 @@ export default function MobileItineraryBuilder({
             <div
               className="fixed inset-0 bg-black/50 z-40"
               onClick={() => setShowAISheet(false)}
+              aria-hidden="true"
             />
 
             {/* Sheet */}
             <div
+              ref={aiSheetRef}
               className="fixed bottom-0 left-0 right-0 h-[70vh] bg-white dark:bg-slate-800 rounded-t-2xl z-50 flex flex-col shadow-xl"
               role="dialog"
               aria-modal="true"
@@ -207,8 +247,7 @@ export default function MobileItineraryBuilder({
               {/* Handle */}
               <div
                 className="flex-shrink-0 py-3 flex justify-center cursor-grab"
-                role="presentation"
-                aria-label="Drag handle to resize panel"
+                aria-hidden="true"
               >
                 <div className="w-10 h-1 bg-slate-300 dark:bg-slate-600 rounded-full" aria-hidden="true" />
               </div>

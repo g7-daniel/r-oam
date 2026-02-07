@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import clsx from 'clsx';
 import {
@@ -40,6 +40,38 @@ export default function DateRangePicker({
 
   const [isOpen, setIsOpen] = useState(false);
   const [selectingEnd, setSelectingEnd] = useState(false);
+  const calendarRef = useRef<HTMLDivElement>(null);
+
+  // Escape key to close and focus trap for the calendar dialog
+  useEffect(() => {
+    if (!isOpen) return;
+    const calendar = calendarRef.current;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+        return;
+      }
+      if (e.key === 'Tab' && calendar) {
+        const focusable = calendar.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
 
   // Generate calendar days for the current month
   const calendarDays = useMemo(() => {
@@ -208,6 +240,7 @@ export default function DateRangePicker({
 
           {/* Calendar - centered modal */}
           <div
+            ref={calendarRef}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-4 z-50 max-h-[80vh] overflow-y-auto"
             role="dialog"
             aria-modal="true"

@@ -13,7 +13,7 @@
  * - Abort support for cleanup
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { requestDedup, dedupedFetch, dedupedPost, DedupOptions } from '@/lib/request-dedup';
 
 // ============================================================================
@@ -76,6 +76,12 @@ export function useDedupedFetch<T>(
     isSuccess: false,
   });
 
+  // Stabilize options reference to prevent unnecessary re-renders
+  const stableOptions = useMemo(
+    () => options,
+    [options?.cacheTTL, options?.timeout, options?.cacheErrors, options?.errorCacheTTL]
+  );
+
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -96,7 +102,7 @@ export function useDedupedFetch<T>(
     }));
 
     try {
-      const data = await dedupedFetch<T>(url, undefined, options);
+      const data = await dedupedFetch<T>(url, undefined, stableOptions);
 
       if (mountedRef.current) {
         setState({
@@ -121,7 +127,7 @@ export function useDedupedFetch<T>(
       }
       return null;
     }
-  }, [url, options]);
+  }, [url, stableOptions]);
 
   const reset = useCallback(() => {
     setState({
@@ -173,6 +179,12 @@ export function useDedupedPost<T, P = Record<string, unknown>>(
     isSuccess: false,
   });
 
+  // Stabilize options reference to prevent unnecessary re-renders
+  const stableOptions = useMemo(
+    () => options,
+    [options?.cacheTTL, options?.timeout, options?.cacheErrors, options?.errorCacheTTL]
+  );
+
   const mountedRef = useRef(true);
   const lastParamsRef = useRef<P | null>(null);
 
@@ -196,7 +208,7 @@ export function useDedupedPost<T, P = Record<string, unknown>>(
     }));
 
     try {
-      const data = await dedupedPost<T, P>(url, params, options);
+      const data = await dedupedPost<T, P>(url, params, stableOptions);
 
       if (mountedRef.current) {
         setState({
@@ -221,7 +233,7 @@ export function useDedupedPost<T, P = Record<string, unknown>>(
       }
       return null;
     }
-  }, [url, options]);
+  }, [url, stableOptions]);
 
   const reset = useCallback(() => {
     setState({
@@ -289,6 +301,17 @@ export function useDedupedMutation<T, P>(
   });
 
   const mountedRef = useRef(true);
+  // Use refs to avoid recreating trigger when callers pass inline functions
+  const mutationFnRef = useRef(mutationFn);
+  mutationFnRef.current = mutationFn;
+  const keyGeneratorRef = useRef(keyGenerator);
+  keyGeneratorRef.current = keyGenerator;
+
+  // Stabilize options reference
+  const stableOptions = useMemo(
+    () => options,
+    [options?.cacheTTL, options?.timeout, options?.cacheErrors, options?.errorCacheTTL]
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -298,7 +321,7 @@ export function useDedupedMutation<T, P>(
   }, []);
 
   const trigger = useCallback(async (params: P) => {
-    const key = keyGenerator(params);
+    const key = keyGeneratorRef.current(params);
 
     setState(prev => ({
       ...prev,
@@ -308,7 +331,7 @@ export function useDedupedMutation<T, P>(
     }));
 
     try {
-      const data = await requestDedup.dedupe(key, () => mutationFn(params), options);
+      const data = await requestDedup.dedupe(key, () => mutationFnRef.current(params), stableOptions);
 
       if (mountedRef.current) {
         setState({
@@ -333,7 +356,7 @@ export function useDedupedMutation<T, P>(
       }
       return null;
     }
-  }, [mutationFn, keyGenerator, options]);
+  }, [stableOptions]);
 
   const reset = useCallback(() => {
     setState({

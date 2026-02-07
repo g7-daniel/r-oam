@@ -11,6 +11,7 @@
 
 import useSWR, { SWRConfiguration, mutate } from 'swr';
 import useSWRMutation from 'swr/mutation';
+import type { QuickPlanItinerary, QualityCheckResult, TripPreferences, AreaCandidate } from '@/types/quick-plan';
 
 // Default SWR configuration with caching optimizations
 const defaultConfig: SWRConfiguration = {
@@ -34,15 +35,20 @@ const defaultConfig: SWRConfiguration = {
 // Fetcher type is available for custom fetcher implementations
 // type Fetcher<T> = (url: string) => Promise<T>;
 
+/** Error with HTTP status and response info for SWR error handling */
+interface FetcherError extends Error {
+  info: Record<string, unknown>;
+  status: number;
+}
+
 // Default JSON fetcher
 async function defaultFetcher<T>(url: string): Promise<T> {
   const res = await fetch(url);
 
   if (!res.ok) {
-    const error = new Error('An error occurred while fetching the data.');
-    // Attach extra info to the error object
-    (error as any).info = await res.json().catch(() => ({}));
-    (error as any).status = res.status;
+    const error = new Error('An error occurred while fetching the data.') as FetcherError;
+    error.info = await res.json().catch(() => ({}));
+    error.status = res.status;
     throw error;
   }
 
@@ -60,9 +66,9 @@ async function postFetcher<T, A>(url: string, { arg }: { arg: A }): Promise<T> {
   });
 
   if (!res.ok) {
-    const error = new Error('An error occurred while posting data.');
-    (error as any).info = await res.json().catch(() => ({}));
-    (error as any).status = res.status;
+    const error = new Error('An error occurred while posting data.') as FetcherError;
+    error.info = await res.json().catch(() => ({}));
+    error.status = res.status;
     throw error;
   }
 
@@ -187,9 +193,9 @@ export function useRestaurants(
   hotels?: Record<string, { lat: number; lng: number }>,
   areas?: Array<{ id: string; name: string; centerLat?: number; centerLng?: number }>
 ) {
-  // Create a stable key from the params
+  // Create a stable key from the params (use slice to avoid mutating original array)
   const key = cuisineTypes && cuisineTypes.length > 0 && destination
-    ? `restaurants-${destination}-${cuisineTypes.sort().join(',')}`
+    ? `restaurants-${destination}-${cuisineTypes.slice().sort().join(',')}`
     : null;
 
   interface RestaurantsResponse {
@@ -235,7 +241,7 @@ export function useExperiences(
   areas?: Array<{ id: string; name: string; centerLat?: number; centerLng?: number }>
 ) {
   const key = activityTypes && activityTypes.length > 0 && destination
-    ? `experiences-${destination}-${activityTypes.sort().join(',')}`
+    ? `experiences-${destination}-${activityTypes.slice().sort().join(',')}`
     : null;
 
   interface ExperiencesResponse {
@@ -354,8 +360,8 @@ export function useGenerateItinerary() {
   return useSWRMutation(
     '/api/quick-plan/generate-itinerary',
     postFetcher<
-      { itinerary: any; qualityCheck: any; success: boolean },
-      { preferences: any; areas: any[]; hotels: Record<string, any>; restaurants: Record<string, any[]> }
+      { itinerary: QuickPlanItinerary; qualityCheck: QualityCheckResult; success: boolean },
+      { preferences: Partial<TripPreferences>; areas: AreaCandidate[]; hotels: Record<string, unknown>; restaurants: Record<string, unknown[]> }
     >
   );
 }

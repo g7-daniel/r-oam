@@ -3,6 +3,7 @@
 import { Users, Check, Bed } from 'lucide-react';
 import type { RoomType } from '@/types';
 import clsx from 'clsx';
+import { handleImageError } from '@/lib/utils';
 
 interface RoomTypeCardProps {
   room: RoomType;
@@ -20,25 +21,35 @@ export default function RoomTypeCard({
   return (
     <div
       onClick={room.available ? onSelect : undefined}
+      role={room.available ? 'button' : undefined}
+      tabIndex={room.available ? 0 : undefined}
+      onKeyDown={room.available ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      } : undefined}
+      aria-label={`${room.name}, ${room.bedType}, $${room.pricePerNight.toLocaleString()} per night, $${room.totalPrice.toLocaleString()} total${!room.available ? ', sold out' : ''}${isSelected ? ', selected' : ''}`}
+      aria-disabled={!room.available}
       className={clsx(
         'relative p-3 sm:p-4 rounded-xl border-2 transition-all min-h-[44px]',
         room.available
           ? isSelected
-            ? 'border-sky-500 bg-sky-50 dark:bg-sky-900/20 cursor-pointer'
+            ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20 cursor-pointer'
             : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 cursor-pointer'
           : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 opacity-60 cursor-not-allowed'
       )}
     >
       {/* Selection indicator */}
       {isSelected && (
-        <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-sky-500 flex items-center justify-center">
+        <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center">
           <Check className="w-4 h-4 text-white" />
         </div>
       )}
 
       {/* Unavailable badge */}
       {!room.available && (
-        <div className="absolute top-2 right-2 px-2 py-0.5 bg-red-100 text-red-600 text-xs rounded-full">
+        <div className="absolute top-2 right-2 px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs rounded-full">
           Sold Out
         </div>
       )}
@@ -52,7 +63,9 @@ export default function RoomTypeCard({
           <img
             src={room.imageUrl}
             alt={room.name}
-            className="w-14 h-10 sm:w-16 sm:h-12 rounded-lg object-cover flex-shrink-0"
+            className="w-14 h-10 sm:w-16 sm:h-12 rounded-lg object-cover flex-shrink-0 bg-slate-100 dark:bg-slate-700"
+            loading="lazy"
+            onError={(e) => handleImageError(e, 'hotel')}
           />
         )}
       </div>
@@ -89,16 +102,16 @@ export default function RoomTypeCard({
       {/* Pricing */}
       <div className="flex items-end justify-between pt-2 sm:pt-3 border-t border-slate-100 dark:border-slate-700">
         <div>
-          <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+          <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 tabular-nums">
             ${room.pricePerNight.toLocaleString()}/night
           </span>
         </div>
         <div className="text-right">
-          <div className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-white">
+          <div className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-white tabular-nums">
             ${room.totalPrice.toLocaleString()}
           </div>
-          <span className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400">
-            Total for {nights} nights
+          <span className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+            Total for {nights} night{nights !== 1 ? 's' : ''}
           </span>
         </div>
       </div>

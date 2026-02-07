@@ -19,6 +19,7 @@ export function cn(...inputs: ClassValue[]): string {
  * Format a number as currency
  */
 export function formatCurrency(amount: number, currency: string = 'USD'): string {
+  if (!isFinite(amount)) return '$0';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency,
@@ -107,6 +108,8 @@ export type { DateInput, DateFormatPreset } from './date-utils';
  * Truncate text to a maximum length with ellipsis
  */
 export function truncate(text: string, maxLength: number): string {
+  if (!text) return '';
+  if (maxLength < 4) return text.slice(0, maxLength);
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength - 3) + '...';
 }
@@ -120,17 +123,30 @@ export function delay(ms: number): Promise<void> {
 
 /**
  * Debounce a function
+ * Returns a debounced function with a cancel method for cleanup
  */
 export function debounce<T extends (...args: unknown[]) => unknown>(
   func: T,
   wait: number
-): (...args: Parameters<T>) => void {
+): ((...args: Parameters<T>) => void) & { cancel: () => void } {
   let timeoutId: NodeJS.Timeout | null = null;
 
-  return (...args: Parameters<T>) => {
+  const debounced = (...args: Parameters<T>) => {
     if (timeoutId) clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => func(...args), wait);
+    timeoutId = setTimeout(() => {
+      timeoutId = null;
+      func(...args);
+    }, wait);
   };
+
+  debounced.cancel = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  };
+
+  return debounced;
 }
 
 /**
@@ -147,6 +163,7 @@ export { calculateHaversineDistance as calculateDistance } from './utils/geo';
  * Format distance for display
  */
 export function formatDistance(km: number): string {
+  if (!isFinite(km) || km < 0) return '0m';
   if (km < 1) return `${Math.round(km * 1000)}m`;
   if (km < 10) return `${km.toFixed(1)}km`;
   return `${Math.round(km)}km`;

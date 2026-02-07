@@ -20,6 +20,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Validate placeId format - Google Place IDs are alphanumeric with some special chars, typically under 300 chars
+  if (placeId.length > 300 || !/^[A-Za-z0-9_\-]+$/.test(placeId)) {
+    return NextResponse.json(
+      { error: 'Invalid place_id format' },
+      { status: 400 }
+    );
+  }
+
   // Check cache first (BoundedMap handles TTL internally)
   const cached = photoCache.get(placeId);
   if (cached) {
@@ -31,8 +39,8 @@ export async function GET(request: NextRequest) {
 
   if (!isConfigured.googleMaps()) {
     return NextResponse.json(
-      { error: 'Google Maps API not configured. Set GOOGLE_MAPS_API_KEY in .env.local' },
-      { status: 500 }
+      { error: 'Photo service is temporarily unavailable' },
+      { status: 503 }
     );
   }
   const apiKey = serverEnv.GOOGLE_MAPS_API_KEY;
@@ -66,7 +74,8 @@ export async function GET(request: NextRequest) {
     }
 
     const photoReference = data.result.photos[0].photo_reference;
-    const photoUrl = `${GOOGLE_MAPS_BASE_URL}/place/photo?maxwidth=400&photo_reference=${photoReference}&key=${apiKey}`;
+    // Use the photo-proxy endpoint to avoid exposing the API key to clients
+    const photoUrl = `/api/photo-proxy?ref=${encodeURIComponent(photoReference)}&maxwidth=400`;
 
     // Cache the result (BoundedMap handles timestamps internally)
     photoCache.set(placeId, photoUrl);

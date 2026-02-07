@@ -85,11 +85,13 @@ export default function DragDropScheduler({
               <button
                 onClick={() => setFilterLeg(null)}
                 className={clsx(
-                  'px-3 py-1.5 text-sm rounded-lg transition-colors',
+                  'px-3 py-2 text-sm rounded-lg transition-colors min-h-[44px]',
                   filterLeg === null
-                    ? 'bg-sky-500 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    ? 'bg-primary-500 text-white shadow-sm'
+                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                 )}
+                aria-label="Show all destinations"
+                aria-pressed={filterLeg === null}
               >
                 All
               </button>
@@ -98,11 +100,13 @@ export default function DragDropScheduler({
                   key={leg.id}
                   onClick={() => setFilterLeg(leg.id)}
                   className={clsx(
-                    'px-3 py-1.5 text-sm rounded-lg transition-colors',
+                    'px-3 py-2 text-sm rounded-lg transition-colors min-h-[44px]',
                     filterLeg === leg.id
-                      ? 'bg-sky-500 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      ? 'bg-primary-500 text-white shadow-sm'
+                      : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                   )}
+                  aria-label={`Filter to ${leg.destination.name}`}
+                  aria-pressed={filterLeg === leg.id}
                 >
                   {leg.destination.name}
                 </button>
@@ -115,17 +119,21 @@ export default function DragDropScheduler({
         <div className="flex items-center gap-2">
           <button
             onClick={expandAll}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
+            className="flex items-center gap-1 px-3 py-2 min-h-[44px] text-sm bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+            aria-label="Expand all days"
           >
             <Maximize2 className="w-4 h-4" />
-            Expand All
+            <span className="hidden sm:inline">Expand All</span>
+            <span className="sm:hidden">Expand</span>
           </button>
           <button
             onClick={collapseAll}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
+            className="flex items-center gap-1 px-3 py-2 min-h-[44px] text-sm bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+            aria-label="Collapse all days"
           >
             <Minimize2 className="w-4 h-4" />
-            Collapse All
+            <span className="hidden sm:inline">Collapse All</span>
+            <span className="sm:hidden">Collapse</span>
           </button>
         </div>
       </div>
@@ -133,12 +141,12 @@ export default function DragDropScheduler({
       {/* Calendar View */}
       <div className="space-y-4">
         {filteredDays.length === 0 ? (
-          <div className="text-center py-12 bg-slate-50 rounded-2xl">
-            <Calendar className="w-16 h-16 mx-auto mb-4 text-slate-300" />
-            <h3 className="text-lg font-medium text-slate-600 mb-2">
+          <div className="text-center py-12 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+            <Calendar className="w-16 h-16 mx-auto mb-4 text-slate-300 dark:text-slate-600" />
+            <h3 className="text-lg font-medium text-slate-600 dark:text-slate-300 mb-2">
               No Itinerary Yet
             </h3>
-            <p className="text-slate-500">
+            <p className="text-slate-500 dark:text-slate-400">
               Add experiences to your trip to build your itinerary
             </p>
           </div>

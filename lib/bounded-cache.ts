@@ -39,8 +39,11 @@ export class BoundedMap<K, V> {
   }
 
   set(key: K, value: V): void {
-    // Evict if at capacity
-    if (this.cache.size >= this.maxSize) {
+    // Check if key already exists (update doesn't need eviction)
+    const exists = this.cache.has(key);
+
+    // Evict if at capacity and adding a NEW key
+    if (!exists && this.cache.size >= this.maxSize) {
       this.evictOldest();
     }
 
@@ -129,8 +132,11 @@ export class BoundedSet<T> {
   }
 
   add(value: T): void {
-    // Evict if at capacity
-    if (this.set.size >= this.maxSize && !this.set.has(value)) {
+    // Check if value already exists (update doesn't need eviction)
+    const exists = this.set.has(value);
+
+    // Evict if at capacity and adding a NEW value
+    if (!exists && this.set.size >= this.maxSize) {
       this.evictOldest();
     }
 

@@ -268,6 +268,22 @@ const EXPERIENCE_CONVERSATION: Record<string, ConversationNode> = {
       default: 'show_suggestions',
     },
   },
+  nightlife_follow: {
+    id: 'nightlife_follow',
+    assistantMessage: 'Ready for a great time! What nightlife scene are you looking for?',
+    quickReplies: ['Beach bars', 'Clubs & dancing', 'Rooftop cocktails', 'Live music'],
+    nextNodes: {
+      default: 'show_suggestions',
+    },
+  },
+  relaxation_follow: {
+    id: 'relaxation_follow',
+    assistantMessage: 'Time to unwind! What kind of relaxation are you after?',
+    quickReplies: ['Spa treatments', 'Beach lounging', 'Yoga retreats', 'Hot springs'],
+    nextNodes: {
+      default: 'show_suggestions',
+    },
+  },
   show_suggestions: {
     id: 'show_suggestions',
     assistantMessage: 'Here are some experiences that Redditors rave about in {destination}:',

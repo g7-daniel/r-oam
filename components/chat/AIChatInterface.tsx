@@ -299,9 +299,9 @@ export default function AIChatInterface({
   };
 
   return (
-    <div className="flex flex-col h-[600px] bg-slate-50 rounded-xl overflow-hidden">
+    <div className="flex flex-col h-[600px] bg-slate-50 dark:bg-slate-900 rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-sky-500 to-teal-500 px-4 py-3 flex items-center gap-3">
+      <div className="bg-gradient-to-r from-orange-500 to-accent-500 px-4 py-3 flex items-center gap-3">
         <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
           <Sparkles className="w-5 h-5 text-white" />
         </div>
@@ -343,12 +343,12 @@ export default function AIChatInterface({
         {/* Streaming content */}
         {streamingContent && (
           <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-500 to-teal-500 flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-accent-500 flex items-center justify-center flex-shrink-0">
               <Bot className="w-4 h-4 text-white" />
             </div>
             <div className="flex-1 bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-              <p className="text-slate-700 whitespace-pre-wrap">{streamingContent}</p>
-              <span className="inline-block w-2 h-4 bg-sky-500 animate-pulse ml-1" />
+              <p className="text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{streamingContent}</p>
+              <span className="inline-block w-2 h-4 bg-orange-500 animate-pulse ml-1" />
             </div>
           </div>
         )}
@@ -385,7 +385,7 @@ export default function AIChatInterface({
               className={clsx(
                 'w-full py-3 rounded-xl font-medium transition-all',
                 selectedSuggestions.length > 0
-                  ? 'bg-gradient-to-r from-sky-500 to-teal-500 text-white hover:shadow-lg'
+                  ? 'bg-gradient-to-r from-orange-500 to-accent-500 text-white hover:shadow-lg'
                   : 'bg-slate-200 text-slate-400 cursor-not-allowed'
               )}
             >
@@ -403,7 +403,7 @@ export default function AIChatInterface({
 
       {/* Input */}
       {!isComplete && (
-        <div className="p-4 bg-white border-t border-slate-200">
+        <div className="p-4 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700">
           <div className="flex gap-2">
             <input
               ref={inputRef}
@@ -412,7 +412,7 @@ export default function AIChatInterface({
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Tell me what you'd love to experience..."
-              className="flex-1 px-4 py-3 bg-slate-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="flex-1 px-4 py-3 min-h-[44px] text-base bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-slate-400"
               disabled={isLoading}
             />
             <button
@@ -421,7 +421,7 @@ export default function AIChatInterface({
               className={clsx(
                 'px-4 py-3 rounded-xl transition-all',
                 input.trim() && !isLoading
-                  ? 'bg-gradient-to-r from-sky-500 to-teal-500 text-white hover:shadow-lg'
+                  ? 'bg-gradient-to-r from-orange-500 to-accent-500 text-white hover:shadow-lg'
                   : 'bg-slate-200 text-slate-400'
               )}
             >

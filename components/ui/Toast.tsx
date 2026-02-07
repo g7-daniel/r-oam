@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, createContext, useContext, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { CheckCircle, XCircle, AlertCircle, Info, X } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -101,7 +101,7 @@ function ToastContainer({
 }) {
   return (
     <div
-      className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-[90vw] sm:max-w-sm"
+      className="fixed bottom-4 right-4 z-toast flex flex-col gap-2 max-w-[90vw] sm:max-w-sm safe-area-inset-bottom"
       role="status"
       aria-live="polite"
       aria-label="Notifications"
@@ -122,6 +122,8 @@ function ToastItem({
   toast: Toast;
   onRemove: (id: string) => void;
 }) {
+  const prefersReducedMotion = useReducedMotion();
+
   const icons = {
     success: CheckCircle,
     error: XCircle,
@@ -130,31 +132,32 @@ function ToastItem({
   };
 
   const colors = {
-    success: 'bg-green-50 border-green-200 text-green-800',
-    error: 'bg-red-50 border-red-200 text-red-800',
-    warning: 'bg-amber-50 border-amber-200 text-amber-800',
-    info: 'bg-blue-50 border-blue-200 text-blue-800',
+    success: 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200',
+    error: 'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200',
+    warning: 'bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200',
+    info: 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200',
   };
 
   const iconColors = {
-    success: 'text-green-500',
-    error: 'text-red-500',
-    warning: 'text-amber-500',
-    info: 'text-blue-500',
+    success: 'text-green-500 dark:text-green-400',
+    error: 'text-red-500 dark:text-red-400',
+    warning: 'text-amber-500 dark:text-amber-400',
+    info: 'text-blue-500 dark:text-blue-400',
   };
 
   const Icon = icons[toast.type];
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 50, scale: 0.9 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, x: 100, scale: 0.9 }}
+      initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 50, scale: 0.9 }}
+      animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+      exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 20, scale: 0.95 }}
+      transition={{ duration: prefersReducedMotion ? 0.15 : 0.3, ease: 'easeOut' }}
       className={`${colors[toast.type]} border rounded-xl p-4 shadow-lg flex items-start gap-3`}
       role={toast.type === 'error' ? 'alert' : 'status'}
       aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
     >
-      <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${iconColors[toast.type]}`} />
+      <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${iconColors[toast.type]}`} aria-hidden="true" />
       <div className="flex-1 min-w-0">
         <p className="font-medium text-sm">{toast.title}</p>
         {toast.message && (
@@ -163,10 +166,10 @@ function ToastItem({
       </div>
       <button
         onClick={() => onRemove(toast.id)}
-        className="p-1 hover:bg-black/5 rounded-full transition-colors flex-shrink-0"
-        aria-label="Dismiss"
+        className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-current"
+        aria-label={`Dismiss ${toast.title} notification`}
       >
-        <X className="w-4 h-4" />
+        <X className="w-4 h-4" aria-hidden="true" />
       </button>
     </motion.div>
   );

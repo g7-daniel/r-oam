@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
     // Call LLM service
     let content: string;
     try {
-      content = await chatCompletion(messages as any, temperature);
+      content = await chatCompletion(messages, temperature);
     } catch (llmError) {
       // Handle specific LLM errors
       if (isRateLimitError(llmError)) {

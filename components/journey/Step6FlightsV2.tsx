@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import Card from '@/components/ui/Card';
 import {
   Plane,
@@ -14,6 +15,7 @@ import {
   ToggleRight,
   Filter,
   SlidersHorizontal,
+  ArrowUpDown,
 } from 'lucide-react';
 import clsx from 'clsx';
 import type { Flight, FlightLeg } from '@/lib/schemas/trip';
@@ -227,7 +229,8 @@ function FlightLegCard({
             e.stopPropagation();
             isSkipped ? onUnskip() : onSkip();
           }}
-          className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+          aria-pressed={isSkipped}
+          className="flex items-center gap-2 min-h-[40px] py-1 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
         >
           {isSkipped ? (
             <ToggleRight className="w-5 h-5 text-amber-500" />
@@ -338,14 +341,15 @@ function RoundTripCard({
       </div>
 
       {/* Skip toggles */}
-      <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600 space-y-2">
+      <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600 space-y-1">
         <button
           onClick={() =>
             outboundLeg.status === 'skipped_booked'
               ? onUnskip(outboundLeg.legId)
               : onSkip(outboundLeg.legId)
           }
-          className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+          aria-pressed={outboundLeg.status === 'skipped_booked'}
+          className="flex items-center gap-2 min-h-[36px] py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
         >
           {outboundLeg.status === 'skipped_booked' ? (
             <ToggleRight className="w-4 h-4 text-amber-500" />
@@ -360,7 +364,8 @@ function RoundTripCard({
               ? onUnskip(returnLeg.legId)
               : onSkip(returnLeg.legId)
           }
-          className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+          aria-pressed={returnLeg.status === 'skipped_booked'}
+          className="flex items-center gap-2 min-h-[36px] py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
         >
           {returnLeg.status === 'skipped_booked' ? (
             <ToggleRight className="w-4 h-4 text-amber-500" />
@@ -383,7 +388,15 @@ export default function Step6FlightsV2() {
     unskipFlightLeg,
     canProceedFromFlights,
     buildFlightLegs,
-  } = useTripStore();
+  } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    setFlightResults: state.setFlightResults,
+    selectFlight: state.selectFlight,
+    skipFlightLeg: state.skipFlightLeg,
+    unskipFlightLeg: state.unskipFlightLeg,
+    canProceedFromFlights: state.canProceedFromFlights,
+    buildFlightLegs: state.buildFlightLegs,
+  })));
 
   const { flights, destinations, basics } = trip;
   const [activeLegId, setActiveLegId] = useState<string | null>(null);
@@ -402,6 +415,9 @@ export default function Step6FlightsV2() {
 
   // Cabin class is a SEARCH parameter (not a filter) - changes trigger new API search
   const [selectedCabinClass, setSelectedCabinClass] = useState<string>('ECONOMY'); // ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST
+
+  // Sort state
+  const [sortBy, setSortBy] = useState<'price' | 'duration' | 'departure'>('price');
 
   // Filter state (applied after results are fetched)
   const [stopsFilter, setStopsFilter] = useState<number[]>([]); // empty = any, [0] = non-stop, [1] = 1 stop
@@ -472,7 +488,6 @@ export default function Step6FlightsV2() {
       }
 
       // Fallback - generate mock round trip data
-      console.log('Using mock round trip data');
       const mockRoundTrips = AIRLINE_DATA.slice(0, 4).map((airline, idx) => ({
         id: `rt_${idx}`,
         isRoundTrip: true,
@@ -541,7 +556,6 @@ export default function Step6FlightsV2() {
       }
 
       // Fallback to mock data if API fails or returns empty
-      console.log('Using mock flight data (API unavailable or no results)');
       const mockFlights = generateMockFlights(
         activeLeg.from.iata,
         activeLeg.to.iata,
@@ -653,6 +667,25 @@ export default function Step6FlightsV2() {
     setMaxDurationFilter(1440);
   };
 
+  // Format price with proper locale formatting
+  const formatPrice = (price: number) => {
+    return price.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  };
+
+  // Sort filtered flights
+  const sortedFlights = [...filteredFlights].sort((a, b) => {
+    switch (sortBy) {
+      case 'price':
+        return a.priceUsd - b.priceUsd;
+      case 'duration':
+        return a.durationMinutes - b.durationMinutes;
+      case 'departure':
+        return a.departureTime.localeCompare(b.departureTime);
+      default:
+        return 0;
+    }
+  });
+
   const hasActiveFilters = stopsFilter.length > 0 || departureTimeFilter.length > 0 || airlinesFilter.length > 0 || maxPriceFilter < 5000 || maxDurationFilter < 1440;
 
   if (destinations.length === 0) {
@@ -744,25 +777,36 @@ export default function Step6FlightsV2() {
         <div className="lg:col-span-2">
           {activeLeg && (
             <>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-slate-900 dark:text-white">
-                  {activeLeg.from.city} to {activeLeg.to.city}
-                </h3>
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-slate-500 dark:text-slate-400">{activeLeg.date}</span>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">
+                    {activeLeg.from.city} to {activeLeg.to.city}
+                  </h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{activeLeg.date}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Flight count badge */}
+                  {activeLeg.flights.length > 0 && (
+                    <span className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm font-medium rounded-lg">
+                      {filteredFlights.length} {filteredFlights.length !== activeLeg.flights.length && `of ${activeLeg.flights.length}`} flights
+                    </span>
+                  )}
                   <button
                     onClick={() => setShowFilters(!showFilters)}
+                    aria-label={showFilters ? "Hide filters" : "Show filters"}
                     className={clsx(
-                      'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+                      'flex items-center gap-2 px-3 py-1.5 min-h-[40px] rounded-lg text-sm font-medium transition-all',
                       showFilters || hasActiveFilters
                         ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300'
                         : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                     )}
                   >
                     <SlidersHorizontal className="w-4 h-4" />
-                    Filters
+                    <span className="hidden sm:inline">Filters</span>
                     {hasActiveFilters && (
-                      <span className="w-2 h-2 rounded-full bg-primary-500" />
+                      <span className="flex items-center justify-center w-5 h-5 rounded-full bg-primary-500 text-white text-xs font-bold">
+                        {[stopsFilter.length > 0, departureTimeFilter.length > 0, airlinesFilter.length > 0, maxPriceFilter < 5000, maxDurationFilter < 1440].filter(Boolean).length}
+                      </span>
                     )}
                   </button>
                 </div>
@@ -775,15 +819,16 @@ export default function Step6FlightsV2() {
                     {/* Stops */}
                     <div>
                       <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Stops</label>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by number of stops">
                         {[{ label: 'Non-stop', value: 0 }, { label: '1 stop', value: 1 }, { label: '2+ stops', value: 2 }].map((option) => (
                           <button
                             key={option.value}
                             onClick={() => setStopsFilter((prev) =>
                               prev.includes(option.value) ? prev.filter((s) => s !== option.value) : [...prev, option.value]
                             )}
+                            aria-pressed={stopsFilter.includes(option.value)}
                             className={clsx(
-                              'px-3 py-1.5 rounded-full text-sm transition-all',
+                              'px-4 py-2 min-h-[40px] rounded-full text-sm transition-all',
                               stopsFilter.includes(option.value)
                                 ? 'bg-primary-500 text-white'
                                 : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
@@ -798,26 +843,28 @@ export default function Step6FlightsV2() {
                     {/* Departure time */}
                     <div>
                       <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Departure Time</label>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by departure time">
                         {[
-                          { label: 'Morning (5am-12pm)', value: 'morning' },
-                          { label: 'Afternoon (12pm-5pm)', value: 'afternoon' },
-                          { label: 'Evening (5pm-9pm)', value: 'evening' },
-                          { label: 'Red-eye (9pm-5am)', value: 'red-eye' },
+                          { label: 'Morning', shortLabel: '5am-12pm', value: 'morning' },
+                          { label: 'Afternoon', shortLabel: '12pm-5pm', value: 'afternoon' },
+                          { label: 'Evening', shortLabel: '5pm-9pm', value: 'evening' },
+                          { label: 'Red-eye', shortLabel: '9pm-5am', value: 'red-eye' },
                         ].map((option) => (
                           <button
                             key={option.value}
                             onClick={() => setDepartureTimeFilter((prev) =>
                               prev.includes(option.value) ? prev.filter((t) => t !== option.value) : [...prev, option.value]
                             )}
+                            aria-pressed={departureTimeFilter.includes(option.value)}
                             className={clsx(
-                              'px-3 py-1.5 rounded-full text-sm transition-all',
+                              'px-4 py-2 min-h-[40px] rounded-full text-sm transition-all',
                               departureTimeFilter.includes(option.value)
                                 ? 'bg-primary-500 text-white'
                                 : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                             )}
                           >
-                            {option.label}
+                            <span className="hidden sm:inline">{option.label} ({option.shortLabel})</span>
+                            <span className="sm:hidden">{option.label}</span>
                           </button>
                         ))}
                       </div>
@@ -825,24 +872,31 @@ export default function Step6FlightsV2() {
 
                     {/* Cabin class - Single select that triggers new search */}
                     <div>
-                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
-                        Cabin Class
-                        <span className="ml-2 text-xs text-primary-500 font-normal">(searches for this class)</span>
-                      </label>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                          Cabin Class
+                        </label>
+                        <span className="text-xs bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded-full font-medium">
+                          New search
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Cabin class">
                         {[
                           { value: 'ECONOMY', label: 'Economy' },
-                          { value: 'PREMIUM_ECONOMY', label: 'Premium Economy' },
+                          { value: 'PREMIUM_ECONOMY', label: 'Premium Econ.' },
                           { value: 'BUSINESS', label: 'Business' },
                           { value: 'FIRST', label: 'First' },
                         ].map((cabin) => (
                           <button
                             key={cabin.value}
+                            role="radio"
+                            aria-checked={selectedCabinClass === cabin.value}
                             onClick={() => setSelectedCabinClass(cabin.value)}
+                            disabled={isLoading}
                             className={clsx(
-                              'px-3 py-1.5 rounded-full text-sm transition-all',
+                              'px-4 py-2 min-h-[40px] rounded-full text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed',
                               selectedCabinClass === cabin.value
-                                ? 'bg-primary-500 text-white ring-2 ring-primary-300'
+                                ? 'bg-primary-500 text-white ring-2 ring-primary-300 dark:ring-primary-700'
                                 : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                             )}
                           >
@@ -856,15 +910,16 @@ export default function Step6FlightsV2() {
                     {availableAirlines.length > 0 && (
                       <div>
                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Airlines</label>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by airline">
                           {availableAirlines.map((airline) => (
                             <button
                               key={airline}
                               onClick={() => setAirlinesFilter((prev) =>
                                 prev.includes(airline) ? prev.filter((a) => a !== airline) : [...prev, airline]
                               )}
+                              aria-pressed={airlinesFilter.includes(airline)}
                               className={clsx(
-                                'px-3 py-1.5 rounded-full text-sm transition-all',
+                                'px-4 py-2 min-h-[40px] rounded-full text-sm transition-all',
                                 airlinesFilter.includes(airline)
                                   ? 'bg-primary-500 text-white'
                                   : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
@@ -880,43 +935,76 @@ export default function Step6FlightsV2() {
                     {/* Price & Duration sliders */}
                     <div className="grid md:grid-cols-2 gap-4">
                       <div>
-                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
-                          Max Price: ${maxPriceFilter.toLocaleString()}
-                        </label>
+                        <div className="flex items-center justify-between mb-2">
+                          <label htmlFor="maxPriceSlider" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                            Max Price
+                          </label>
+                          <span className="text-sm font-bold text-primary-600 dark:text-primary-400">
+                            {formatPrice(maxPriceFilter)}
+                          </span>
+                        </div>
                         <input
+                          id="maxPriceSlider"
                           type="range"
                           min={100}
                           max={5000}
                           step={100}
                           value={maxPriceFilter}
                           onChange={(e) => setMaxPriceFilter(parseInt(e.target.value))}
+                          aria-valuemin={100}
+                          aria-valuemax={5000}
+                          aria-valuenow={maxPriceFilter}
+                          aria-valuetext={formatPrice(maxPriceFilter)}
                           className="w-full h-2 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
                         />
+                        <div className="flex justify-between text-xs text-slate-400 dark:text-slate-500 mt-1">
+                          <span>$100</span>
+                          <span>$5,000+</span>
+                        </div>
                       </div>
                       <div>
-                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
-                          Max Duration: {formatDuration(maxDurationFilter)}
-                        </label>
+                        <div className="flex items-center justify-between mb-2">
+                          <label htmlFor="maxDurationSlider" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                            Max Duration
+                          </label>
+                          <span className="text-sm font-bold text-primary-600 dark:text-primary-400">
+                            {formatDuration(maxDurationFilter)}
+                          </span>
+                        </div>
                         <input
+                          id="maxDurationSlider"
                           type="range"
                           min={120}
                           max={1440}
                           step={60}
                           value={maxDurationFilter}
                           onChange={(e) => setMaxDurationFilter(parseInt(e.target.value))}
+                          aria-valuemin={120}
+                          aria-valuemax={1440}
+                          aria-valuenow={maxDurationFilter}
+                          aria-valuetext={formatDuration(maxDurationFilter)}
                           className="w-full h-2 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
                         />
+                        <div className="flex justify-between text-xs text-slate-400 dark:text-slate-500 mt-1">
+                          <span>2h</span>
+                          <span>24h+</span>
+                        </div>
                       </div>
                     </div>
 
                     {/* Clear filters */}
                     {hasActiveFilters && (
-                      <button
-                        onClick={clearAllFilters}
-                        className="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
-                      >
-                        Clear all filters
-                      </button>
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-700">
+                        <span className="text-sm text-slate-600 dark:text-slate-400">
+                          {[stopsFilter.length > 0, departureTimeFilter.length > 0, airlinesFilter.length > 0, maxPriceFilter < 5000, maxDurationFilter < 1440].filter(Boolean).length} filter{[stopsFilter.length > 0, departureTimeFilter.length > 0, airlinesFilter.length > 0, maxPriceFilter < 5000, maxDurationFilter < 1440].filter(Boolean).length !== 1 ? 's' : ''} active
+                        </span>
+                        <button
+                          onClick={clearAllFilters}
+                          className="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium min-h-[40px] px-3"
+                        >
+                          Clear all
+                        </button>
+                      </div>
                     )}
                   </div>
                 </Card>
@@ -970,32 +1058,32 @@ export default function Step6FlightsV2() {
                         >
                           <div className="space-y-4">
                             {/* Outbound Flight */}
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
+                            <div className="flex items-start gap-3 md:gap-4">
+                              <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center flex-shrink-0">
                                 <Plane className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                               </div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-4">
-                                  <div className="text-center">
-                                    <p className="text-lg font-bold text-slate-900 dark:text-white">{rt.outbound.departureTime}</p>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400">{rt.outbound.departureAirport}</p>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-3 md:gap-4">
+                                  <div className="text-center flex-shrink-0">
+                                    <p className="text-base md:text-lg font-bold text-slate-900 dark:text-white">{rt.outbound.departureTime}</p>
+                                    <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">{rt.outbound.departureAirport}</p>
                                   </div>
-                                  <div className="flex-1 flex flex-col items-center">
-                                    <p className="text-xs text-slate-400">
-                                      {formatDuration(rt.outbound.durationMinutes)} • {rt.outbound.stops === 0 ? 'Non-stop' : `${rt.outbound.stops} stop`}
+                                  <div className="flex-1 flex flex-col items-center min-w-0">
+                                    <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                                      {formatDuration(rt.outbound.durationMinutes)} &middot; {rt.outbound.stops === 0 ? 'Non-stop' : `${rt.outbound.stops} stop`}
                                     </p>
                                     <div className="w-full flex items-center gap-1">
-                                      <div className="h-px flex-1 bg-blue-300" />
-                                      <ChevronRight className="w-4 h-4 text-blue-400" />
+                                      <div className="h-px flex-1 bg-blue-300 dark:bg-blue-700" />
+                                      <ChevronRight className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 flex-shrink-0" />
                                     </div>
                                   </div>
-                                  <div className="text-center">
-                                    <p className="text-lg font-bold text-slate-900 dark:text-white">{rt.outbound.arrivalTime}</p>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400">{rt.outbound.arrivalAirport}</p>
+                                  <div className="text-center flex-shrink-0">
+                                    <p className="text-base md:text-lg font-bold text-slate-900 dark:text-white">{rt.outbound.arrivalTime}</p>
+                                    <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">{rt.outbound.arrivalAirport}</p>
                                   </div>
                                 </div>
                                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                  {rt.outbound.airline} • {rt.outbound.flightNumber}
+                                  {rt.outbound.airline} &middot; {rt.outbound.flightNumber}
                                 </p>
                               </div>
                             </div>
@@ -1003,32 +1091,32 @@ export default function Step6FlightsV2() {
                             <div className="border-t border-slate-200 dark:border-slate-700" />
 
                             {/* Return Flight */}
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/50 flex items-center justify-center">
+                            <div className="flex items-start gap-3 md:gap-4">
+                              <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/50 flex items-center justify-center flex-shrink-0">
                                 <Plane className="w-5 h-5 text-green-600 dark:text-green-400 rotate-180" />
                               </div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-4">
-                                  <div className="text-center">
-                                    <p className="text-lg font-bold text-slate-900 dark:text-white">{rt.return.departureTime}</p>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400">{rt.return.departureAirport}</p>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-3 md:gap-4">
+                                  <div className="text-center flex-shrink-0">
+                                    <p className="text-base md:text-lg font-bold text-slate-900 dark:text-white">{rt.return.departureTime}</p>
+                                    <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">{rt.return.departureAirport}</p>
                                   </div>
-                                  <div className="flex-1 flex flex-col items-center">
-                                    <p className="text-xs text-slate-400">
-                                      {formatDuration(rt.return.durationMinutes)} • {rt.return.stops === 0 ? 'Non-stop' : `${rt.return.stops} stop`}
+                                  <div className="flex-1 flex flex-col items-center min-w-0">
+                                    <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                                      {formatDuration(rt.return.durationMinutes)} &middot; {rt.return.stops === 0 ? 'Non-stop' : `${rt.return.stops} stop`}
                                     </p>
                                     <div className="w-full flex items-center gap-1">
-                                      <div className="h-px flex-1 bg-green-300" />
-                                      <ChevronRight className="w-4 h-4 text-green-400" />
+                                      <div className="h-px flex-1 bg-green-300 dark:bg-green-700" />
+                                      <ChevronRight className="w-3.5 h-3.5 text-green-400 dark:text-green-500 flex-shrink-0" />
                                     </div>
                                   </div>
-                                  <div className="text-center">
-                                    <p className="text-lg font-bold text-slate-900 dark:text-white">{rt.return.arrivalTime}</p>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400">{rt.return.arrivalAirport}</p>
+                                  <div className="text-center flex-shrink-0">
+                                    <p className="text-base md:text-lg font-bold text-slate-900 dark:text-white">{rt.return.arrivalTime}</p>
+                                    <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">{rt.return.arrivalAirport}</p>
                                   </div>
                                 </div>
                                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                  {rt.return.airline} • {rt.return.flightNumber}
+                                  {rt.return.airline} &middot; {rt.return.flightNumber}
                                 </p>
                               </div>
                             </div>
@@ -1039,10 +1127,10 @@ export default function Step6FlightsV2() {
                                 <p className="text-sm text-slate-500 dark:text-slate-400">{rt.outbound.cabinClass}</p>
                               </div>
                               <div className="text-right">
-                                <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                                  ${Math.round(rt.totalPrice)}
+                                <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
+                                  {Math.round(rt.totalPrice).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 })}
                                 </p>
-                                <p className="text-sm text-slate-500 dark:text-slate-400">total round trip</p>
+                                <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">total round trip</p>
                               </div>
                             </div>
 
@@ -1062,11 +1150,11 @@ export default function Step6FlightsV2() {
                 <div className="text-center py-12 bg-amber-50 dark:bg-amber-900/30 rounded-xl">
                   <Check className="w-10 h-10 mx-auto mb-3 text-amber-500" />
                   <p className="text-amber-700 dark:text-amber-300 font-medium">
-                    You've marked this flight as already booked
+                    You&apos;ve marked this flight as already booked
                   </p>
                   <button
                     onClick={() => unskipFlightLeg(activeLeg.legId)}
-                    className="mt-4 text-sm text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 underline"
+                    className="mt-4 px-4 py-2 min-h-[40px] text-sm text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 underline"
                   >
                     I need to book this flight
                   </button>
@@ -1079,22 +1167,47 @@ export default function Step6FlightsV2() {
               ) : activeLeg.flights.length === 0 ? (
                 <div className="text-center py-12 bg-slate-50 dark:bg-slate-800 rounded-xl">
                   <Plane className="w-10 h-10 mx-auto mb-3 text-slate-300 dark:text-slate-600" />
-                  <p className="text-slate-500 dark:text-slate-400">No flights found for this route.</p>
+                  <h4 className="text-slate-700 dark:text-slate-300 font-medium mb-1">No flights found</h4>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">No flights are available for this route on the selected date. Try changing your cabin class or dates.</p>
                 </div>
               ) : filteredFlights.length === 0 ? (
                 <div className="text-center py-12 bg-slate-50 dark:bg-slate-800 rounded-xl">
                   <Filter className="w-10 h-10 mx-auto mb-3 text-slate-300 dark:text-slate-600" />
-                  <p className="text-slate-500 dark:text-slate-400 mb-2">No flights match your filters.</p>
+                  <h4 className="text-slate-700 dark:text-slate-300 font-medium mb-1">No matching flights</h4>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm mb-3">None of the {activeLeg.flights.length} available flights match your current filters.</p>
                   <button
                     onClick={clearAllFilters}
-                    className="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
+                    className="px-4 py-2 min-h-[40px] text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 font-medium transition-colors"
                   >
-                    Clear filters
+                    Clear all filters
                   </button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {filteredFlights.map((flight) => {
+                  {/* Sort controls and result count */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 pb-3 border-b border-slate-200 dark:border-slate-700">
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      {sortedFlights.length} flight{sortedFlights.length !== 1 ? 's' : ''} available
+                      {hasActiveFilters && <span className="text-slate-400 dark:text-slate-500 font-normal ml-1">(filtered)</span>}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="sortSelect" className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                        Sort by:
+                      </label>
+                      <select
+                        id="sortSelect"
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as 'price' | 'duration' | 'departure')}
+                        className="text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 min-h-[40px] font-medium focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                      >
+                        <option value="price">Price: Low to High</option>
+                        <option value="duration">Duration: Shortest</option>
+                        <option value="departure">Departure: Earliest</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {sortedFlights.map((flight) => {
                     const isSelected = activeLeg.selectedFlightId === flight.id;
                     const isExpanded = expandedFlightId === flight.id;
                     const flightWithSegments = flight as FlightWithSegments;
@@ -1112,74 +1225,96 @@ export default function Step6FlightsV2() {
                       >
                         {/* Main flight row - clickable for selection */}
                         <div
-                          className="flex items-center gap-4 cursor-pointer"
+                          className="cursor-pointer"
                           onClick={() => handleSelectFlight(flight.id)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              handleSelectFlight(flight.id);
+                            }
+                          }}
+                          aria-label={`${flight.airline} ${flight.flightNumber}, ${flight.departureTime} to ${flight.arrivalTime}, ${formatDuration(flight.durationMinutes)}, ${flight.stops === 0 ? 'Non-stop' : `${flight.stops} stop`}, ${formatPrice(flight.priceUsd)} per person`}
+                          aria-pressed={isSelected}
                         >
-                          {/* Airline logo */}
-                          <div className="w-12 h-12 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 flex items-center justify-center overflow-hidden">
-                            {flight.airlineLogo ? (
-                              <img
-                                src={flight.airlineLogo}
-                                alt={flight.airline}
-                                className="w-10 h-10 object-contain"
-                              />
-                            ) : (
-                              <Plane className="w-6 h-6 text-slate-400" />
-                            )}
-                          </div>
-
-                          {/* Flight details */}
-                          <div className="flex-1">
-                            <div className="flex items-center gap-4">
-                              <div className="text-center">
-                                <p className="text-lg font-bold text-slate-900 dark:text-white">
-                                  {flight.departureTime}
-                                </p>
-                                <p className="text-sm text-slate-500 dark:text-slate-400">{flight.departureAirport}</p>
+                          {/* Top row: airline + price + selection */}
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                              {/* Airline logo */}
+                              <div className="w-10 h-10 md:w-12 md:h-12 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 flex items-center justify-center overflow-hidden flex-shrink-0">
+                                {flight.airlineLogo ? (
+                                  <img
+                                    src={flight.airlineLogo}
+                                    alt=""
+                                    className="w-8 h-8 md:w-10 md:h-10 object-contain"
+                                  />
+                                ) : (
+                                  <Plane className="w-5 h-5 text-slate-400" />
+                                )}
                               </div>
-                              <div className="flex-1 flex flex-col items-center">
-                                <p className="text-xs text-slate-400 mb-1">
-                                  {formatDuration(flight.durationMinutes)}
+                              <div>
+                                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                  {flight.airline}
                                 </p>
-                                <div className="w-full flex items-center gap-1">
-                                  <div className="h-px flex-1 bg-slate-300 dark:bg-slate-600" />
-                                  {flight.stops > 0 && (
-                                    <div className="w-2 h-2 rounded-full bg-amber-400" title="Layover" />
-                                  )}
-                                  <Plane className="w-4 h-4 text-slate-400 rotate-90" />
-                                  <div className="h-px flex-1 bg-slate-300 dark:bg-slate-600" />
-                                </div>
-                                <p className="text-xs text-slate-400 mt-1">
-                                  {flight.stops === 0 ? 'Non-stop' : `${flight.stops} stop${flight.stops > 1 ? 's' : ''}`}
+                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                  {flight.flightNumber} &middot; {flight.cabinClass}
                                 </p>
-                              </div>
-                              <div className="text-center">
-                                <p className="text-lg font-bold text-slate-900 dark:text-white">
-                                  {flight.arrivalTime}
-                                </p>
-                                <p className="text-sm text-slate-500 dark:text-slate-400">{flight.arrivalAirport}</p>
                               </div>
                             </div>
-                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-                              {flight.airline} • {flight.flightNumber} • {flight.cabinClass}
-                            </p>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
+                                  {formatPrice(flight.priceUsd)}
+                                </p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">per person</p>
+                              </div>
+                              <div
+                                className={clsx(
+                                  'w-8 h-8 rounded-full flex items-center justify-center border-2 flex-shrink-0 transition-colors',
+                                  isSelected
+                                    ? 'bg-primary-500 border-primary-500 text-white'
+                                    : 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-500'
+                                )}
+                              >
+                                {isSelected && <Check className="w-4 h-4" />}
+                              </div>
+                            </div>
                           </div>
 
-                          {/* Price and selection */}
-                          <div className="text-right">
-                            <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                              ${flight.priceUsd}
-                            </p>
-                            <p className="text-sm text-slate-500 dark:text-slate-400">per person</p>
-                          </div>
-
-                          <div
-                            className={clsx(
-                              'w-8 h-8 rounded-full flex items-center justify-center',
-                              isSelected ? 'bg-primary-500 text-white' : 'bg-slate-100 dark:bg-slate-700'
-                            )}
-                          >
-                            {isSelected && <Check className="w-5 h-5" />}
+                          {/* Flight time details */}
+                          <div className="flex items-center gap-3 md:gap-4">
+                            <div className="text-center flex-shrink-0">
+                              <p className="text-base md:text-lg font-bold text-slate-900 dark:text-white">
+                                {flight.departureTime}
+                              </p>
+                              <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">{flight.departureAirport}</p>
+                            </div>
+                            <div className="flex-1 flex flex-col items-center min-w-0">
+                              <p className="text-xs text-slate-400 dark:text-slate-500 mb-1">
+                                {formatDuration(flight.durationMinutes)}
+                              </p>
+                              <div className="w-full flex items-center gap-1">
+                                <div className="h-px flex-1 bg-slate-300 dark:bg-slate-600" />
+                                {flight.stops > 0 && (
+                                  <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" title="Layover" />
+                                )}
+                                <Plane className="w-3.5 h-3.5 text-slate-400 rotate-90 flex-shrink-0" />
+                                <div className="h-px flex-1 bg-slate-300 dark:bg-slate-600" />
+                              </div>
+                              <p className={clsx(
+                                'text-xs mt-1',
+                                flight.stops === 0 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-amber-600 dark:text-amber-400'
+                              )}>
+                                {flight.stops === 0 ? 'Non-stop' : `${flight.stops} stop${flight.stops > 1 ? 's' : ''}`}
+                              </p>
+                            </div>
+                            <div className="text-center flex-shrink-0">
+                              <p className="text-base md:text-lg font-bold text-slate-900 dark:text-white">
+                                {flight.arrivalTime}
+                              </p>
+                              <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">{flight.arrivalAirport}</p>
+                            </div>
                           </div>
                         </div>
 
@@ -1189,7 +1324,8 @@ export default function Step6FlightsV2() {
                             e.stopPropagation();
                             setExpandedFlightId(isExpanded ? null : flight.id);
                           }}
-                          className="w-full mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                          aria-expanded={isExpanded}
+                          className="w-full mt-3 pt-3 min-h-[40px] border-t border-slate-100 dark:border-slate-700 flex items-center justify-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
                         >
                           {isExpanded ? 'Hide' : 'View'} flight details
                           <ChevronRight className={clsx('w-3 h-3 transition-transform', isExpanded && 'rotate-90')} />
@@ -1279,26 +1415,37 @@ export default function Step6FlightsV2() {
 
       {/* Total summary */}
       <Card className="bg-slate-50 dark:bg-slate-800">
-        <div className="flex items-center justify-between">
-          <div>
-            <h4 className="font-semibold text-slate-900 dark:text-white">Flight Summary</h4>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              {completedLegs} of {flights.legs.length} legs completed
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-2xl font-bold text-primary-600 dark:text-primary-400">
-              ${flights.legs.reduce((sum, leg) => {
-                if (!leg.selectedFlightId) return sum;
-                const flight = leg.flights.find((f) => f.id === leg.selectedFlightId);
-                return sum + (flight?.priceUsd || 0);
-              }, 0).toLocaleString()}
-            </p>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              × {trip.basics.travelers.adults + trip.basics.travelers.children} travelers
-            </p>
-          </div>
-        </div>
+        {(() => {
+          const perPersonTotal = flights.legs.reduce((sum, leg) => {
+            if (!leg.selectedFlightId) return sum;
+            const flight = leg.flights.find((f) => f.id === leg.selectedFlightId);
+            return sum + (flight?.priceUsd || 0);
+          }, 0);
+          const travelerCount = trip.basics.travelers.adults + trip.basics.travelers.children;
+          const grandTotal = perPersonTotal * travelerCount;
+
+          return (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="font-semibold text-slate-900 dark:text-white">Flight Summary</h4>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {completedLegs} of {flights.legs.length} legs completed
+                </p>
+              </div>
+              <div className="text-left sm:text-right">
+                <p className="text-xl md:text-2xl font-bold text-primary-600 dark:text-primary-400">
+                  {perPersonTotal.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 })}
+                  <span className="text-sm font-normal text-slate-500 dark:text-slate-400"> /person</span>
+                </p>
+                {travelerCount > 1 && (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    {grandTotal.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 })} total for {travelerCount} travelers
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </Card>
     </div>
   );

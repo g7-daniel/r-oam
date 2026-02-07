@@ -1,12 +1,32 @@
 import type { SentimentData, RedditPost, RedditComment } from '@/types';
 import { fetchWithTimeout } from './api-cache';
+import { withRetry } from './retry';
 
 // Use Reddit's public JSON API (no authentication required)
 const REDDIT_BASE_URL = 'https://www.reddit.com';
 const REDDIT_TIMEOUT = 10000; // 10 second timeout for Reddit API
 
+// Reddit-specific retry options - handles rate limits and transient errors
+const REDDIT_RETRY_OPTIONS = {
+  maxRetries: 3,
+  initialDelayMs: 2000,
+  maxDelayMs: 10000,
+  isRetryable: (error: unknown) => {
+    const errWithStatus = error as { status?: number; message?: string };
+    // Retry on rate limits (429), server errors (5xx), and timeouts
+    if (errWithStatus.status === 429 || (errWithStatus.status && errWithStatus.status >= 500)) {
+      return true;
+    }
+    const message = errWithStatus.message?.toLowerCase() || '';
+    return message.includes('timeout') || message.includes('network') || message.includes('econnreset');
+  },
+  onRetry: (attempt: number, delay: number) => {
+    console.log(`[Reddit] Retry attempt ${attempt} after ${delay}ms`);
+  },
+};
+
 // Reddit API rate limiting - minimum 1 second between requests to comply with terms
-const REDDIT_RATE_LIMIT_MS = 200; // Reduced from 1000ms for faster searches
+const REDDIT_RATE_LIMIT_MS = 1000; // Reddit API terms require minimum 1 second between requests
 // User-Agent must be descriptive per Reddit API terms
 const REDDIT_USER_AGENT = 'web:r-oam-travel-planner:v1.0 (https://roam.travel)';
 
@@ -44,35 +64,56 @@ export async function searchReddit(
 
     for (const subreddit of subreddits.slice(0, 3)) {
       try {
-        const response = await fetchWithTimeout(
-          `${REDDIT_BASE_URL}/r/${subreddit}/search.json?q=${encodeURIComponent(
-            query
-          )}&sort=relevance&limit=${limit}&restrict_sr=true`,
-          {
-            headers: {
-              'User-Agent': REDDIT_USER_AGENT,
+        const response = await withRetry(
+          () => fetchWithTimeout(
+            `${REDDIT_BASE_URL}/r/${subreddit}/search.json?q=${encodeURIComponent(
+              query
+            )}&sort=relevance&limit=${limit}&restrict_sr=true`,
+            {
+              headers: {
+                'User-Agent': REDDIT_USER_AGENT,
+              },
             },
-          },
-          REDDIT_TIMEOUT
+            REDDIT_TIMEOUT
+          ),
+          REDDIT_RETRY_OPTIONS
         );
 
         if (response.ok) {
-          const data = await response.json();
-          const children = data.data?.children as RedditPostData[] | undefined;
-          const posts: RedditPost[] = children?.map((child) => ({
-            id: child.data.id,
-            title: child.data.title,
-            selftext: child.data.selftext || '',
-            subreddit: child.data.subreddit,
-            score: child.data.score,
-            numComments: child.data.num_comments,
-            createdUtc: child.data.created_utc,
-            permalink: child.data.permalink,
-          })) || [];
+          let data;
+          try {
+            data = await response.json();
+          } catch (parseErr) {
+            console.error(`[Reddit] JSON parse error for r/${subreddit}:`, parseErr);
+            continue;
+          }
+          if (!data?.data?.children || !Array.isArray(data.data.children)) {
+            console.warn(`[Reddit] Unexpected response structure from r/${subreddit}`);
+            continue;
+          }
+          const children = data.data.children as RedditPostData[];
+          const posts: RedditPost[] = children
+            .filter((child) => child?.data?.id && child?.data?.title)
+            .map((child) => ({
+              id: child.data.id,
+              title: child.data.title,
+              selftext: child.data.selftext || '',
+              subreddit: child.data.subreddit,
+              score: child.data.score ?? 0,
+              numComments: child.data.num_comments ?? 0,
+              createdUtc: child.data.created_utc ?? 0,
+              permalink: child.data.permalink || '',
+            }));
           allPosts.push(...posts);
+        } else if (response.status === 403) {
+          console.warn(`[Reddit] Access forbidden to r/${subreddit} (may be private/banned)`);
+        } else if (response.status === 404) {
+          console.warn(`[Reddit] Subreddit r/${subreddit} not found`);
+        } else {
+          console.error(`[Reddit] HTTP ${response.status} from r/${subreddit}`);
         }
       } catch (err) {
-        console.warn(`Failed to fetch from r/${subreddit}:`, err);
+        console.error(`[Reddit] Error searching r/${subreddit}:`, err);
       }
 
       // Small delay to avoid rate limiting
@@ -92,31 +133,42 @@ export async function getPostComments(
   limit = 10
 ): Promise<RedditComment[]> {
   try {
-    const response = await fetchWithTimeout(
-      `${REDDIT_BASE_URL}/r/${subreddit}/comments/${postId}.json?limit=${limit}&depth=1`,
-      {
-        headers: {
-          'User-Agent': REDDIT_USER_AGENT,
+    const response = await withRetry(
+      () => fetchWithTimeout(
+        `${REDDIT_BASE_URL}/r/${subreddit}/comments/${postId}.json?limit=${limit}&depth=1`,
+        {
+          headers: {
+            'User-Agent': REDDIT_USER_AGENT,
+          },
         },
-      },
-      REDDIT_TIMEOUT
+        REDDIT_TIMEOUT
+      ),
+      REDDIT_RETRY_OPTIONS
     );
 
     if (!response.ok) {
+      console.warn(`[Reddit] Failed to fetch comments for post ${postId}: HTTP ${response.status}`);
       return [];
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseErr) {
+      console.error(`[Reddit] JSON parse error for comments on post ${postId}:`, parseErr);
+      return [];
+    }
+
     const comments: RedditComment[] = [];
 
-    if (data[1]?.data?.children) {
+    if (Array.isArray(data) && data[1]?.data?.children && Array.isArray(data[1].data.children)) {
       for (const child of data[1].data.children) {
-        if (child.kind === 't1' && child.data.body) {
+        if (child.kind === 't1' && child.data?.body) {
           comments.push({
             text: child.data.body.slice(0, 500),
             subreddit,
-            score: child.data.score,
-            date: new Date(child.data.created_utc * 1000).toISOString(),
+            score: child.data.score ?? 0,
+            date: new Date((child.data.created_utc ?? 0) * 1000).toISOString(),
           });
         }
       }
@@ -152,8 +204,12 @@ function isNegated(text: string, wordIndex: number, windowSize: number = 4): boo
 /**
  * Find word with word boundary matching to avoid partial matches
  */
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function findWordWithBoundary(text: string, word: string): number {
-  const regex = new RegExp(`\\b${word}\\b`, 'gi');
+  const regex = new RegExp(`\\b${escapeRegExp(word)}\\b`, 'gi');
   const match = regex.exec(text);
   return match ? match.index : -1;
 }
@@ -575,8 +631,6 @@ export async function searchHotelRecommendations(
     })
     .slice(0, 10);
 
-  console.log(`Reddit hotels: Found ${recommendations.length} quality recommendations (filtered by ${MIN_UPVOTES}+ upvotes)`);
-
   return recommendations;
 }
 
@@ -813,7 +867,6 @@ export async function searchAreaRecommendations(
     })
     .slice(0, 15);
 
-  console.log(`Reddit areas: Found ${recommendations.length} area recommendations for ${destination}`);
   return recommendations;
 }
 
@@ -986,6 +1039,5 @@ export async function searchRestaurantRecommendations(
     })
     .slice(0, 10);
 
-  console.log(`Reddit restaurants: Found ${recommendations.length} recommendations for ${location}`);
   return recommendations;
 }

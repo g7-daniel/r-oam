@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
   X,
   Star,
@@ -31,9 +32,35 @@ export default function PlaceDetailModal({
   onClose,
   onSchedule,
 }: PlaceDetailModalProps) {
-  const { trip, addToCollection, scheduleItem, updateScheduledItem, scheduledItems, unscheduleItem } = useTripStore();
+  const { trip, addToCollection, scheduleItem, updateScheduledItem, scheduledItems, unscheduleItem } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    addToCollection: state.addToCollection,
+    scheduleItem: state.scheduleItem,
+    updateScheduledItem: state.updateScheduledItem,
+    scheduledItems: state.scheduledItems,
+    unscheduleItem: state.unscheduleItem,
+  })));
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [showBookingModal, setShowBookingModal] = useState(false);
+  const [previousFocus, setPreviousFocus] = useState<HTMLElement | null>(null);
+
+  // Store previous focus and set up Escape key handler
+  useEffect(() => {
+    setPreviousFocus(document.activeElement as HTMLElement);
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !showBookingModal) {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      // Restore focus when modal closes
+      previousFocus?.focus();
+    };
+  }, [onClose, showBookingModal, previousFocus]);
 
   // Use item image or null (we'll show a nice gradient fallback)
   const images = item.imageUrl ? [item.imageUrl] : [];
@@ -96,11 +123,12 @@ export default function PlaceDetailModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="place-detail-title">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60"
         onClick={onClose}
+        aria-hidden="true"
       />
 
       {/* Modal - full screen on mobile, modal on larger screens */}
@@ -108,9 +136,10 @@ export default function PlaceDetailModal({
         {/* Close button - touch-friendly */}
         <button
           onClick={onClose}
+          aria-label={`Close ${item.name} details`}
           className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10 min-w-[44px] min-h-[44px] flex items-center justify-center bg-black/30 hover:bg-black/50 text-white rounded-full transition-colors"
         >
-          <X className="w-5 h-5" />
+          <X className="w-5 h-5" aria-hidden="true" />
         </button>
 
         {/* Image gallery - responsive height */}
@@ -132,18 +161,20 @@ export default function PlaceDetailModal({
               <button
                 onClick={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
                 disabled={currentImageIndex === 0}
-                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 bg-black/30 hover:bg-black/50 text-white rounded-full disabled:opacity-50"
+                aria-label="Previous image"
+                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 min-w-[44px] min-h-[44px] bg-black/30 hover:bg-black/50 text-white rounded-full disabled:opacity-50"
               >
-                <ChevronLeft className="w-5 h-5" />
+                <ChevronLeft className="w-5 h-5" aria-hidden="true" />
               </button>
               <button
                 onClick={() => setCurrentImageIndex(prev => Math.min(images.length - 1, prev + 1))}
                 disabled={currentImageIndex === images.length - 1}
-                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 bg-black/30 hover:bg-black/50 text-white rounded-full disabled:opacity-50"
+                aria-label="Next image"
+                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 min-w-[44px] min-h-[44px] bg-black/30 hover:bg-black/50 text-white rounded-full disabled:opacity-50"
               >
-                <ChevronRight className="w-5 h-5" />
+                <ChevronRight className="w-5 h-5" aria-hidden="true" />
               </button>
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5">
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5" role="status" aria-live="polite" aria-label={`Image ${currentImageIndex + 1} of ${images.length}`}>
                 {images.map((_, idx) => (
                   <div
                     key={idx}
@@ -151,6 +182,7 @@ export default function PlaceDetailModal({
                       'w-2 h-2 rounded-full transition-colors',
                       idx === currentImageIndex ? 'bg-white' : 'bg-white/50'
                     )}
+                    aria-hidden="true"
                   />
                 ))}
               </div>
@@ -162,7 +194,7 @@ export default function PlaceDetailModal({
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {/* Title and rating */}
           <div className="mb-4">
-            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mb-2">
+            <h2 id="place-detail-title" className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mb-2">
               {item.name}
             </h2>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs sm:text-sm">
@@ -416,9 +448,10 @@ export default function PlaceDetailModal({
             <div className="relative w-full max-w-md">
               <button
                 onClick={() => setShowBookingModal(false)}
-                className="absolute -top-2 -right-2 z-10 p-2 bg-white shadow-lg rounded-full text-slate-500 hover:text-slate-700"
+                aria-label="Close booking options"
+                className="absolute -top-2 -right-2 z-10 min-w-[40px] min-h-[40px] flex items-center justify-center bg-white dark:bg-slate-700 shadow-lg rounded-full text-slate-500 dark:text-slate-300 hover:text-slate-700 dark:hover:text-white"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
               <RestaurantAvailability
                 restaurantName={item.name}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import Card from '@/components/ui/Card';
 import {
   Sparkles,
@@ -38,7 +39,13 @@ export default function Step4Experiences() {
     seedExperiencesFromDiscovery,
     selectExperience,
     deselectExperience,
-  } = useTripStore();
+  } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    setActiveDestination: state.setActiveDestination,
+    seedExperiencesFromDiscovery: state.seedExperiencesFromDiscovery,
+    selectExperience: state.selectExperience,
+    deselectExperience: state.deselectExperience,
+  })));
 
   const { destinations, activeDestinationId } = trip;
   const activeDestination = destinations.find((d) => d.destinationId === activeDestinationId);
@@ -288,12 +295,12 @@ export default function Step4Experiences() {
 
           {/* Empty state */}
           {experiences.length === 0 && (
-            <div className="text-center py-12 px-4 bg-slate-50 rounded-xl">
-              <Sparkles className="w-10 h-10 mx-auto mb-3 text-slate-300" />
-              <p className="text-slate-500 mb-4">
+            <div className="text-center py-12 px-4 bg-slate-50 dark:bg-slate-800 rounded-xl">
+              <Sparkles className="w-10 h-10 mx-auto mb-3 text-slate-300 dark:text-slate-600" />
+              <p className="text-slate-500 dark:text-slate-400 mb-4">
                 No experiences found for this destination yet.
               </p>
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-slate-400 dark:text-slate-500">
                 Complete the AI Discovery step to get personalized recommendations.
               </p>
             </div>
@@ -302,13 +309,13 @@ export default function Step4Experiences() {
       )}
 
       {/* Summary */}
-      <Card className="bg-slate-50">
+      <Card className="bg-slate-50 dark:bg-slate-800/50">
         <div className="flex items-center justify-between">
           <div>
-            <h4 className="font-semibold text-slate-900">
+            <h4 className="font-semibold text-slate-900 dark:text-white">
               {destinations.reduce((sum, d) => sum + d.experiences.selectedExperienceIds.length, 0)} Experiences Selected
             </h4>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Across {destinations.length} destination{destinations.length > 1 ? 's' : ''}
             </p>
           </div>

@@ -60,7 +60,6 @@ async function fetchExchangeRates(): Promise<Record<string, number> | null> {
     });
 
     if (!response.ok) {
-      console.warn(`Exchange rate API returned ${response.status}`);
       return null;
     }
 
@@ -76,10 +75,8 @@ async function fetchExchangeRates(): Promise<Record<string, number> | null> {
       }
     }
 
-    console.log('Exchange rates fetched successfully');
     return rates;
   } catch (error) {
-    console.warn('Failed to fetch exchange rates:', error);
     return null;
   }
 }
@@ -106,12 +103,10 @@ export async function getExchangeRates(): Promise<Record<string, number>> {
 
   // If fetch failed but we have cached rates (even if stale), use them
   if (cachedRates) {
-    console.warn('Using stale cached exchange rates');
     return cachedRates;
   }
 
   // Last resort: use fallback rates
-  console.warn('Using fallback exchange rates');
   return FALLBACK_RATES;
 }
 
@@ -133,7 +128,6 @@ export async function convertToUSD(amount: number, fromCurrency: string): Promis
   const rate = rates[fromCurrency];
 
   if (!rate) {
-    console.warn(`Unknown currency "${fromCurrency}" - returning amount without conversion`);
     return amount;
   }
 
@@ -150,7 +144,6 @@ export function convertToUSDSync(amount: number, fromCurrency: string): number {
   const rate = rates[fromCurrency];
 
   if (!rate) {
-    console.warn(`Unknown currency "${fromCurrency}" - returning amount without conversion`);
     return amount;
   }
 

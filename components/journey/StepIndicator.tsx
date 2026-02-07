@@ -30,14 +30,16 @@ export default function StepIndicator({
   onStepClick,
 }: StepIndicatorProps) {
   return (
-    <div className="w-full">
+    <nav className="w-full" aria-label="Trip planning progress">
       {/* Desktop view */}
-      <div className="hidden md:flex items-center justify-between">
+      <div className="hidden md:flex items-center justify-between" role="list">
         {steps.map((step, index) => (
-          <div key={step.number} className="flex items-center">
+          <div key={step.number} className="flex items-center" role="listitem">
             <button
               onClick={() => onStepClick?.(step.number)}
               disabled={step.number > currentStep}
+              aria-label={`Step ${step.number}: ${step.title}${step.number === currentStep ? ' (current)' : step.number < currentStep ? ' (completed)' : ''}`}
+              aria-current={step.number === currentStep ? 'step' : undefined}
               className={clsx(
                 'flex flex-col items-center gap-2 transition-all duration-300',
                 step.number <= currentStep
@@ -57,9 +59,9 @@ export default function StepIndicator({
                 )}
               >
                 {step.number < currentStep ? (
-                  <Check className="w-5 h-5" />
+                  <Check className="w-5 h-5" aria-hidden="true" />
                 ) : (
-                  step.number
+                  <span aria-hidden="true">{step.number}</span>
                 )}
               </div>
               <span
@@ -100,10 +102,11 @@ export default function StepIndicator({
             {steps[currentStep - 1]?.title}
           </span>
         </div>
-        <div className="h-2 bg-reddit-gray-200 rounded-full overflow-hidden">
+        <div className="h-2 bg-reddit-gray-200 rounded-full overflow-hidden" role="progressbar" aria-valuenow={currentStep} aria-valuemin={1} aria-valuemax={steps.length} aria-label={`Progress: Step ${currentStep} of ${steps.length}`}>
           <div
             className="h-full bg-gradient-reddit transition-all duration-300"
             style={{ width: `${(currentStep / steps.length) * 100}%` }}
+            aria-hidden="true"
           />
         </div>
         <div className="flex justify-between mt-2">
@@ -112,6 +115,8 @@ export default function StepIndicator({
               key={step.number}
               onClick={() => onStepClick?.(step.number)}
               disabled={step.number > currentStep}
+              aria-label={`Step ${step.number}: ${step.title}${step.number === currentStep ? ' (current)' : step.number < currentStep ? ' (completed)' : ''}`}
+              aria-current={step.number === currentStep ? 'step' : undefined}
               className={clsx(
                 'w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium transition-all',
                 step.number < currentStep &&
@@ -123,14 +128,14 @@ export default function StepIndicator({
               )}
             >
               {step.number < currentStep ? (
-                <Check className="w-4 h-4" />
+                <Check className="w-4 h-4" aria-hidden="true" />
               ) : (
-                step.number
+                <span aria-hidden="true">{step.number}</span>
               )}
             </button>
           ))}
         </div>
       </div>
-    </div>
+    </nav>
   );
 }

@@ -4,7 +4,15 @@ import type { ChatMessage } from '@/types';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON in request body' },
+        { status: 400 }
+      );
+    }
     const {
       destination,
       message,
@@ -17,15 +25,30 @@ export async function POST(request: NextRequest) {
       conversationHistory: ChatMessage[];
     };
 
-    if (!destination) {
+    if (!destination || typeof destination !== 'string') {
       return NextResponse.json(
         { error: 'Destination is required' },
         { status: 400 }
       );
     }
 
-    // Ensure conversationHistory is an array
-    const history = conversationHistory || [];
+    if (conversationType && !['destination', 'experiences'].includes(conversationType)) {
+      return NextResponse.json(
+        { error: 'conversationType must be "destination" or "experiences"' },
+        { status: 400 }
+      );
+    }
+
+    // Ensure conversationHistory is an array and limit its size
+    const history = Array.isArray(conversationHistory) ? conversationHistory.slice(0, 50) : [];
+
+    // Validate message length if provided
+    if (message && (typeof message !== 'string' || message.length > 5000)) {
+      return NextResponse.json(
+        { error: 'Message must be a string of at most 5000 characters' },
+        { status: 400 }
+      );
+    }
 
     // If no message, return initial greeting
     if (!message && history.length === 0) {

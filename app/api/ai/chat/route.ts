@@ -5,7 +5,7 @@ import {
   chatCompletion,
   parseRecommendations,
   isGroqConfigured,
-  type ChatMessage,
+  type GroqMessage,
 } from '@/lib/groq';
 import { searchReddit } from '@/lib/reddit';
 
@@ -60,7 +60,15 @@ async function getRedditContext(
 
 export async function POST(request: NextRequest) {
   try {
-    const body: RequestBody = await request.json();
+    let body: RequestBody;
+    try {
+      body = await request.json();
+    } catch {
+      return new Response(JSON.stringify({ error: 'Invalid JSON in request body' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     const {
       destination,
       message,
@@ -71,8 +79,36 @@ export async function POST(request: NextRequest) {
       interests = [],
     } = body;
 
-    if (!destination) {
+    if (!destination || typeof destination !== 'string') {
       return new Response(JSON.stringify({ error: 'Destination is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (!message || typeof message !== 'string') {
+      return new Response(JSON.stringify({ error: 'Message is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (message.length > 5000) {
+      return new Response(JSON.stringify({ error: 'Message too long (max 5000 characters)' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (!Array.isArray(conversationHistory)) {
+      return new Response(JSON.stringify({ error: 'conversationHistory must be an array' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (conversationHistory.length > 50) {
+      return new Response(JSON.stringify({ error: 'conversationHistory too long (max 50 messages)' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -82,8 +118,8 @@ export async function POST(request: NextRequest) {
     if (!isGroqConfigured()) {
       return new Response(
         JSON.stringify({
-          error: 'AI not configured',
-          message: 'Please add GROQ_API_KEY to your .env.local file. Get a free key at console.groq.com',
+          error: 'AI service temporarily unavailable',
+          message: 'The AI chat service is currently unavailable. Please try again later.',
         }),
         {
           status: 503,
@@ -106,7 +142,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Build messages array
-    const messages: ChatMessage[] = [
+    const messages: GroqMessage[] = [
       { role: 'system', content: systemPrompt },
       ...conversationHistory.map((msg) => ({
         role: msg.role as 'user' | 'assistant',

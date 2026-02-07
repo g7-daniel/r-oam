@@ -3,7 +3,7 @@
  * Provides common validation functions for forms across the app
  */
 
-import { toDate, isAfter, getToday, getNights } from './date-utils';
+import { toDate, isAfter, isBefore, getToday, getNights } from './date-utils';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -53,8 +53,8 @@ export function validateNumberRange(
   max: number,
   fieldName: string
 ): ValidationResult {
-  if (isNaN(value)) {
-    return { isValid: false, error: `${fieldName} must be a number` };
+  if (isNaN(value) || !isFinite(value)) {
+    return { isValid: false, error: `${fieldName} must be a valid number` };
   }
   if (value < min || value > max) {
     return { isValid: false, error: `${fieldName} must be between ${min} and ${max}` };
@@ -84,8 +84,7 @@ export function validateFutureDate(date: Date | string | null, fieldName: string
     return { isValid: false, error: `Please enter a valid ${fieldName.toLowerCase()}` };
   }
 
-  const today = getToday();
-  if (d < today) {
+  if (isBefore(d, getToday())) {
     return { isValid: false, error: `${fieldName} must be in the future` };
   }
   return { isValid: true };
@@ -116,8 +115,8 @@ export function validateDateRange(
 
 // Budget validation
 export function validateBudget(min: number, max: number): ValidationResult {
-  if (isNaN(min) || isNaN(max)) {
-    return { isValid: false, error: 'Budget must be a number' };
+  if (isNaN(min) || isNaN(max) || !isFinite(min) || !isFinite(max)) {
+    return { isValid: false, error: 'Budget must be a valid number' };
   }
   if (min < 0 || max < 0) {
     return { isValid: false, error: 'Budget cannot be negative' };
@@ -130,6 +129,12 @@ export function validateBudget(min: number, max: number): ValidationResult {
 
 // Travelers validation
 export function validateTravelers(adults: number, children: number = 0): ValidationResult {
+  if (isNaN(adults) || !isFinite(adults) || !Number.isInteger(adults)) {
+    return { isValid: false, error: 'Number of adults must be a whole number' };
+  }
+  if (isNaN(children) || !isFinite(children) || !Number.isInteger(children)) {
+    return { isValid: false, error: 'Number of children must be a whole number' };
+  }
   if (adults < 1) {
     return { isValid: false, error: 'At least 1 adult is required' };
   }
@@ -161,7 +166,10 @@ export function validateDestination(destination: string | null | undefined): Val
 
 // Trip length validation
 export function validateTripLength(nights: number): ValidationResult {
-  if (isNaN(nights) || nights < 1) {
+  if (isNaN(nights) || !isFinite(nights) || !Number.isInteger(nights)) {
+    return { isValid: false, error: 'Trip length must be a whole number' };
+  }
+  if (nights < 1) {
     return { isValid: false, error: 'Trip must be at least 1 night' };
   }
   if (nights > 60) {
@@ -285,11 +293,17 @@ export const quickPlanValidators = {
     if (!party.adults || party.adults < 1) {
       return { isValid: false, error: 'At least one adult traveler is required' };
     }
-    if (party.adults > 20) {
-      return { isValid: false, error: 'Maximum 20 adults per booking' };
+    if (party.adults > 10) {
+      return { isValid: false, error: 'Maximum 10 adults per booking' };
+    }
+    if (party.children && party.children < 0) {
+      return { isValid: false, error: 'Number of children cannot be negative' };
     }
     if (party.children && party.children > 10) {
       return { isValid: false, error: 'Maximum 10 children per booking' };
+    }
+    if ((party.adults || 0) + (party.children || 0) > 15) {
+      return { isValid: false, error: 'Maximum 15 travelers allowed' };
     }
     return { isValid: true };
   },

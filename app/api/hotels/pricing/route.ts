@@ -64,6 +64,7 @@ function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: numbe
 }
 
 export async function GET(request: NextRequest) {
+  try {
   const params = request.nextUrl.searchParams;
   const placeId = params.get('placeId');
   const checkIn = params.get('checkIn');
@@ -77,7 +78,30 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  console.log(`Pricing request for placeId: ${placeId}, dates: ${checkIn} - ${checkOut}`);
+  // Validate adults is a valid number
+  if (isNaN(adults) || adults < 1 || adults > 20) {
+    return NextResponse.json(
+      { error: 'Invalid adults parameter: must be between 1 and 20' },
+      { status: 400 }
+    );
+  }
+
+  // Validate date format
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(checkIn) || !dateRegex.test(checkOut)) {
+    return NextResponse.json(
+      { error: 'Invalid date format: use YYYY-MM-DD' },
+      { status: 400 }
+    );
+  }
+
+  // Validate checkOut is after checkIn
+  if (new Date(checkOut) <= new Date(checkIn)) {
+    return NextResponse.json(
+      { error: 'checkOut must be after checkIn' },
+      { status: 400 }
+    );
+  }
 
   // Step 1: Check cache
   const cached = await prisma.priceCache.findUnique({
@@ -87,7 +111,6 @@ export async function GET(request: NextRequest) {
   });
 
   if (cached && cached.expiresAt > new Date()) {
-    console.log('Returning cached pricing');
     return NextResponse.json({
       placeId,
       pricePerNight: cached.pricePerNight,
@@ -118,9 +141,10 @@ export async function GET(request: NextRequest) {
   };
 
   let source = 'estimate';
+  // Track amadeusHotelId at outer scope so it's available for cache write in Step 6
+  let resolvedAmadeusHotelId: string | null = hotel.amadeusHotelId;
 
   // Step 3: Try Booking.com first (primary source)
-  console.log(`Trying Booking.com for: ${hotel.name}`);
   try {
     const bookingResult = await matchAndPriceHotel(
       hotel.name,
@@ -139,11 +163,8 @@ export async function GET(request: NextRequest) {
         hasAvailability: true,
       };
       source = 'booking.com';
-      console.log(`✓ Booking.com price: $${pricing.pricePerNight}/night`);
     } else if (bookingResult?.soldOut) {
-      console.log(`Booking.com: ${hotel.name} is sold out for these dates`);
     } else {
-      console.log(`Booking.com: No pricing found for ${hotel.name}`);
     }
   } catch (error) {
     console.error('Booking.com error:', error);
@@ -151,7 +172,6 @@ export async function GET(request: NextRequest) {
 
   // Step 4: Fall back to Amadeus if Booking.com didn't work
   if (!pricing.hasAvailability) {
-    console.log(`Trying Amadeus for: ${hotel.name}`);
     let amadeusHotelId = hotel.amadeusHotelId;
 
     if (!amadeusHotelId) {
@@ -182,6 +202,7 @@ export async function GET(request: NextRequest) {
 
         if (bestMatch) {
           amadeusHotelId = bestMatch.hotelId;
+          resolvedAmadeusHotelId = bestMatch.hotelId;
           await prisma.hotel.update({
             where: { placeId },
             data: { amadeusHotelId, amadeusMatched: true },
@@ -205,7 +226,6 @@ export async function GET(request: NextRequest) {
             hasAvailability: true,
           };
           source = 'amadeus';
-          console.log(`✓ Amadeus price: $${pricing.pricePerNight}/night`);
         }
       } catch (error) {
         console.error('Amadeus pricing error:', error);
@@ -226,11 +246,16 @@ export async function GET(request: NextRequest) {
       hasAvailability: false,
     };
     source = 'estimate';
-    console.log(`Using estimated price: $${estimatedPrice}/night`);
   }
 
   // Step 6: Cache result
-  const expiresAt = new Date(Date.now() + CACHE_TTL_MINUTES * 60 * 1000);
+  // Use shorter TTL for estimates (which use Math.random()) so real prices are fetched sooner
+  const cacheTtlMinutes = pricing.hasAvailability ? CACHE_TTL_MINUTES : 5;
+  const expiresAt = new Date(Date.now() + cacheTtlMinutes * 60 * 1000);
+
+  // Use resolvedAmadeusHotelId which tracks the latest value from Step 4
+  // (avoids a redundant DB re-read since we already have the value in memory)
+  const currentAmadeusHotelId = resolvedAmadeusHotelId;
 
   try {
     await prisma.priceCache.upsert({
@@ -242,7 +267,7 @@ export async function GET(request: NextRequest) {
         checkIn,
         checkOut,
         adults,
-        amadeusHotelId: hotel.amadeusHotelId,
+        amadeusHotelId: currentAmadeusHotelId,
         pricePerNight: pricing.pricePerNight,
         totalPrice: pricing.totalPrice,
         currency: pricing.currency,
@@ -251,6 +276,7 @@ export async function GET(request: NextRequest) {
         expiresAt,
       },
       update: {
+        amadeusHotelId: currentAmadeusHotelId,
         pricePerNight: pricing.pricePerNight,
         totalPrice: pricing.totalPrice,
         currency: pricing.currency,
@@ -269,11 +295,26 @@ export async function GET(request: NextRequest) {
     isEstimate: !pricing.hasAvailability,
     source,
   });
+  } catch (error) {
+    console.error('Hotel pricing GET error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch hotel pricing' },
+      { status: 500 }
+    );
+  }
 }
 
 // Batch pricing endpoint
 export async function POST(request: NextRequest) {
-  const body = await request.json();
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: 'Invalid JSON in request body' },
+      { status: 400 }
+    );
+  }
   const { placeIds, checkIn, checkOut, adults = 2 } = body;
 
   if (!placeIds || !Array.isArray(placeIds) || !checkIn || !checkOut) {
@@ -283,7 +324,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  console.log(`Batch pricing request for ${placeIds.length} hotels`);
+  // Limit batch size to prevent DoS
+  if (placeIds.length > 50) {
+    return NextResponse.json(
+      { error: 'Maximum 50 placeIds per batch request' },
+      { status: 400 }
+    );
+  }
+
+  // Validate adults
+  if (typeof adults !== 'number' || adults < 1 || adults > 20) {
+    return NextResponse.json(
+      { error: 'Invalid adults parameter: must be between 1 and 20' },
+      { status: 400 }
+    );
+  }
 
   const results: Record<string, {
     pricePerNight: number | null;
@@ -294,16 +349,23 @@ export async function POST(request: NextRequest) {
     source: string;
   }> = {};
 
+  try {
   // Step 1: Batch fetch all cached prices (single DB query instead of N queries)
-  const cachedPrices = await prisma.priceCache.findMany({
-    where: {
-      placeId: { in: placeIds },
-      checkIn,
-      checkOut,
-      adults,
-      expiresAt: { gt: new Date() },
-    },
-  });
+  let cachedPrices: Awaited<ReturnType<typeof prisma.priceCache.findMany>>;
+  try {
+    cachedPrices = await prisma.priceCache.findMany({
+      where: {
+        placeId: { in: placeIds },
+        checkIn,
+        checkOut,
+        adults,
+        expiresAt: { gt: new Date() },
+      },
+    });
+  } catch (error) {
+    console.error('Cache lookup error:', error);
+    cachedPrices = [];
+  }
 
   // Create lookup map for cached prices
   const cachedPricesMap = new Map(cachedPrices.map(c => [c.placeId, c]));
@@ -325,16 +387,31 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  console.log(`Cache hit: ${placeIds.length - uncachedPlaceIds.length}, need to fetch: ${uncachedPlaceIds.length}`);
-
   if (uncachedPlaceIds.length === 0) {
     return NextResponse.json({ pricing: results });
   }
 
   // Step 2: Batch fetch all hotels for uncached prices (single DB query)
-  const hotels = await prisma.hotel.findMany({
-    where: { placeId: { in: uncachedPlaceIds } },
-  });
+  let hotels;
+  try {
+    hotels = await prisma.hotel.findMany({
+      where: { placeId: { in: uncachedPlaceIds } },
+    });
+  } catch (error) {
+    console.error('Hotel lookup error:', error);
+    // Return what we have from cache, mark rest as error
+    for (const placeId of uncachedPlaceIds) {
+      results[placeId] = {
+        pricePerNight: null,
+        totalPrice: null,
+        currency: null,
+        hasAvailability: false,
+        isEstimate: true,
+        source: 'error',
+      };
+    }
+    return NextResponse.json({ pricing: results });
+  }
 
   const hotelMap = new Map(hotels.map(h => [h.placeId, h]));
 
@@ -382,23 +459,58 @@ export async function POST(request: NextRequest) {
               isEstimate: false,
               source: 'booking.com',
             };
-            return;
+          } else {
+            // Fall back to estimate
+            const estimatedPrice = estimatePriceByHotelName(hotel.name);
+            const nights = Math.ceil(
+              (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24)
+            );
+
+            results[placeId] = {
+              pricePerNight: estimatedPrice,
+              totalPrice: estimatedPrice * nights,
+              currency: 'USD',
+              hasAvailability: false,
+              isEstimate: true,
+              source: 'estimate',
+            };
           }
 
-          // Fall back to estimate
-          const estimatedPrice = estimatePriceByHotelName(hotel.name);
-          const nights = Math.ceil(
-            (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24)
-          );
-
-          results[placeId] = {
-            pricePerNight: estimatedPrice,
-            totalPrice: estimatedPrice * nights,
-            currency: 'USD',
-            hasAvailability: false,
-            isEstimate: true,
-            source: 'estimate',
-          };
+          // Write back to cache so subsequent requests benefit
+          const result = results[placeId];
+          const cacheTtlMinutes = result.hasAvailability ? CACHE_TTL_MINUTES : 5;
+          const expiresAt = new Date(Date.now() + cacheTtlMinutes * 60 * 1000);
+          try {
+            await prisma.priceCache.upsert({
+              where: {
+                placeId_checkIn_checkOut_adults: { placeId, checkIn, checkOut, adults },
+              },
+              create: {
+                placeId,
+                checkIn,
+                checkOut,
+                adults,
+                amadeusHotelId: hotel.amadeusHotelId,
+                pricePerNight: result.pricePerNight,
+                totalPrice: result.totalPrice,
+                currency: result.currency,
+                hasAvailability: result.hasAvailability,
+                cachedAt: new Date(),
+                expiresAt,
+              },
+              update: {
+                amadeusHotelId: hotel.amadeusHotelId,
+                pricePerNight: result.pricePerNight,
+                totalPrice: result.totalPrice,
+                currency: result.currency,
+                hasAvailability: result.hasAvailability,
+                cachedAt: new Date(),
+                expiresAt,
+              },
+            });
+          } catch (cacheError) {
+            console.error(`Cache write error for ${placeId}:`, cacheError);
+          }
         } catch (error) {
           console.error(`Error fetching pricing for ${placeId}:`, error);
           results[placeId] = {
@@ -415,4 +527,11 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ pricing: results });
+  } catch (error) {
+    console.error('Batch pricing error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch batch pricing' },
+      { status: 500 }
+    );
+  }
 }

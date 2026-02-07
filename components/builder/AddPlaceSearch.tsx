@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { CollectionItem } from '@/stores/tripStore';
 import {
   Search,
@@ -67,7 +68,11 @@ export default function AddPlaceSearch({
   destinationId,
   onClose,
 }: AddPlaceSearchProps) {
-  const { trip, scheduleItem, addToCollection } = useTripStore();
+  const { trip, scheduleItem, addToCollection } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    scheduleItem: state.scheduleItem,
+    addToCollection: state.addToCollection,
+  })));
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [places, setPlaces] = useState<PlaceResult[]>([]);
@@ -336,7 +341,7 @@ export default function AddPlaceSearch({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder={`Search places in ${destinationName}...`}
-          className="w-full pl-10 pr-10 py-2.5 text-sm border border-slate-200 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400"
+          className="w-full pl-10 pr-10 py-2.5 text-base border border-slate-200 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400"
           onKeyDown={(e) => {
             if (e.key === 'Enter') handleSearch();
             if (e.key === 'Escape') onClose();
@@ -344,7 +349,8 @@ export default function AddPlaceSearch({
         />
         <button
           onClick={onClose}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          className="absolute right-2 top-1/2 -translate-y-1/2 min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg"
+          aria-label="Close search"
         >
           <X className="w-4 h-4" />
         </button>
@@ -490,7 +496,7 @@ export default function AddPlaceSearch({
                   }}
                   disabled={addedIds.has(place.id)}
                   className={clsx(
-                    "flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                    "flex-shrink-0 flex items-center gap-1 px-3 py-2 min-h-[36px] rounded-lg text-xs font-medium transition-colors",
                     addedIds.has(place.id)
                       ? "bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 cursor-default"
                       : "bg-primary-500 text-white hover:bg-primary-600"

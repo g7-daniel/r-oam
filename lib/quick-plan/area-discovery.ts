@@ -395,12 +395,10 @@ export async function discoverAreas(
 
   // Get known areas for this destination
   let knownAreas = destKey ? DESTINATION_AREAS[destKey] : [];
-  console.log(`Area discovery: destName="${destName}", destKey="${destKey}", found ${knownAreas.length} known areas`);
 
   // If no known areas, try to extract areas from LLM-generated data
   // This is what makes the system work for ANY destination worldwide
   if (knownAreas.length === 0 && redditData.length > 0) {
-    console.log(`Area discovery: No hardcoded areas for "${destName}", using LLM-generated areas`);
     // Convert LLM data to our area format
     const llmAreas = redditData
       .filter(rd => rd.mentionedAreas && rd.mentionedAreas.length > 0)
@@ -436,7 +434,6 @@ export async function discoverAreas(
       seen.add(key);
       return true;
     });
-    console.log(`Area discovery: Extracted ${knownAreas.length} unique areas from LLM for worldwide destination`);
   }
 
   // Get user's selected activities (both standard and custom)
@@ -460,7 +457,6 @@ export async function discoverAreas(
 
   // Find specific activities from custom inputs
   const specificActivities = findSpecificActivities(customActivities, destName);
-  console.log(`Area discovery: Found ${specificActivities.length} specific activities:`, specificActivities);
 
   // Build a map of areas that MUST be shown because of specific activities
   const mustShowAreas = new Map<string, { activity: string; description: string; seasonNote?: string }>();
@@ -600,7 +596,6 @@ export async function discoverAreas(
     }
 
     // Debug logging
-    console.log(`  ${area.name}: ${Math.round(overallScore * 100)}% (activities: ${matchedActivities.join(', ') || 'none'}${finalSpecificMatch ? `, SPECIFIC: ${finalSpecificMatch.activity}` : ''})`);
 
     // Build evidence array
     const evidence: Evidence[] = [];
@@ -681,11 +676,7 @@ export async function discoverAreas(
       };
       topAreas.push(candidate);
     }
-    console.log(`Area discovery: Padded with ${remainingAreas.length} additional areas from database`);
   }
-
-  console.log(`Area discovery: Returning ${topAreas.length} areas (min: ${MIN_AREAS})`);
-  console.log(`  Top picks: ${topAreas.slice(0, 3).map(a => `${a.name} (${Math.round(a.overallScore * 100)}%)`).join(', ')}`);
 
   return topAreas;
 }
@@ -955,7 +946,9 @@ function generateWhyItFits(
   }
 
   // Add sentiment-based reason
-  const avgSentiment = data.sentiment.reduce((a, b) => a + b, 0) / data.sentiment.length;
+  const avgSentiment = data.sentiment.length > 0
+    ? data.sentiment.reduce((a, b) => a + b, 0) / data.sentiment.length
+    : 0.5;
   if (avgSentiment > 0.7) {
     reasons.push('Highly recommended by travelers');
   }

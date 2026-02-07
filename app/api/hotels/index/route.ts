@@ -27,15 +27,41 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const count = await getHotelCount(country);
-  return NextResponse.json({
-    country,
-    hotelCount: count,
-  });
+  try {
+    const count = await getHotelCount(country);
+    return NextResponse.json({
+      country,
+      hotelCount: count,
+    });
+  } catch (error: any) {
+    console.error('Hotel count error:', error);
+    return NextResponse.json(
+      { error: 'Failed to get hotel count' },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
+  // Admin-only endpoint: require a secret token to prevent unauthorized indexing
+  const authHeader = request.headers.get('authorization');
+  const adminToken = process.env.ADMIN_API_TOKEN;
+  if (!adminToken || authHeader !== `Bearer ${adminToken}`) {
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: 'Invalid JSON in request body' },
+      { status: 400 }
+    );
+  }
   const { country, countryCode = 'XX' } = body;
 
   if (!country) {
@@ -52,8 +78,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  console.log(`Starting indexing for ${country}...`);
-
   try {
     const result = await indexDestination(country, countryCode);
     return NextResponse.json({
@@ -64,13 +88,23 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Indexing error:', error);
     return NextResponse.json(
-      { error: error.message || 'Indexing failed' },
+      { error: 'Indexing failed' },
       { status: 500 }
     );
   }
 }
 
 export async function DELETE(request: NextRequest) {
+  // Admin-only endpoint: require a secret token to prevent unauthorized deletion
+  const authHeader = request.headers.get('authorization');
+  const adminToken = process.env.ADMIN_API_TOKEN;
+  if (!adminToken || authHeader !== `Bearer ${adminToken}`) {
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+
   const country = request.nextUrl.searchParams.get('country');
 
   if (!country) {
@@ -80,10 +114,18 @@ export async function DELETE(request: NextRequest) {
     );
   }
 
-  const deleted = await clearDestinationHotels(country);
-  return NextResponse.json({
-    success: true,
-    country,
-    deletedCount: deleted,
-  });
+  try {
+    const deleted = await clearDestinationHotels(country);
+    return NextResponse.json({
+      success: true,
+      country,
+      deletedCount: deleted,
+    });
+  } catch (error: any) {
+    console.error('Delete error:', error);
+    return NextResponse.json(
+      { error: 'Failed to clear hotels' },
+      { status: 500 }
+    );
+  }
 }

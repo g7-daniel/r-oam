@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import Card from '@/components/ui/Card';
 import {
   MapPin,
@@ -24,7 +25,14 @@ import {
 } from '@/lib/data/destinations';
 
 export default function Step2Destinations() {
-  const { trip, addDestination, removeDestination, updateDestinationNights, reorderDestinations, setDestinationHeroImage } = useTripStore();
+  const { trip, addDestination, removeDestination, updateDestinationNights, reorderDestinations, setDestinationHeroImage } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    addDestination: state.addDestination,
+    removeDestination: state.removeDestination,
+    updateDestinationNights: state.updateDestinationNights,
+    reorderDestinations: state.reorderDestinations,
+    setDestinationHeroImage: state.setDestinationHeroImage,
+  })));
   const { destinations, basics } = trip;
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -331,7 +339,7 @@ export default function Step2Destinations() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search any city, country, or region..."
-              className="w-full pl-12 pr-12 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              className="w-full pl-12 pr-12 py-3 text-base border border-slate-200 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleCustomDestination();
                 if (e.key === 'Escape') {

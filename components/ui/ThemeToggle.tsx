@@ -6,28 +6,22 @@ import { Sun, Moon } from 'lucide-react';
 export default function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
 
+  const label = theme === 'light'
+    ? 'Switch to dark mode'
+    : 'Switch to light mode';
+
+  const icon = theme === 'light'
+    ? <Sun className="w-5 h-5 text-amber-700 transition-transform duration-300 hover:rotate-90" aria-hidden="true" />
+    : <Moon className="w-5 h-5 text-blue-400 transition-transform duration-300 hover:-rotate-12" aria-hidden="true" />;
+
   return (
     <button
       onClick={toggleTheme}
-      className="relative w-14 h-7 rounded-full bg-slate-200 dark:bg-slate-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900"
-      aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+      className="relative flex items-center justify-center w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-slate-200/80 dark:bg-slate-700/80 backdrop-blur-sm transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-reddit focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 touch-manipulation hover:bg-slate-300 dark:hover:bg-slate-600 hover:scale-110 active:scale-95 shadow-sm hover:shadow-md"
+      aria-label={label}
+      title={label}
     >
-      {/* Track icons */}
-      <Sun className="absolute left-1.5 top-1.5 w-4 h-4 text-amber-500 transition-opacity duration-300 opacity-100 dark:opacity-30" />
-      <Moon className="absolute right-1.5 top-1.5 w-4 h-4 text-slate-400 dark:text-blue-300 transition-opacity duration-300 opacity-30 dark:opacity-100" />
-
-      {/* Thumb */}
-      <span
-        className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow-md transition-all duration-300 flex items-center justify-center ${
-          theme === 'dark' ? 'left-[calc(100%-26px)]' : 'left-0.5'
-        }`}
-      >
-        {theme === 'dark' ? (
-          <Moon className="w-3.5 h-3.5 text-blue-500" />
-        ) : (
-          <Sun className="w-3.5 h-3.5 text-amber-500" />
-        )}
-      </span>
+      {icon}
     </button>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import TripSummary from './TripSummary';
 import Step1TripBasics from './Step1TripBasics';
 import Step2Destinations from './Step2Destinations';
@@ -66,7 +67,13 @@ export default function JourneyWizardV2() {
     nextStep,
     prevStep,
     resetTrip,
-  } = useTripStore();
+  } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    setCurrentStep: state.setCurrentStep,
+    nextStep: state.nextStep,
+    prevStep: state.prevStep,
+    resetTrip: state.resetTrip,
+  })));
 
   const { currentStep, destinations } = trip;
 

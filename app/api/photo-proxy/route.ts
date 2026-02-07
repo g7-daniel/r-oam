@@ -22,10 +22,28 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Validate photo reference format to prevent SSRF attacks
+  // Google photo references are alphanumeric with some special chars, typically 100-500 chars
+  if (photoReference.length > 1000 || !/^[A-Za-z0-9_\-=]+$/.test(photoReference)) {
+    return NextResponse.json(
+      { error: 'Invalid photo reference format' },
+      { status: 400 }
+    );
+  }
+
+  // Validate maxWidth to prevent abuse
+  const maxWidthNum = parseInt(maxWidth, 10);
+  if (isNaN(maxWidthNum) || maxWidthNum < 1 || maxWidthNum > 4096) {
+    return NextResponse.json(
+      { error: 'Invalid maxwidth parameter (must be 1-4096)' },
+      { status: 400 }
+    );
+  }
+
   if (!isConfigured.googleMaps()) {
     return NextResponse.json(
-      { error: 'Google Maps API not configured. Set GOOGLE_MAPS_API_KEY in .env.local' },
-      { status: 500 }
+      { error: 'Photo service is temporarily unavailable' },
+      { status: 503 }
     );
   }
   const apiKey = serverEnv.GOOGLE_MAPS_API_KEY;

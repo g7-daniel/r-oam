@@ -4,22 +4,35 @@ import OpenAI from 'openai';
 import { GoogleGenAI } from '@google/genai';
 import { searchReddit } from '@/lib/reddit';
 import { sanitizeDestination, sanitizeUserInput } from '@/lib/prompt-sanitizer';
+import { serverEnv, isConfigured } from '@/lib/env';
 
 export const runtime = 'nodejs';
 
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
-// Initialize Groq client
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY || '',
-  baseURL: 'https://api.groq.com/openai/v1',
-});
+// Lazy-initialize Groq client
+let _groq: OpenAI | null = null;
+function getGroq(): OpenAI {
+  if (!_groq) {
+    _groq = new OpenAI({
+      apiKey: serverEnv.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
+  }
+  return _groq;
+}
 
-// Initialize Gemini client (fallback)
-const gemini = process.env.GEMINI_API_KEY
-  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-  : null;
+// Lazy-initialize Gemini client (fallback)
+let _gemini: GoogleGenAI | null | undefined = undefined;
+function getGemini(): GoogleGenAI | null {
+  if (_gemini === undefined) {
+    _gemini = serverEnv.GEMINI_API_KEY
+      ? new GoogleGenAI({ apiKey: serverEnv.GEMINI_API_KEY })
+      : null;
+  }
+  return _gemini;
+}
 
 // ============ ZOD SCHEMAS ============
 
@@ -582,11 +595,9 @@ function parseAIResponse(content: string): AIResponse {
 async function callGemini(
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
 ): Promise<AIResponse> {
-  if (!gemini) {
+  if (!getGemini()) {
     throw new Error('Gemini not configured');
   }
-
-  console.log('Falling back to Gemini...');
 
   // Combine system prompt with conversation into a single prompt
   const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
@@ -602,7 +613,7 @@ async function callGemini(
   // Retry up to 2 times
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const response = await gemini.models.generateContent({
+      const response = await getGemini()!.models.generateContent({
         model: GEMINI_MODEL,
         contents: fullPrompt,
         config: {
@@ -613,7 +624,6 @@ async function callGemini(
       });
 
       const content = response.text || '';
-      console.log(`Gemini attempt ${attempt + 1}, response length:`, content.length);
 
       return parseAIResponse(content);
     } catch (parseError) {
@@ -635,9 +645,8 @@ async function callAIWithRetry(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`AI call attempt ${attempt + 1} using Groq`);
 
-      const response = await groq.chat.completions.create({
+      const response = await getGroq().chat.completions.create({
         model: GROQ_MODEL,
         messages,
         temperature: attempt === 0 ? 0.7 : 0.4 - (attempt * 0.1),
@@ -657,7 +666,6 @@ async function callAIWithRetry(
       if (errorMessage.includes('Rate limit') || errorMessage.includes('rate_limit') ||
           errorMessage.includes('429') || errorMessage.includes('quota')) {
         isRateLimited = true;
-        console.log('Groq rate limited, will try Gemini fallback');
         break; // Exit Groq retry loop to try Gemini
       }
 
@@ -674,9 +682,8 @@ async function callAIWithRetry(
   }
 
   // Try Gemini fallback if rate limited or all Groq retries failed
-  if (gemini) {
+  if (getGemini()) {
     try {
-      console.log('Attempting Gemini fallback...');
       return await callGemini(messages);
     } catch (geminiError) {
       console.error('Gemini fallback also failed:', geminiError);
@@ -699,15 +706,22 @@ async function callAIWithRetry(
 export async function POST(request: NextRequest) {
   try {
     // Validate request
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ type: 'error', message: 'Invalid JSON in request body' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
     const validatedRequest = RequestSchema.safeParse(body);
 
     if (!validatedRequest.success) {
       return new Response(
         JSON.stringify({
           type: 'error',
-          message: 'Invalid request format',
-          errors: validatedRequest.error.issues,
+          message: 'Invalid request format. Please check your input and try again.',
         }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
@@ -737,11 +751,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Check Groq configuration
-    if (!process.env.GROQ_API_KEY) {
+    if (!isConfigured.groq()) {
       return new Response(
         JSON.stringify({
           type: 'error',
-          message: 'AI service not configured. Please add GROQ_API_KEY to your environment.',
+          message: 'AI service is temporarily unavailable. Please try again later.',
         }),
         { status: 503, headers: { 'Content-Type': 'application/json' } }
       );

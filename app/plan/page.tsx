@@ -6,7 +6,7 @@ import { useTripStore } from '@/stores/tripStore';
 
 export default function PlanPage() {
   const router = useRouter();
-  const { trip } = useTripStore();
+  const trip = useTripStore((state) => state.trip);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -41,10 +41,10 @@ export default function PlanPage() {
   }, [isClient, trip.destinations.length, trip.id, router]);
 
   return (
-    <div className="flex items-center justify-center min-h-[60vh]">
+    <div className="flex items-center justify-center min-h-[60vh] bg-slate-50 dark:bg-slate-900">
       <div className="text-center">
-        <div className="w-16 h-16 border-4 border-primary-200 border-t-primary-500 rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-gray-600">Loading your journey planner...</p>
+        <div className="w-16 h-16 border-4 border-primary-200 dark:border-primary-800 border-t-primary-500 rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-slate-600 dark:text-slate-400">Loading your journey planner...</p>
       </div>
     </div>
   );

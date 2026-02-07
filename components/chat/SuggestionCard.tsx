@@ -21,13 +21,13 @@ export default function SuggestionCard({
       className={clsx(
         'relative p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all min-h-[44px]',
         isSelected
-          ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20 shadow-md'
+          ? 'border-accent-500 bg-accent-50 dark:bg-green-900/20 shadow-md'
           : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-sm'
       )}
     >
       {/* Selection indicator */}
       {isSelected && (
-        <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-teal-500 flex items-center justify-center">
+        <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-accent-500 flex items-center justify-center">
           <Check className="w-4 h-4 text-white" />
         </div>
       )}
@@ -78,7 +78,7 @@ export default function SuggestionCard({
             className={clsx(
               'px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-xs rounded-full capitalize',
               isSelected
-                ? 'bg-teal-200 dark:bg-teal-800 text-teal-700 dark:text-teal-300'
+                ? 'bg-accent-200 dark:bg-green-800 text-accent-700 dark:text-green-300'
                 : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
             )}
           >

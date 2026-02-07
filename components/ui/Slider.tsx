@@ -78,8 +78,7 @@ const Slider = forwardRef<HTMLInputElement, SliderProps>(
                     ? 'text-red-600 dark:text-red-400'
                     : 'text-orange-600 dark:text-orange-400'
                 )}
-                aria-live="polite"
-                aria-atomic="true"
+                aria-hidden="true"
               >
                 {displayValue}
               </span>
@@ -119,15 +118,16 @@ const Slider = forwardRef<HTMLInputElement, SliderProps>(
             aria-valuetext={displayValue}
             aria-invalid={!!error}
             aria-describedby={[errorId, helperId].filter(Boolean).join(' ') || undefined}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer focus:outline-none"
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer focus:outline-none peer"
             {...props}
           />
           <div
             className={clsx(
-              'absolute top-1/2 -translate-y-1/2 w-6 h-6 bg-white rounded-full shadow-lg pointer-events-none transition-all duration-150',
+              'absolute top-1/2 -translate-y-1/2 w-6 h-6 bg-white dark:bg-slate-200 rounded-full shadow-lg pointer-events-none transition-all duration-150',
               error
                 ? 'border-2 border-red-500'
-                : 'border-2 border-orange-500'
+                : 'border-2 border-orange-500',
+              'peer-focus-visible:ring-2 peer-focus-visible:ring-orange-500 peer-focus-visible:ring-offset-2 dark:peer-focus-visible:ring-offset-slate-900'
             )}
             style={{ left: `calc(${percentage}% - 12px)` }}
             aria-hidden="true"

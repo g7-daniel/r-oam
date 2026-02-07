@@ -73,7 +73,6 @@ async function verifyHotelWithGoogle(
             hotelLng
           );
           if (distance > maxDistanceKm) {
-            console.log(`Rejected hotel "${match.name}" - ${distance.toFixed(0)}km from destination (max ${maxDistanceKm}km)`);
             return null; // Hotel is too far from destination
           }
         }
@@ -181,7 +180,15 @@ export async function GET(request: NextRequest) {
 // POST handler for preference-based search (from Snoo questionnaire or subreddit selection)
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON in request body' },
+        { status: 400 }
+      );
+    }
     const { destination, preferences, subreddits, lat, lng, cityCode, checkInDate, checkOutDate, adults } = body;
     const destinationCoords = lat && lng ? { lat, lng } : undefined;
 
@@ -203,8 +210,6 @@ export async function POST(request: NextRequest) {
       subreddits: subreddits || [],
       keywords: [...styleKeywords, ...priorityKeywords].join(' '),
     };
-
-    console.log('Reddit hotel search:', searchContext);
 
     // If specific subreddits are provided, search those directly
     let recommendations: any[] = [];
@@ -302,14 +307,11 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      console.log(`Reddit search found ${hotelMentions.size} unique hotel mentions before filtering`);
-
       // Convert to array and sort by mentions + upvotes
       const rawRecommendations = Array.from(hotelMentions.values())
         .filter(h => {
           // Filter: must have positive sentiment, and name must look like a real hotel
           if (h.count < 1 || h.totalScore < 0) {
-            console.log(`Filtered out "${h.name}" - sentiment: ${h.totalScore}`);
             return false;
           }
 
@@ -318,14 +320,12 @@ export async function POST(request: NextRequest) {
           const words = h.name.trim().split(/\s+/);
           const hasKnownBrand = KNOWN_HOTEL_BRANDS.some(brand => name.includes(brand));
           if (words.length < 2 && !hasKnownBrand) {
-            console.log(`Filtered out "${h.name}" - not a known brand and < 2 words`);
             return false;
           }
 
           // Reject names that are just locations
           const locationWords = ['in', 'at', 'the', 'and', 'a', 'an'];
           if (locationWords.includes(words[0].toLowerCase())) {
-            console.log(`Filtered out "${h.name}" - starts with location word`);
             return false;
           }
 
@@ -354,8 +354,6 @@ export async function POST(request: NextRequest) {
         (rec) => (rec.upvotes || 0) >= MIN_UPVOTES
       );
 
-      console.log(`Reddit: Filtered ${rawRecommendations.length} -> ${qualityRecommendations.length} by upvotes (min ${MIN_UPVOTES})`);
-
       // Verify ALL quality hotels with Google Places (with distance check)
       // ONLY include hotels that pass verification - no exceptions for brands
       const verificationPromises = qualityRecommendations.map(async (rec) => {
@@ -375,7 +373,6 @@ export async function POST(request: NextRequest) {
           };
         }
         // Hotel failed verification (wrong location or not found) - exclude it
-        console.log(`Excluded hotel "${rec.rawName}" - failed location verification for ${destination}`);
         return null;
       });
 
@@ -384,7 +381,6 @@ export async function POST(request: NextRequest) {
 
       // FALLBACK: If luxury search but few results, add known luxury hotels for the destination
       if (isLuxurySearch && recommendations.length < 5) {
-        console.log(`Reddit: Only ${recommendations.length} luxury hotels found, adding fallback luxury hotels`);
 
         // Known luxury hotels by destination
         const LUXURY_HOTELS_BY_DEST: Record<string, string[]> = {
@@ -422,7 +418,6 @@ export async function POST(request: NextRequest) {
               verified: true,
               isFallback: true,
             });
-            console.log(`Added fallback luxury hotel: ${verified.name}`);
           }
         }
       }
@@ -449,7 +444,6 @@ export async function POST(request: NextRequest) {
               verified: true,
             };
           }
-          console.log(`Excluded fallback hotel "${rec.hotelName}" - failed location verification`);
           return null;
         });
         const verifiedResults = await Promise.all(verificationPromises);

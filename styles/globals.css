@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Satisfy&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -7,10 +5,42 @@
 @layer base {
   html {
     scroll-behavior: smooth;
+    /* Prevent horizontal overflow on mobile */
+    overflow-x: hidden;
+    /* Prevent flash of unstyled content during theme switch */
+    color-scheme: light dark;
+  }
+
+  /* Smooth theme transitions - only for colors, not layout */
+  html.transitioning,
+  html.transitioning *,
+  html.transitioning *::before,
+  html.transitioning *::after {
+    transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease, fill 300ms ease !important;
+  }
+
+  /* Respect user preference for reduced motion on scroll */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
   }
 
   body {
-    @apply font-sans text-slate-900 dark:text-slate-100 bg-reddit-gray-100 dark:bg-slate-900 antialiased transition-colors duration-300;
+    @apply font-sans text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-900 antialiased;
+    /* Use a single consistent background token (slate-50 = #f8fafc) */
+    /* Avoid transition on body bg to prevent flash during theme toggle hydration */
+  }
+
+  /* Baseline heading typography scale */
+  h1, h2, h3, h4, h5, h6 {
+    @apply text-slate-900 dark:text-white;
+    text-wrap: balance;
+  }
+
+  /* Sensible default for paragraphs */
+  p {
+    text-wrap: pretty;
   }
 }
 
@@ -211,20 +241,47 @@
       opacity: 0.7;
     }
   }
+
+  /* Dark mode image adjustments */
+  .dark img:not([class*="no-dark-filter"]) {
+    /* Slightly reduce brightness in dark mode for better eye comfort */
+    filter: brightness(0.95);
+  }
+
+  .dark img[class*="logo"],
+  .dark img[class*="icon"] {
+    /* Don't adjust logos or icons */
+    filter: none;
+  }
 }
 
 /* Custom scrollbar - Reddit style */
+/* Firefox standard properties */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #CBD5E1 #F1F5F9;
+}
+
+.dark * {
+  scrollbar-color: #475569 #1e293b;
+}
+
+/* WebKit (Chrome, Safari, Edge) scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-reddit-gray-100 dark:bg-slate-800 rounded-full;
+  @apply bg-slate-100 dark:bg-slate-800;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-reddit-gray-300 dark:bg-slate-600 rounded-full hover:bg-reddit-gray-400 dark:hover:bg-slate-500;
+  @apply bg-slate-300 dark:bg-slate-600 rounded-md hover:bg-slate-400 dark:hover:bg-slate-500 transition-colors;
+}
+
+::-webkit-scrollbar-thumb:active {
+  @apply bg-slate-500 dark:bg-slate-400;
 }
 
 /* Hide scrollbar utility */
@@ -286,14 +343,96 @@
   @apply w-full h-[400px] rounded-lg overflow-hidden shadow-reddit dark:shadow-slate-900/50;
 }
 
+/* Leaflet zoom controls positioning and styling */
+.leaflet-control-zoom {
+  @apply border-none shadow-lg;
+}
+
+.leaflet-control-zoom a {
+  @apply bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors;
+}
+
+.leaflet-control-zoom a:hover {
+  @apply bg-slate-50 dark:bg-slate-700 border-slate-300 dark:border-slate-600;
+}
+
+.leaflet-control-zoom a:first-child {
+  @apply rounded-t-lg;
+}
+
+.leaflet-control-zoom a:last-child {
+  @apply rounded-b-lg border-t-0;
+}
+
+/* Leaflet popup styling for dark mode */
+.dark .leaflet-popup-content-wrapper,
+.dark .leaflet-popup-tip {
+  @apply bg-slate-800 text-slate-100 shadow-xl;
+}
+
+.dark .leaflet-popup-content-wrapper {
+  @apply border border-slate-700;
+}
+
+/* Smooth transitions for Leaflet tile changes */
+.leaflet-tile-container {
+  transition: opacity 300ms ease-in-out;
+}
+
 /* Reddit-style selection highlight */
 ::selection {
   @apply bg-reddit-200 dark:bg-orange-900/50 text-reddit-900 dark:text-orange-100;
 }
 
-/* Reddit-style focus ring */
-*:focus-visible {
-  @apply outline-none ring-2 ring-reddit ring-offset-2 dark:ring-offset-slate-900;
+/* Reddit-style focus ring - scoped to interactive elements only */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+[role="button"]:focus-visible,
+[role="link"]:focus-visible,
+[role="switch"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="checkbox"]:focus-visible,
+[role="radio"]:focus-visible,
+summary:focus-visible {
+  @apply outline-none ring-2 ring-reddit dark:ring-orange-500 ring-offset-2 dark:ring-offset-slate-900;
+}
+
+/* Safe area inset utilities for mobile notch/home indicator */
+.safe-area-inset-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-area-inset-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-area-inset-left {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.safe-area-inset-right {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* Margin variants for safe areas */
+.safe-area-margin-top {
+  margin-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-area-margin-bottom {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Shorthand for all safe area padding */
+.safe-area-inset {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* Reduced motion preference - disable animations for users who prefer reduced motion */
@@ -318,5 +457,84 @@
   .btn-secondary,
   .btn-accent {
     border: 2px solid currentColor;
+  }
+}
+
+/* Print styles for travel itineraries */
+@media print {
+  /* Reset backgrounds for printing */
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 12pt;
+  }
+
+  /* Hide non-essential UI elements when printing */
+  header,
+  footer,
+  nav,
+  .no-print,
+  .safe-area-inset-top,
+  .safe-area-inset-bottom,
+  button:not(.print-include),
+  [role="switch"],
+  .fixed,
+  .sticky {
+    display: none !important;
+  }
+
+  /* Ensure cards print cleanly */
+  .card,
+  .reddit-card,
+  .card-interactive,
+  .card-selected {
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Ensure links show their URL */
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #666;
+  }
+
+  /* Disable dark mode overrides for print */
+  .dark {
+    color-scheme: light;
+  }
+
+  /* Badges should print with borders instead of backgrounds */
+  .badge,
+  .badge-positive,
+  .badge-negative,
+  .badge-neutral,
+  .badge-reddit {
+    border: 1px solid #999 !important;
+    background: transparent !important;
+    color: black !important;
+  }
+
+  /* Maps don't print well - hide the map content but keep the container
+     visible so the ::after fallback message can render */
+  .map-container {
+    height: auto !important;
+    min-height: 2em;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  .map-container > * {
+    display: none !important;
+  }
+
+  /* Show a print-friendly message for map areas */
+  .map-container::after {
+    content: "[Map - see online version]";
+    display: block;
+    font-style: italic;
+    color: #666;
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import type { ValidationResult } from '@/lib/validation';
 
 // ============================================================================
@@ -291,13 +291,16 @@ export function useFieldValidation<T>(
   const [error, setError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
 
+  const valueRef = useRef<T>(initialValue);
+  valueRef.current = value;
+
   const validateValue = useCallback(
-    (val: T = value): ValidationResult => {
-      const result = validate(val);
+    (val?: T): ValidationResult => {
+      const result = validate(val !== undefined ? val : valueRef.current);
       setError(result.error || null);
       return result;
     },
-    [value, validate]
+    [validate]
   );
 
   const setValue = useCallback(

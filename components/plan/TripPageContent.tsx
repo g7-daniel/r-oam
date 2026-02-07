@@ -8,7 +8,7 @@ import ItineraryBuilder from '@/components/builder/ItineraryBuilder';
 export default function TripPageContent() {
   const params = useParams();
   const router = useRouter();
-  const { trip } = useTripStore();
+  const trip = useTripStore((state) => state.trip);
   const [isReady, setIsReady] = useState(false);
   const [hasDestinations, setHasDestinations] = useState<boolean | null>(null);
 
@@ -20,11 +20,14 @@ export default function TripPageContent() {
       if (stored) {
         const parsed = JSON.parse(stored);
         const destinations = parsed?.state?.trip?.destinations || [];
+        console.log(`[TripPageContent] localStorage check: ${destinations.length} destinations, version=${parsed?.version}, tripId=${parsed?.state?.trip?.id}`);
         setHasDestinations(destinations.length > 0);
       } else {
+        console.log('[TripPageContent] localStorage check: no data found');
         setHasDestinations(false);
       }
     } catch (e) {
+      console.error('[TripPageContent] localStorage read error:', e);
       // If localStorage fails, fall back to store state after delay
       setHasDestinations(null);
     }

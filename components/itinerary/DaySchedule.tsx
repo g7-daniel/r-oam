@@ -80,15 +80,15 @@ export default function DaySchedule({
   return (
     <div
       className={clsx(
-        'bg-white rounded-2xl border overflow-hidden transition-all',
-        day.isTransitionDay ? 'border-sky-200 bg-sky-50/30' : 'border-slate-200'
+        'bg-white dark:bg-slate-800 rounded-2xl border overflow-hidden transition-all',
+        day.isTransitionDay ? 'border-sky-200 dark:border-sky-800 bg-sky-50/30 dark:bg-sky-900/20' : 'border-slate-200 dark:border-slate-700'
       )}
     >
       {/* Day Header */}
       <div
         className={clsx(
-          'flex items-center gap-4 p-4 cursor-pointer hover:bg-slate-50 transition-colors',
-          day.isTransitionDay && 'bg-sky-100/50 hover:bg-sky-100'
+          'flex items-center gap-4 p-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors',
+          day.isTransitionDay && 'bg-sky-100/50 dark:bg-sky-900/30 hover:bg-sky-100 dark:hover:bg-sky-900/50'
         )}
         onClick={onToggleExpand}
       >
@@ -96,7 +96,7 @@ export default function DaySchedule({
           className={clsx(
             'w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold',
             day.isTransitionDay
-              ? 'bg-sky-500 text-white'
+              ? 'bg-secondary-500 text-white'
               : 'bg-gradient-to-br from-orange-500 to-amber-500 text-white'
           )}
         >
@@ -105,16 +105,16 @@ export default function DaySchedule({
 
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-slate-700">
+            <h3 className="font-semibold text-slate-700 dark:text-white">
               {day.isTransitionDay ? 'Travel Day' : `Day ${day.dayNumber}`}
             </h3>
             {legName && (
-              <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-full">
+              <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs rounded-full">
                 {legName}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 text-sm text-slate-500 mt-0.5">
+          <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400 mt-0.5">
             <span className="flex items-center gap-1">
               <Calendar className="w-4 h-4" />
               {formatDate(day.date)}
@@ -129,7 +129,11 @@ export default function DaySchedule({
 
         {getTimeOfDayIcon()}
 
-        <button className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+        <button
+          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+          aria-label={isExpanded ? 'Collapse day' : 'Expand day'}
+          aria-expanded={isExpanded}
+        >
           {isExpanded ? (
             <ChevronUp className="w-5 h-5 text-slate-400" />
           ) : (
@@ -140,19 +144,19 @@ export default function DaySchedule({
 
       {/* Day Content */}
       {isExpanded && (
-        <div className="border-t border-slate-100">
+        <div className="border-t border-slate-100 dark:border-slate-700">
           {day.notes && (
-            <div className="px-4 py-3 bg-amber-50 text-amber-700 text-sm border-b border-amber-100">
+            <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-sm border-b border-amber-100 dark:border-amber-800">
               {day.notes}
             </div>
           )}
 
           <div className="p-4 space-y-2">
             {day.items.length === 0 ? (
-              <div className="text-center py-8 text-slate-400">
+              <div className="text-center py-8 text-slate-400 dark:text-slate-500">
                 <Calendar className="w-12 h-12 mx-auto mb-2 opacity-50" />
                 <p>No activities scheduled</p>
-                <p className="text-xs">Drag experiences here to add them</p>
+                <p className="text-xs mt-1">Drag experiences here to add them</p>
               </div>
             ) : (
               day.items.map((item, index) => {
@@ -171,9 +175,11 @@ export default function DaySchedule({
                     onDragEnd={handleDragEnd}
                     onDragLeave={handleDragLeave}
                     className={clsx(
+                      'transition-all duration-200',
                       dragOverIndex === experienceIndex &&
                         draggedIndex !== experienceIndex &&
-                        'border-t-2 border-sky-500'
+                        'border-t-4 border-primary-500 -mt-1 pt-1',
+                      draggedIndex === experienceIndex && 'opacity-50 scale-95'
                     )}
                   >
                     <ItinerarySlot

@@ -17,6 +17,12 @@
 // TYPES
 // ============================================================================
 
+/** Error with HTTP status and response data for API error handling */
+interface FetchError extends Error {
+  status: number;
+  data: unknown;
+}
+
 interface InFlightRequest<T> {
   promise: Promise<T>;
   timestamp: number;
@@ -73,6 +79,10 @@ class RequestDeduplicator {
     // Periodic cleanup every 60 seconds
     if (typeof setInterval !== 'undefined') {
       this.cleanupIntervalId = setInterval(() => this.cleanup(), 60000);
+      // Unref the interval so it doesn't prevent Node.js from exiting
+      if (this.cleanupIntervalId && typeof this.cleanupIntervalId === 'object' && 'unref' in this.cleanupIntervalId) {
+        (this.cleanupIntervalId as NodeJS.Timeout).unref();
+      }
     }
   }
 
@@ -171,12 +181,16 @@ class RequestDeduplicator {
     fetcher: () => Promise<T>,
     timeout: number
   ): Promise<T> {
-    return Promise.race([
-      fetcher(),
-      new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error(`Request timeout after ${timeout}ms`)), timeout);
-      }),
-    ]);
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`Request timeout after ${timeout}ms`)), timeout);
+    });
+
+    try {
+      return await Promise.race([fetcher(), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutId!);
+    }
   }
 
   /**
@@ -288,7 +302,6 @@ class RequestDeduplicator {
     const inFlightEntries = Array.from(this.inFlight.entries());
     for (const [key, request] of inFlightEntries) {
       if (request.timestamp < staleThreshold) {
-        console.warn(`[RequestDedup] Cleaning stale in-flight request: ${key}`);
         this.inFlight.delete(key);
       }
     }
@@ -301,7 +314,7 @@ class RequestDeduplicator {
 
 // Guard against HMR creating duplicate instances with stale intervals
 const globalKey = '__requestDedup__' as const;
-const globalObj = (typeof globalThis !== 'undefined' ? globalThis : {}) as Record<string, any>;
+const globalObj = (typeof globalThis !== 'undefined' ? globalThis : {}) as Record<string, unknown>;
 if (globalObj[globalKey]) {
   (globalObj[globalKey] as RequestDeduplicator).destroy();
 }
@@ -332,9 +345,9 @@ export async function dedupedFetch<T = unknown>(
         const errorData = await response.json().catch(() => ({}));
         const error = new Error(
           errorData.message || `Request failed with status ${response.status}`
-        );
-        (error as any).status = response.status;
-        (error as any).data = errorData;
+        ) as FetchError;
+        error.status = response.status;
+        error.data = errorData;
         throw error;
       }
 
@@ -368,9 +381,9 @@ export async function dedupedPost<T = unknown, D = unknown>(
         const errorData = await response.json().catch(() => ({}));
         const error = new Error(
           errorData.message || `Request failed with status ${response.status}`
-        );
-        (error as any).status = response.status;
-        (error as any).data = errorData;
+        ) as FetchError;
+        error.status = response.status;
+        error.data = errorData;
         throw error;
       }
 

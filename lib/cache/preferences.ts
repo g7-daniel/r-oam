@@ -47,7 +47,6 @@ export function getPreference<T>(key: string, defaultValue: T): T {
 
     return parsed.value;
   } catch (error) {
-    console.warn(`[Preferences] Failed to read ${key}:`, error);
     return defaultValue;
   }
 }
@@ -66,7 +65,6 @@ export function setPreference<T>(key: string, value: T, ttlMs: number = DEFAULT_
     };
     localStorage.setItem(`${CACHE_NAMESPACE}:${key}`, JSON.stringify(cached));
   } catch (error) {
-    console.warn(`[Preferences] Failed to set ${key}:`, error);
     // If storage is full, try to clear old entries
     if (error instanceof Error && error.name === 'QuotaExceededError') {
       clearExpiredPreferences();
@@ -124,7 +122,6 @@ export function clearExpiredPreferences(): void {
   }
 
   if (keysToRemove.length > 0) {
-    console.log(`[Preferences] Cleared ${keysToRemove.length} expired entries`);
   }
 }
 

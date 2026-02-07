@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import type { StateStorage } from 'zustand/middleware';
 import {
   Trip,
   TripBasics,
@@ -15,7 +16,7 @@ import {
   Flight,
   FlightLeg,
   FlightLegStatus,
-  ChatMessage,
+  JourneyChatMessage,
   ChatThread,
   CartItem,
   DiningReservation,
@@ -248,7 +249,7 @@ interface TripStoreState {
   getFlightLeg: (legId: string) => FlightLeg | null;
 
   // ============ CHAT ACTIONS ============
-  addChatMessage: (destinationId: string, message: ChatMessage) => void;
+  addChatMessage: (destinationId: string, message: JourneyChatMessage) => void;
   updateLastMessage: (destinationId: string, content: string, recommendations?: Recommendation[]) => void;
   getChatThread: (destinationId: string) => ChatThread | null;
 
@@ -308,6 +309,41 @@ interface TripStoreState {
   };
 }
 
+// ============ STORE VERSION & MIGRATION ============
+
+const STORE_VERSION = 2;
+
+// Migration function for handling schema changes between versions
+const migrateStore = (persistedState: any, version: number): any => {
+  if (version < 2) {
+    // Version 1 -> 2: Ensure collections, customLists, and scheduledItems exist
+    // Zustand persist does a shallow merge, so missing top-level keys from v1
+    // data would be undefined rather than falling back to initial state defaults.
+    if (!persistedState.collections) {
+      persistedState.collections = { experiences: [], restaurants: [] };
+    }
+    if (!persistedState.customLists) {
+      persistedState.customLists = [];
+    }
+    if (!persistedState.scheduledItems) {
+      persistedState.scheduledItems = [];
+    }
+    if (!persistedState.experienceCart) {
+      persistedState.experienceCart = [];
+    }
+    if (!persistedState.diningReservations) {
+      persistedState.diningReservations = [];
+    }
+    if (!persistedState.itineraryAssignments) {
+      persistedState.itineraryAssignments = [];
+    }
+  }
+  return persistedState;
+};
+
+// Cache for last successfully serialized state to prevent data loss on circular reference errors
+let _lastGoodPersistedState: Record<string, any> | null = null;
+
 // ============ STORE IMPLEMENTATION ============
 
 export const useTripStore = create<TripStoreState>()(
@@ -333,17 +369,30 @@ export const useTripStore = create<TripStoreState>()(
 
       // ============ LOADING & ERROR ACTIONS ============
       setLoading: (operationType: AsyncOperationType, isLoading: boolean) =>
-        set((state) => ({
-          loading: {
-            ...state.loading,
-            isLoading: isLoading || Object.values({ ...state.loading.operations, [operationType]: isLoading }).some(Boolean),
-            operationType: isLoading ? operationType : state.loading.operationType,
-            operations: {
-              ...state.loading.operations,
-              [operationType]: isLoading,
+        set((state) => {
+          const updatedOperations = {
+            ...state.loading.operations,
+            [operationType]: isLoading,
+          };
+          const anyStillLoading = Object.values(updatedOperations).some(Boolean);
+          // When clearing a loading flag, find an operation that IS still loading
+          // (not the one that just finished) to use as the active operationType
+          let activeOperationType: AsyncOperationType | null = null;
+          if (isLoading) {
+            activeOperationType = operationType;
+          } else if (anyStillLoading) {
+            const stillLoadingEntry = Object.entries(updatedOperations).find(([, v]) => v === true);
+            activeOperationType = stillLoadingEntry ? stillLoadingEntry[0] as AsyncOperationType : null;
+          }
+          return {
+            loading: {
+              ...state.loading,
+              isLoading: anyStillLoading,
+              operationType: activeOperationType,
+              operations: updatedOperations,
             },
-          },
-        })),
+          };
+        }),
 
       setError: (operationType: AsyncOperationType, error: string | null) =>
         set((state) => ({
@@ -541,6 +590,29 @@ export const useTripStore = create<TripStoreState>()(
               activeDestinationId: newActiveId,
               updatedAt: new Date().toISOString(),
             },
+            // Clean up orphaned references for the removed destination
+            collections: {
+              experiences: state.collections.experiences.filter(
+                (i) => i.destinationId !== destinationId
+              ),
+              restaurants: state.collections.restaurants.filter(
+                (i) => i.destinationId !== destinationId
+              ),
+            },
+            scheduledItems: state.scheduledItems.filter(
+              (i) => i.destinationId !== destinationId
+            ),
+            // Clean up custom list items that belong to removed destination
+            customLists: state.customLists.map(list => ({
+              ...list,
+              items: list.items.filter(i => i.destinationId !== destinationId),
+            })),
+            experienceCart: state.experienceCart.filter(
+              (i) => i.destinationId !== destinationId
+            ),
+            diningReservations: state.diningReservations.filter(
+              (r) => r.destinationId !== destinationId
+            ),
           };
         }),
 
@@ -1172,11 +1244,11 @@ export const useTripStore = create<TripStoreState>()(
           case 3: // AI Discovery requires at least one destination
             return destinations.length > 0;
           case 4: // Experiences requires discovery complete for all destinations
-            return destinations.every((d) => d.discovery.isComplete);
+            return destinations.length > 0 && destinations.every((d) => d.discovery.isComplete);
           case 5: // Hotels - can always proceed if we have destinations
             return destinations.length > 0;
           case 6: // Flights - needs hotels selected for all destinations
-            return destinations.every((d) => d.hotels.selectedHotelId !== null);
+            return destinations.length > 0 && destinations.every((d) => d.hotels.selectedHotelId !== null);
           case 7: // Itinerary - all flights must be selected or skipped
             return state.canProceedFromFlights();
           case 8: // Review - itinerary ready
@@ -1293,23 +1365,60 @@ export const useTripStore = create<TripStoreState>()(
           recommendation,
           addedAt: new Date().toISOString(),
         };
+        // Atomic: add to cart AND select spot in discovery in a single set() call
         set((state) => ({
           experienceCart: [...state.experienceCart, cartItem],
+          trip: {
+            ...state.trip,
+            destinations: state.trip.destinations.map((d) =>
+              d.destinationId === destinationId
+                ? {
+                    ...d,
+                    discovery: {
+                      ...d.discovery,
+                      selectedSpotIds: d.discovery.selectedSpotIds.includes(recommendation.id)
+                        ? d.discovery.selectedSpotIds
+                        : [...d.discovery.selectedSpotIds, recommendation.id],
+                    },
+                  }
+                : d
+            ),
+            updatedAt: new Date().toISOString(),
+          },
         }));
-        // Also select the spot in discovery
-        get().selectSpot(destinationId, recommendation.id);
       },
 
       removeFromCart: (cartItemId) => {
-        const state = get();
-        const cartItem = state.experienceCart.find((item) => item.id === cartItemId);
-        if (cartItem) {
-          // Also deselect the spot in discovery
-          get().deselectSpot(cartItem.destinationId, cartItem.recommendation.id);
-        }
-        set((state) => ({
-          experienceCart: state.experienceCart.filter((item) => item.id !== cartItemId),
-        }));
+        // Atomic: remove from cart AND deselect spot in discovery in a single set() call
+        set((state) => {
+          const cartItem = state.experienceCart.find((item) => item.id === cartItemId);
+          const newCart = state.experienceCart.filter((item) => item.id !== cartItemId);
+
+          if (cartItem) {
+            return {
+              experienceCart: newCart,
+              trip: {
+                ...state.trip,
+                destinations: state.trip.destinations.map((d) =>
+                  d.destinationId === cartItem.destinationId
+                    ? {
+                        ...d,
+                        discovery: {
+                          ...d.discovery,
+                          selectedSpotIds: d.discovery.selectedSpotIds.filter(
+                            (id) => id !== cartItem.recommendation.id
+                          ),
+                        },
+                      }
+                    : d
+                ),
+                updatedAt: new Date().toISOString(),
+              },
+            };
+          }
+
+          return { experienceCart: newCart };
+        });
       },
 
       getCartTotal: () => {
@@ -1431,13 +1540,14 @@ export const useTripStore = create<TripStoreState>()(
             };
           }
 
-          // Custom list
+          // Custom list - also unschedule if scheduled
           return {
             customLists: state.customLists.map(list =>
               list.id === type
                 ? { ...list, items: list.items.filter(i => i.id !== itemId) }
                 : list
             ),
+            scheduledItems: state.scheduledItems.filter(i => i.id !== itemId),
           };
         });
       },
@@ -1464,12 +1574,16 @@ export const useTripStore = create<TripStoreState>()(
           const existingIndex = state.scheduledItems.findIndex(i => i.id === itemId);
 
           if (existingIndex >= 0) {
-            // Update existing
+            // Update existing - exclude the item itself when counting for default order
+            // to avoid off-by-one when moving within the same day
             const updated = [...state.scheduledItems];
+            const otherItemsOnDay = state.scheduledItems.filter(
+              i => i.scheduledDayIndex === dayIndex && i.id !== itemId
+            );
             updated[existingIndex] = {
               ...updated[existingIndex],
               scheduledDayIndex: dayIndex,
-              order: position ?? state.scheduledItems.filter(i => i.scheduledDayIndex === dayIndex).length,
+              order: position ?? otherItemsOnDay.length,
             };
             return { scheduledItems: updated };
           }
@@ -1503,7 +1617,7 @@ export const useTripStore = create<TripStoreState>()(
 
       reorderScheduledItem: (dayIndex, fromIndex, toIndex) => {
         set((state) => {
-          // Get items for this day
+          // Get items for this day - create a shallow copy to avoid mutating state
           const dayItems = state.scheduledItems
             .filter(i => i.scheduledDayIndex === dayIndex)
             .sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -1512,12 +1626,13 @@ export const useTripStore = create<TripStoreState>()(
             return state;
           }
 
-          // Reorder
-          const [moved] = dayItems.splice(fromIndex, 1);
-          dayItems.splice(toIndex, 0, moved);
+          // Reorder immutably - remove item at fromIndex and insert at toIndex
+          const reordered = dayItems.filter((_, idx) => idx !== fromIndex);
+          const moved = dayItems[fromIndex];
+          reordered.splice(toIndex, 0, moved);
 
           // Update orders
-          const updatedDayItems = dayItems.map((item, idx) => ({
+          const updatedDayItems = reordered.map((item, idx) => ({
             ...item,
             order: idx,
           }));
@@ -1536,11 +1651,16 @@ export const useTripStore = create<TripStoreState>()(
           const itemIndex = state.scheduledItems.findIndex(i => i.id === itemId);
           if (itemIndex < 0) return state;
 
+          // Exclude the item itself when counting for default order
+          // to avoid off-by-one when moving within the same day
+          const otherItemsOnTargetDay = state.scheduledItems.filter(
+            i => i.scheduledDayIndex === toDayIndex && i.id !== itemId
+          );
           const updated = [...state.scheduledItems];
           updated[itemIndex] = {
             ...updated[itemIndex],
             scheduledDayIndex: toDayIndex,
-            order: toPosition ?? state.scheduledItems.filter(i => i.scheduledDayIndex === toDayIndex).length,
+            order: toPosition ?? otherItemsOnTargetDay.length,
           };
 
           return { scheduledItems: updated };
@@ -1562,18 +1682,27 @@ export const useTripStore = create<TripStoreState>()(
       },
 
       deleteCustomList: (listId) => {
-        set((state) => ({
-          customLists: state.customLists.filter(l => l.id !== listId),
-        }));
+        set((state) => {
+          const listToDelete = state.customLists.find(l => l.id === listId);
+          const deletedItemIds = new Set(listToDelete?.items.map(i => i.id) ?? []);
+          return {
+            customLists: state.customLists.filter(l => l.id !== listId),
+            // Also remove any scheduled items that came from this list
+            scheduledItems: deletedItemIds.size > 0
+              ? state.scheduledItems.filter(i => !deletedItemIds.has(i.id))
+              : state.scheduledItems,
+          };
+        });
       },
 
       addToCustomList: (listId, item) => {
         set((state) => ({
-          customLists: state.customLists.map(list =>
-            list.id === listId
-              ? { ...list, items: [...list.items, item] }
-              : list
-          ),
+          customLists: state.customLists.map(list => {
+            if (list.id !== listId) return list;
+            // Prevent duplicate items in custom list
+            if (list.items.some(i => i.id === item.id)) return list;
+            return { ...list, items: [...list.items, item] };
+          }),
         }));
       },
 
@@ -1581,6 +1710,9 @@ export const useTripStore = create<TripStoreState>()(
         const { setLoading, setError } = get();
         setLoading('optimizeDay', true);
         setError('optimizeDay', null);
+
+        // Capture current state for rollback on error
+        const previousScheduledItems = get().scheduledItems;
 
         try {
           const state = get();
@@ -1614,14 +1746,20 @@ export const useTripStore = create<TripStoreState>()(
           });
 
           set((state) => {
+            // Keep items from other days, plus items on this day that lack lat/lng (not optimizable)
             const otherItems = state.scheduledItems.filter(i => i.scheduledDayIndex !== dayIndex);
+            const nonGeoItems = state.scheduledItems.filter(
+              i => i.scheduledDayIndex === dayIndex && (!i.lat || !i.lng)
+            );
             return {
-              scheduledItems: [...otherItems, ...reorderedItems],
+              scheduledItems: [...otherItems, ...reorderedItems, ...nonGeoItems],
             };
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Failed to optimize day';
           setError('optimizeDay', errorMessage);
+          // Rollback state on error
+          set({ scheduledItems: previousScheduledItems });
         } finally {
           setLoading('optimizeDay', false);
         }
@@ -1632,7 +1770,11 @@ export const useTripStore = create<TripStoreState>()(
         setLoading('autoFillDay', true);
         setError('autoFillDay', null);
 
+        // Capture current state for rollback on error
+        const previousScheduledItems = get().scheduledItems;
+
         try {
+          // Re-read state at operation time to avoid stale data from race conditions
           const state = get();
           const dayItems = state.scheduledItems.filter(i => i.scheduledDayIndex === dayIndex);
 
@@ -1670,13 +1812,47 @@ export const useTripStore = create<TripStoreState>()(
             5 // max items
           );
 
-          // Schedule suggested items
-          for (const id of suggestions) {
-            get().scheduleItem(id, dayIndex);
+          // Schedule suggested items in a single batched update
+          if (suggestions.length > 0) {
+            set((currentState) => {
+              // Re-check scheduledIds to prevent duplicate scheduling due to race conditions
+              const scheduledIds = new Set(currentState.scheduledItems.map(i => i.id));
+              const allCollectionItems = [
+                ...currentState.collections.experiences,
+                ...currentState.collections.restaurants,
+              ];
+              // Also check custom lists
+              for (const list of currentState.customLists) {
+                allCollectionItems.push(...list.items);
+              }
+
+              const newScheduled: CollectionItem[] = [];
+              let orderOffset = currentState.scheduledItems.filter(
+                i => i.scheduledDayIndex === dayIndex
+              ).length;
+
+              for (const id of suggestions) {
+                if (scheduledIds.has(id)) continue;
+                const item = allCollectionItems.find(i => i.id === id);
+                if (item) {
+                  newScheduled.push({
+                    ...item,
+                    scheduledDayIndex: dayIndex,
+                    order: orderOffset++,
+                  });
+                }
+              }
+
+              return {
+                scheduledItems: [...currentState.scheduledItems, ...newScheduled],
+              };
+            });
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Failed to auto-fill day';
           setError('autoFillDay', errorMessage);
+          // Rollback state on error
+          set({ scheduledItems: previousScheduledItems });
         } finally {
           setLoading('autoFillDay', false);
         }
@@ -1684,15 +1860,106 @@ export const useTripStore = create<TripStoreState>()(
     }),
     {
       name: 'wandercraft-trip-v2',
-      partialize: (state) => ({
-        trip: state.trip,
-        collections: state.collections,
-        customLists: state.customLists,
-        scheduledItems: state.scheduledItems,
-        experienceCart: state.experienceCart,
-        diningReservations: state.diningReservations,
-        itineraryAssignments: state.itineraryAssignments,
+      version: STORE_VERSION,
+      migrate: (persistedState: any, version: number) => {
+        return migrateStore(persistedState, version);
+      },
+      storage: createJSONStorage(() => {
+        const MAX_SIZE = 4 * 1024 * 1024; // 4MB limit (1MB buffer from 5MB localStorage max)
+
+        // Helper to clean up old/large data when quota is exceeded
+        const cleanupLocalStorage = () => {
+          try {
+            // Remove old versions of the store
+            const keysToCheck = ['wandercraft-trip', 'wandercraft-trip-v1'];
+            keysToCheck.forEach(key => {
+              if (localStorage.getItem(key)) {
+                localStorage.removeItem(key);
+                console.info(`[tripStore] Cleaned up old store: ${key}`);
+              }
+            });
+          } catch (e) {
+            console.error('[tripStore] Failed to cleanup localStorage:', e);
+          }
+        };
+
+        const guardedStorage: StateStorage = {
+          getItem: (name: string) => {
+            try {
+              return localStorage.getItem(name);
+            } catch (e) {
+              console.error('[tripStore] Failed to read from localStorage:', e);
+              return null;
+            }
+          },
+          setItem: (name: string, value: string) => {
+            try {
+              const sizeBytes = new Blob([value]).size;
+              if (sizeBytes > MAX_SIZE) {
+                console.warn(
+                  `[tripStore] localStorage write skipped: serialized size is ${(sizeBytes / (1024 * 1024)).toFixed(2)}MB, exceeding the 4MB safety limit.`
+                );
+                // Attempt cleanup and retry once
+                cleanupLocalStorage();
+                return;
+              }
+              localStorage.setItem(name, value);
+            } catch (e) {
+              if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.code === 22)) {
+                console.warn('[tripStore] localStorage quota exceeded. Attempting cleanup...');
+                cleanupLocalStorage();
+                // Try one more time after cleanup
+                try {
+                  localStorage.setItem(name, value);
+                } catch (retryError) {
+                  console.error('[tripStore] Failed to write after cleanup. Data not persisted.');
+                }
+              } else {
+                console.error('[tripStore] Failed to write to localStorage:', e);
+              }
+            }
+          },
+          removeItem: (name: string) => {
+            try {
+              localStorage.removeItem(name);
+            } catch (e) {
+              console.error('[tripStore] Failed to remove from localStorage:', e);
+            }
+          },
+        };
+        return guardedStorage;
       }),
+      partialize: (state) => {
+        // Only persist data, not functions or transient state
+        // This prevents circular references and keeps localStorage size down
+        const persistedState = {
+          trip: state.trip,
+          collections: state.collections,
+          customLists: state.customLists,
+          scheduledItems: state.scheduledItems,
+          experienceCart: state.experienceCart,
+          diningReservations: state.diningReservations,
+          itineraryAssignments: state.itineraryAssignments,
+        };
+
+        // Validate that we're not persisting circular references
+        try {
+          JSON.stringify(persistedState);
+          // Cache this valid state so we never wipe data on future errors
+          _lastGoodPersistedState = persistedState;
+        } catch (e) {
+          console.error('[tripStore] Circular reference detected in state. Using last known good state.', e);
+          // Return last known good state instead of {} to prevent data loss
+          if (_lastGoodPersistedState) {
+            return _lastGoodPersistedState;
+          }
+          // If no previous good state exists, return persistedState anyway and let
+          // the storage adapter's JSON.stringify fail gracefully (it won't write)
+          return persistedState;
+        }
+
+        return persistedState;
+      },
       onRehydrateStorage: () => (state, error) => {
         if (error) {
           console.error('Zustand hydration error:', error);

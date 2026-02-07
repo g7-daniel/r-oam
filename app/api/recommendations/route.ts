@@ -1,20 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchReddit } from '@/lib/reddit';
-import { searchPlaces, getPhotoUrl, getPlaceDetails } from '@/lib/google-maps';
+import { searchPlaces, getPlaceDetails } from '@/lib/google-maps';
 import { getSubredditsForDestination, getSearchTermsForCategory } from '@/lib/data/subredditMapping';
 import OpenAI from 'openai';
 import { GoogleGenAI } from '@google/genai';
+import { serverEnv, isConfigured } from '@/lib/env';
 
-// Initialize Groq client
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY || '',
-  baseURL: 'https://api.groq.com/openai/v1',
-});
+// Lazy-initialize Groq client
+let _groq: OpenAI | null = null;
+function getGroq(): OpenAI {
+  if (!_groq) {
+    _groq = new OpenAI({
+      apiKey: serverEnv.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
+  }
+  return _groq;
+}
 
-// Initialize Gemini client (fallback when Groq is rate limited)
-const gemini = process.env.GEMINI_API_KEY
-  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-  : null;
+// Lazy-initialize Gemini client (fallback when Groq is rate limited)
+let _gemini: GoogleGenAI | null | undefined = undefined;
+function getGemini(): GoogleGenAI | null {
+  if (_gemini === undefined) {
+    _gemini = serverEnv.GEMINI_API_KEY
+      ? new GoogleGenAI({ apiKey: serverEnv.GEMINI_API_KEY })
+      : null;
+  }
+  return _gemini;
+}
 
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const GEMINI_MODEL = 'gemini-2.5-flash';
@@ -59,7 +72,12 @@ interface EnrichedRecommendation {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON in request body', recommendations: [], sources: [] }, { status: 400 });
+    }
     const { category, destination, lat, lng, subreddits: customSubreddits } = body;
 
     if (!destination) {
@@ -136,7 +154,6 @@ async function searchRedditPosts(
           permalink: r.permalink,
         })));
       } catch (error) {
-        console.warn(`Failed to search r/${subreddit}:`, error);
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -229,20 +246,16 @@ function parseExtractedPlaces(content: string): ExtractedPlace[] {
         });
       }
       if (places.length > 0) {
-        console.log(`Recovered ${places.length} places from truncated JSON`);
         return places;
       }
     }
-    console.warn('AI did not return valid JSON array');
     return [];
   }
 
   try {
     const places = JSON.parse(jsonMatch[0]) as ExtractedPlace[];
-    console.log(`AI extracted ${places.length} place names from Reddit`);
     return places;
   } catch (parseError) {
-    console.warn('Failed to parse JSON:', parseError);
     return [];
   }
 }
@@ -251,14 +264,12 @@ function parseExtractedPlaces(content: string): ExtractedPlace[] {
  * Use Gemini to extract place names (fallback when Groq is rate limited)
  */
 async function extractWithGemini(prompt: string): Promise<ExtractedPlace[]> {
-  if (!gemini) {
+  if (!getGemini()) {
     throw new Error('Gemini not configured');
   }
 
-  console.log('Falling back to Gemini for extraction...');
-
   try {
-    const response = await gemini.models.generateContent({
+    const response = await getGemini()!.models.generateContent({
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
@@ -269,8 +280,6 @@ async function extractWithGemini(prompt: string): Promise<ExtractedPlace[]> {
     });
 
     const content = response.text || '[]';
-    console.log('Gemini response length:', content.length);
-    console.log('Gemini response preview:', content.slice(0, 500));
     return parseExtractedPlaces(content);
   } catch (geminiError) {
     console.error('Gemini extraction error:', geminiError);
@@ -291,9 +300,9 @@ async function extractPlaceNamesWithAI(
   let isRateLimited = false;
 
   // Try Groq first
-  if (process.env.GROQ_API_KEY) {
+  if (isConfigured.groq()) {
     try {
-      const response = await groq.chat.completions.create({
+      const response = await getGroq().chat.completions.create({
         model: GROQ_MODEL,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
@@ -310,13 +319,12 @@ async function extractPlaceNamesWithAI(
       if (errorMessage.includes('Rate limit') || errorMessage.includes('rate_limit') ||
           errorMessage.includes('429') || errorMessage.includes('quota')) {
         isRateLimited = true;
-        console.log('Groq rate limited, trying Gemini fallback...');
       }
     }
   }
 
   // Try Gemini fallback
-  if (gemini) {
+  if (getGemini()) {
     try {
       return await extractWithGemini(prompt);
     } catch (geminiError) {
@@ -325,7 +333,6 @@ async function extractPlaceNamesWithAI(
   }
 
   if (isRateLimited) {
-    console.log('Both AI services unavailable - returning empty to trigger Google fallback');
   }
 
   return [];
@@ -368,7 +375,6 @@ async function verifyAndEnrichWithGoogle(
             }
           }
         } catch (detailsError) {
-          console.warn(`Failed to get details for ${match.name}:`, detailsError);
         }
 
         verified.push({
@@ -382,7 +388,7 @@ async function verifyAndEnrichWithGoogle(
           lng: match.geometry.location.lng,
           address: match.formatted_address,
           imageUrl: match.photos?.[0]?.photo_reference
-            ? getPhotoUrl(match.photos[0].photo_reference, 400)
+            ? `/api/photo-proxy?ref=${encodeURIComponent(match.photos[0].photo_reference)}&maxwidth=400`
             : undefined,
           source: {
             type: 'reddit',
@@ -393,15 +399,12 @@ async function verifyAndEnrichWithGoogle(
           durationMinutes: estimateDuration(place.category),
         });
 
-        console.log(`Verified: ${place.name} -> ${match.name}`);
       } else {
-        console.log(`Could not verify: ${place.name}`);
       }
 
       // Rate limiting
       await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error) {
-      console.warn(`Failed to verify ${place.name}:`, error);
     }
   }
 
@@ -464,7 +467,7 @@ async function getGoogleOnlyResults(
         lng: place.geometry?.location?.lng,
         address: place.formatted_address,
         imageUrl: place.photos?.[0]?.photo_reference
-          ? getPhotoUrl(place.photos[0].photo_reference, 400)
+          ? `/api/photo-proxy?ref=${encodeURIComponent(place.photos[0].photo_reference)}&maxwidth=400`
           : undefined,
         source: {
           type: 'google' as const,

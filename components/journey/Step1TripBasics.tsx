@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import AirportAutocomplete from '@/components/ui/AirportAutocomplete';
 import Card from '@/components/ui/Card';
 import {
@@ -70,7 +71,16 @@ const getBudgetStyleForAmount = (amount: number): BudgetStyle => {
 };
 
 export default function Step1TripBasics() {
-  const { trip, setOriginAirport, setDates, setTravelers, setBudget, setPace, setTripTypeTags, setRoundTrip } = useTripStore();
+  const { trip, setOriginAirport, setDates, setTravelers, setBudget, setPace, setTripTypeTags, setRoundTrip } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    setOriginAirport: state.setOriginAirport,
+    setDates: state.setDates,
+    setTravelers: state.setTravelers,
+    setBudget: state.setBudget,
+    setPace: state.setPace,
+    setTripTypeTags: state.setTripTypeTags,
+    setRoundTrip: state.setRoundTrip,
+  })));
   const { basics } = trip;
 
   const [errors] = useState<Record<string, string>>({});
@@ -134,8 +144,8 @@ export default function Step1TripBasics() {
 
       {/* Origin Airport */}
       <Card>
-        <h2 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <span className="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-sm font-bold">
+        <h2 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+          <span className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 flex items-center justify-center text-sm font-bold">
             1
           </span>
           Where are you flying from?
@@ -151,8 +161,8 @@ export default function Step1TripBasics() {
 
       {/* Travel Dates */}
       <Card>
-        <h2 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <span className="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-sm font-bold">
+        <h2 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+          <span className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 flex items-center justify-center text-sm font-bold">
             2
           </span>
           When are you traveling?
@@ -171,17 +181,17 @@ export default function Step1TripBasics() {
         )}
 
         {/* Round Trip Toggle */}
-        <div className="mt-4 pt-4 border-t border-slate-100">
+        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
           <label className="flex items-center gap-3 cursor-pointer">
             <input
               type="checkbox"
               checked={trip.flights.isRoundTrip}
               onChange={(e) => setRoundTrip(e.target.checked)}
-              className="w-5 h-5 rounded border-slate-300 text-primary-500 focus:ring-primary-500"
+              className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-primary-500 focus:ring-primary-500"
             />
             <div>
-              <span className="font-medium text-slate-900">Round trip flight</span>
-              <p className="text-sm text-slate-500">
+              <span className="font-medium text-slate-900 dark:text-white">Round trip flight</span>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 {trip.flights.isRoundTrip
                   ? 'Return flight to your origin included'
                   : 'One-way flights only'}
@@ -193,19 +203,19 @@ export default function Step1TripBasics() {
 
       {/* Travelers */}
       <Card>
-        <h2 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <span className="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-sm font-bold">
+        <h2 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+          <span className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 flex items-center justify-center text-sm font-bold">
             3
           </span>
           Who's traveling?
         </h2>
         <div className="grid md:grid-cols-2 gap-6">
-          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
+          <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-xl">
             <div className="flex items-center gap-3">
-              <Users className="w-5 h-5 text-slate-600" />
+              <Users className="w-5 h-5 text-slate-600 dark:text-slate-400" />
               <div>
-                <p className="font-medium text-slate-900">Adults</p>
-                <p className="text-sm text-slate-500">Ages 12+</p>
+                <p className="font-medium text-slate-900 dark:text-white">Adults</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Ages 12+</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -213,7 +223,7 @@ export default function Step1TripBasics() {
                 type="button"
                 onClick={() => handleTravelerChange('adults', -1)}
                 disabled={basics.travelers.adults <= 1}
-                className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Decrease adults"
               >
                 <Minus className="w-5 h-5" />
@@ -225,19 +235,19 @@ export default function Step1TripBasics() {
                 type="button"
                 onClick={() => handleTravelerChange('adults', 1)}
                 disabled={basics.travelers.adults >= 9}
-                className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Increase adults"
               >
                 <Plus className="w-5 h-5" />
               </button>
             </div>
           </div>
-          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
+          <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-xl">
             <div className="flex items-center gap-3">
-              <Baby className="w-5 h-5 text-slate-600" />
+              <Baby className="w-5 h-5 text-slate-600 dark:text-slate-400" />
               <div>
-                <p className="font-medium text-slate-900">Children</p>
-                <p className="text-sm text-slate-500">Ages 0-11</p>
+                <p className="font-medium text-slate-900 dark:text-white">Children</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Ages 0-11</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -245,7 +255,7 @@ export default function Step1TripBasics() {
                 type="button"
                 onClick={() => handleTravelerChange('children', -1)}
                 disabled={basics.travelers.children <= 0}
-                className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Decrease children"
               >
                 <Minus className="w-5 h-5" />
@@ -257,7 +267,7 @@ export default function Step1TripBasics() {
                 type="button"
                 onClick={() => handleTravelerChange('children', 1)}
                 disabled={basics.travelers.children >= 9}
-                className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Increase children"
               >
                 <Plus className="w-5 h-5" />
@@ -269,8 +279,8 @@ export default function Step1TripBasics() {
 
       {/* Budget */}
       <Card>
-        <h2 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <span className="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-sm font-bold">
+        <h2 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+          <span className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 flex items-center justify-center text-sm font-bold">
             4
           </span>
           What's your total budget?
@@ -288,7 +298,7 @@ export default function Step1TripBasics() {
               }}
               min={0}
               step={100}
-              className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              className="w-full pl-12 pr-4 py-3 border border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               placeholder="Total trip budget in USD"
               aria-label="Total trip budget in USD"
             />
@@ -306,20 +316,20 @@ export default function Step1TripBasics() {
                   className={clsx(
                     'p-4 rounded-xl border-2 text-left transition-all',
                     isSelected
-                      ? 'border-primary-500 bg-primary-50'
-                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                      : 'border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500 bg-white dark:bg-slate-800'
                   )}
                 >
                   <Icon
                     className={clsx(
                       'w-5 h-5 mb-2',
-                      isSelected ? 'text-primary-600' : 'text-slate-400'
+                      isSelected ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400 dark:text-slate-500'
                     )}
                   />
                   <p
                     className={clsx(
                       'font-medium',
-                      isSelected ? 'text-primary-700' : 'text-slate-700'
+                      isSelected ? 'text-primary-700 dark:text-primary-400' : 'text-slate-700 dark:text-slate-200'
                     )}
                   >
                     {style.label}
@@ -327,7 +337,7 @@ export default function Step1TripBasics() {
                   <p className="text-xs text-slate-500 mt-0.5">{style.description}</p>
                   <p className={clsx(
                     'text-xs mt-1 font-medium',
-                    isSelected ? 'text-primary-600' : 'text-slate-400'
+                    isSelected ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400 dark:text-slate-500'
                   )}>
                     {style.priceRange}
                   </p>
@@ -340,8 +350,8 @@ export default function Step1TripBasics() {
 
       {/* Pace */}
       <Card>
-        <h2 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <span className="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-sm font-bold">
+        <h2 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+          <span className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 flex items-center justify-center text-sm font-bold">
             5
           </span>
           What's your ideal pace?
@@ -357,14 +367,14 @@ export default function Step1TripBasics() {
                 className={clsx(
                   'p-4 rounded-xl border-2 text-left transition-all',
                   isSelected
-                    ? 'border-primary-500 bg-primary-50'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                    : 'border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500 bg-white dark:bg-slate-800'
                 )}
               >
                 <p
                   className={clsx(
                     'font-medium',
-                    isSelected ? 'text-primary-700' : 'text-slate-700'
+                    isSelected ? 'text-primary-700 dark:text-primary-400' : 'text-slate-700 dark:text-slate-200'
                   )}
                 >
                   {option.label}
@@ -378,11 +388,11 @@ export default function Step1TripBasics() {
 
       {/* Trip Type Tags */}
       <Card>
-        <h2 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-          <span className="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-sm font-bold">
+        <h2 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+          <span className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 flex items-center justify-center text-sm font-bold">
             6
           </span>
-          What kind of trip is this? <span className="text-slate-400 font-normal">(optional)</span>
+          What kind of trip is this? <span className="text-slate-400 dark:text-slate-500 font-normal">(optional)</span>
         </h2>
         <div className="flex flex-wrap gap-2">
           {TRIP_TYPE_TAGS.map((tag) => {
@@ -396,8 +406,8 @@ export default function Step1TripBasics() {
                 className={clsx(
                   'inline-flex items-center gap-2 px-4 py-2 rounded-full border-2 transition-all',
                   isSelected
-                    ? 'border-primary-500 bg-primary-50 text-primary-700'
-                    : 'border-slate-200 hover:border-slate-300 bg-white text-slate-600'
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-400'
+                    : 'border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                 )}
               >
                 <Icon className="w-4 h-4" />

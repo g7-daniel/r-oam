@@ -26,7 +26,7 @@ export default function RedditReviewCard({
     return (
       <div
         className={clsx(
-          'flex items-start gap-2 p-2 bg-gradient-to-r from-reddit-50 to-white rounded-lg border border-reddit-100',
+          'flex items-start gap-2 p-2 bg-gradient-to-r from-reddit-50 to-white dark:from-reddit-900/30 dark:to-slate-800 rounded-lg border border-reddit-100 dark:border-reddit-800',
           className
         )}
         role="article"
@@ -38,18 +38,19 @@ export default function RedditReviewCard({
             {upvotes ? upvotes.toLocaleString() : '—'}
           </span>
         </div>
-        <blockquote className="text-xs text-slate-600 italic line-clamp-2">"{quote}"</blockquote>
+        <blockquote className="text-xs text-slate-600 dark:text-slate-300 italic line-clamp-2">"{quote}"</blockquote>
       </div>
     );
   }
 
   if (variant === 'prominent') {
     return (
-      <div
+      <article
         className={clsx(
           'bg-gradient-to-br from-reddit-50 via-white to-reddit-50 dark:from-reddit-900/30 dark:via-slate-800 dark:to-reddit-900/30 border-2 border-reddit-200 dark:border-reddit-800 rounded-xl sm:rounded-2xl p-3 sm:p-5 shadow-sm',
           className
         )}
+        aria-label={`Reddit review from r/${subreddit}`}
       >
         {/* Header with Reddit branding */}
         <div className="flex items-center justify-between mb-2 sm:mb-3">
@@ -82,7 +83,7 @@ export default function RedditReviewCard({
             </>
           )}
         </div>
-      </div>
+      </article>
     );
   }
 

@@ -54,13 +54,16 @@ function extractActivitiesFromDay(day: QuickPlanDay): ExtractedActivity[] {
   const blocks = [day.morning, day.afternoon, day.evening].filter((b): b is DayBlock => b !== null);
   for (const block of blocks) {
     if (block.type === 'activity') {
+      // Extract activity type from block ID (format: "dayNum-activityType")
+      // or fall back to title for display
+      const extractedType = block.activityId || block.id.split('-').slice(1).join('-') || block.title;
       activities.push({
         id: block.id,
-        type: block.title,
+        type: extractedType,
         name: block.title,
         description: block.description,
-        durationHours: block.duration / 60,
-        effortCost: block.effortCost,
+        durationHours: (block.duration || 60) / 60,
+        effortCost: block.effortCost || 0,
         startTime: block.startTime,
         endTime: block.endTime,
       });
@@ -188,7 +191,7 @@ function checkIntensityBudget(
   preferences: TripPreferences
 ): QualityCheckItem[] {
   const checks: QualityCheckItem[] = [];
-  const dailyBudget = PACE_DAILY_BUDGET[preferences.pace];
+  const dailyBudget = PACE_DAILY_BUDGET[preferences.pace || 'balanced'];
 
   let overBudgetDays = 0;
   let severeOverbudgetDays = 0;
@@ -363,8 +366,12 @@ function checkHardNos(
       for (const activity of extractActivitiesFromDay(day)) {
         const activityLower = (activity.name + ' ' + (activity.description || '')).toLowerCase();
 
-        if (activityLower.includes(noLower) ||
-            noLower.includes(activity.type)) {
+        // Use word-boundary matching to avoid false positives
+        // e.g., hard-no "car" should not match activity type "cultural"
+        const noWordPattern = new RegExp(`\\b${noLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        const typeWordPattern = new RegExp(`\\b${activity.type.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        if (noWordPattern.test(activityLower) ||
+            typeWordPattern.test(noLower)) {
           checks.push({
             id: `hardno-${hardNo}-day-${day.dayNumber}`,
             category: 'preferences',
@@ -422,7 +429,7 @@ function checkDiningCoverage(
   let daysWithoutDinner = 0;
   for (const day of itinerary.days) {
     const blocks = [day.morning, day.afternoon, day.evening].filter((b): b is DayBlock => b !== null);
-    const hasDinner = blocks.some(b => b.type === 'meal' && parseTime(b.startTime) >= 18);
+    const hasDinner = blocks.some(b => b.type === 'meal' && parseTime(b.startTime || '00:00') >= 18);
     if (!hasDinner) {
       daysWithoutDinner++;
     }

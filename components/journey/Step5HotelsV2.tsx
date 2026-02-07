@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import Card from '@/components/ui/Card';
 import {
   Hotel,
@@ -25,6 +26,8 @@ import {
   Sparkles,
   ShieldCheck,
   Search,
+  SlidersHorizontal,
+  RefreshCw,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { handleImageError, getPlaceholderImage } from '@/lib/utils';
@@ -222,14 +225,23 @@ function HotelDetailModal({
     setCurrentImageIndex(0);
   }, [selectedRoom]);
 
+  // Close on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const selectedRoomType = ROOM_TYPES.find(r => r.id === selectedRoom) || ROOM_TYPES[0];
   const roomPrice = Math.round(hotel.pricePerNight * selectedRoomType.priceMultiplier);
   const totalPrice = roomPrice * nights;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-sm transition-opacity" onClick={onClose} role="dialog" aria-modal="true" aria-label={`${hotel.name} details`}>
       <div
-        className="bg-white dark:bg-slate-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
+        className="bg-white dark:bg-slate-800 sm:rounded-2xl max-w-4xl w-full h-full sm:h-auto sm:max-h-[90vh] overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header with close button */}
@@ -249,15 +261,17 @@ function HotelDetailModal({
             {/* Image navigation */}
             <button
               onClick={() => setCurrentImageIndex((prev) => (prev - 1 + hotelImages.length) % hotelImages.length)}
+              aria-label="Previous image"
               className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 dark:bg-slate-800/80 rounded-full flex items-center justify-center hover:bg-white dark:hover:bg-slate-700 transition-colors"
             >
               <ChevronLeft className="w-6 h-6 dark:text-white" />
             </button>
             <button
               onClick={() => setCurrentImageIndex((prev) => (prev + 1) % hotelImages.length)}
+              aria-label="Next image"
               className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 dark:bg-slate-800/80 rounded-full flex items-center justify-center hover:bg-white dark:hover:bg-slate-700 transition-colors"
             >
-              <ChevronRight className="w-6 h-6" />
+              <ChevronRight className="w-6 h-6 dark:text-white" />
             </button>
             {/* Image indicators */}
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
@@ -265,8 +279,9 @@ function HotelDetailModal({
                 <button
                   key={idx}
                   onClick={() => setCurrentImageIndex(idx)}
+                  aria-label={`View image ${idx + 1} of ${hotelImages.length}`}
                   className={clsx(
-                    'w-2 h-2 rounded-full transition-colors',
+                    'w-3 h-3 rounded-full transition-colors',
                     idx === currentImageIndex ? 'bg-white' : 'bg-white/50'
                   )}
                 />
@@ -275,6 +290,7 @@ function HotelDetailModal({
             {/* Close button */}
             <button
               onClick={onClose}
+              aria-label="Close hotel details"
               className="absolute top-4 right-4 w-10 h-10 bg-white/80 dark:bg-slate-800/80 rounded-full flex items-center justify-center hover:bg-white dark:hover:bg-slate-700 transition-colors"
             >
               <X className="w-6 h-6 dark:text-white" />
@@ -294,8 +310,8 @@ function HotelDetailModal({
                     <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{hotel.name}</h2>
                     <div className="flex items-center gap-2 mt-1">
                       <div className="flex items-center gap-0.5">
-                        {Array.from({ length: hotel.stars }).map((_, i) => (
-                          <Star key={i} className="w-4 h-4 text-amber-400 fill-amber-400" />
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star key={i} className={clsx('w-4 h-4', i < hotel.stars ? 'text-amber-400 fill-amber-400' : 'text-slate-200 dark:text-slate-600')} />
                         ))}
                       </div>
                       {hotel.guestRating && (
@@ -329,7 +345,7 @@ function HotelDetailModal({
                     const Icon = amenityInfo.icon;
                     return (
                       <div key={amenity} className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
-                        <Icon className="w-4 h-4 text-primary-500" />
+                        <Icon className="w-4 h-4 text-primary-500 dark:text-primary-400" />
                         <span className="text-sm">{amenityInfo.label}</span>
                       </div>
                     );
@@ -370,7 +386,7 @@ function HotelDetailModal({
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="text-lg font-bold text-slate-900 dark:text-white">${price}</p>
+                            <p className="text-lg font-bold text-slate-900 dark:text-white">${price.toLocaleString()}</p>
                             <p className="text-xs text-slate-500 dark:text-slate-400">per night</p>
                           </div>
                         </div>
@@ -393,7 +409,7 @@ function HotelDetailModal({
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500 dark:text-slate-400">Price per night</span>
-                    <span className="font-medium dark:text-white">${roomPrice}</span>
+                    <span className="font-medium dark:text-white">${roomPrice.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500 dark:text-slate-400">Duration</span>
@@ -402,7 +418,7 @@ function HotelDetailModal({
                   <div className="border-t border-slate-200 dark:border-slate-600 pt-3 mt-3">
                     <div className="flex justify-between">
                       <span className="font-semibold text-slate-900 dark:text-white">Total</span>
-                      <span className="text-xl font-bold text-primary-600 dark:text-primary-400">${totalPrice}</span>
+                      <span className="text-xl font-bold text-primary-600 dark:text-primary-400">${totalPrice.toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
@@ -447,7 +463,12 @@ export default function Step5HotelsV2() {
     setActiveDestination,
     setHotelResults,
     selectHotel,
-  } = useTripStore();
+  } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    setActiveDestination: state.setActiveDestination,
+    setHotelResults: state.setHotelResults,
+    selectHotel: state.selectHotel,
+  })));
 
   const { destinations, activeDestinationId, basics } = trip;
   const activeDestination = destinations.find((d) => d.destinationId === activeDestinationId);
@@ -463,6 +484,7 @@ export default function Step5HotelsV2() {
   const [propertyTypeFilter, setPropertyTypeFilter] = useState<string[]>([]);
   const [distanceFilter, setDistanceFilter] = useState<number>(300); // Default 300km for country/region searches
   const [modalHotel, setModalHotel] = useState<HotelType | null>(null);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [redditHotels, setRedditHotels] = useState<RedditHotel[]>([]);
   const [selectedSubreddits, setSelectedSubreddits] = useState<Set<string>>(
     new Set(['travel', 'hotels', 'luxurytravel', 'fatfire'])
@@ -473,12 +495,13 @@ export default function Step5HotelsV2() {
   const HOTELS_PER_PAGE = 50;
   // Track hotels currently fetching pricing
   const [pricingLoadingIds, setPricingLoadingIds] = useState<Set<string>>(new Set());
+  // Sort state
+  const [sortBy, setSortBy] = useState<'recommended' | 'price' | 'rating' | 'distance'>('recommended');
 
   // Handler for Snoo Reddit recommendations - only applies when subreddits are selected
   const handleRedditHotelsFound = (hotels: RedditHotel[]) => {
     // Only set Reddit recommendations if user has subreddits selected
     if (selectedSubreddits.size === 0) {
-      console.log('Ignoring Snoo recommendations - no subreddits selected');
       return;
     }
 
@@ -536,7 +559,6 @@ export default function Step5HotelsV2() {
       const checkOutDate = new Date(checkInDate);
       checkOutDate.setDate(checkOutDate.getDate() + activeDestination.nights);
 
-      console.log('Reddit: Fetching recommendations for', activeDestination.place.name, 'with subreddits:', Array.from(selectedSubreddits));
       const response = await fetch('/api/reddit/hotels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -555,7 +577,6 @@ export default function Step5HotelsV2() {
         }),
       });
 
-      console.log('Reddit: Response status:', response.status);
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Reddit API error:', response.status, errorText);
@@ -564,11 +585,9 @@ export default function Step5HotelsV2() {
 
       const data = await response.json();
       const hotels = data.hotels || [];
-      console.log(`Reddit API returned ${hotels.length} hotels:`, hotels.map((h: any) => h.name));
       setRedditHotels(hotels);
 
       if (hotels.length === 0) {
-        console.log('Reddit: No hotels found. Try different subreddits or destination.');
         return;
       }
 
@@ -598,7 +617,6 @@ export default function Step5HotelsV2() {
           // Deduplicate by normalized name
           const normalizedName = hotel.name.toLowerCase().trim().replace(/\s+/g, ' ');
           if (processedNames.has(normalizedName)) {
-            console.log(`Removing duplicate: ${hotel.name}`);
             return false;
           }
           processedNames.add(normalizedName);
@@ -632,7 +650,6 @@ export default function Step5HotelsV2() {
         // Skip if we already have this name in our processed list
         const normalizedRedditName = redditNameLower.trim().replace(/\s+/g, ' ');
         if (processedNames.has(normalizedRedditName)) {
-          console.log(`Skipping duplicate Reddit hotel: ${info.hotel.name}`);
           continue;
         }
 
@@ -664,8 +681,6 @@ export default function Step5HotelsV2() {
           newRedditHotels.push(newHotel);
         }
       }
-
-      console.log(`Reddit: ${matchedRedditNames.size} matched existing, ${newRedditHotels.length} new hotels added, ${processedNames.size} total unique`);
 
       // Combine: Reddit-only hotels first, then matched+existing
       const allHotels = [...newRedditHotels, ...updatedResults];
@@ -784,12 +799,10 @@ export default function Step5HotelsV2() {
       }
 
       const response = await fetch(`/api/hotels?${params}`);
-      console.log('Hotel API response status:', response.status);
 
       if (response.ok) {
         const data = await response.json();
         const apiHotels = data.hotels || data; // Support both new and old format
-        console.log(`Hotel API returned: ${apiHotels?.length || 0} hotels (${data.withPricing || 0} with real prices)`);
 
         if (Array.isArray(apiHotels) && apiHotels.length > 0) {
           // Transform API response to match our schema and add images
@@ -825,7 +838,6 @@ export default function Step5HotelsV2() {
 
       // Show empty state with retry option if API didn't return results
       if (!hotelsFetched) {
-        console.log('No hotels fetched for', activeDestination.place.name);
         setHotelResults(activeDestination.destinationId, []);
       }
     } catch (error) {
@@ -853,12 +865,10 @@ export default function Step5HotelsV2() {
 
     // If no subreddits selected, CLEAR all Reddit recommendations
     if (selectedSubreddits.size === 0) {
-      console.log('Reddit: No subreddits selected, clearing ALL Reddit picks');
       setRedditHotels([]);
       // ALWAYS clear isRedditRecommended from all existing hotels
       const existingResults = activeDestination.hotels.results || [];
       const redditCount = existingResults.filter(h => h.isRedditRecommended).length;
-      console.log(`Reddit: Clearing ${redditCount} hotels with isRedditRecommended flag`);
 
       // Force clear even if count is 0 (in case of stale data)
       const clearedResults = existingResults.map(hotel => ({
@@ -867,11 +877,9 @@ export default function Step5HotelsV2() {
         redditUpvotes: 0,
       }));
       setHotelResults(activeDestination.destinationId, clearedResults);
-      console.log('Reddit: Cleared all Reddit flags');
       return;
     }
 
-    console.log(`Reddit: Subreddits changed to [${subredditsKey}], fetching recommendations...`);
     const debounceTimer = setTimeout(() => {
       fetchRedditRecommendations();
     }, 500);
@@ -922,6 +930,28 @@ export default function Step5HotelsV2() {
       return false;
     }
     return true;
+  });
+
+  // Sort filtered hotels
+  const sortedHotels = [...filteredHotels].sort((a, b) => {
+    switch (sortBy) {
+      case 'recommended':
+        // Reddit picks first, then by rating
+        if (a.isRedditRecommended && !b.isRedditRecommended) return -1;
+        if (!a.isRedditRecommended && b.isRedditRecommended) return 1;
+        if (a.isRedditRecommended && b.isRedditRecommended) {
+          return ((b as any).redditUpvotes || 0) - ((a as any).redditUpvotes || 0);
+        }
+        return (b.guestRating || 0) - (a.guestRating || 0);
+      case 'price':
+        return a.pricePerNight - b.pricePerNight;
+      case 'rating':
+        return (b.guestRating || 0) - (a.guestRating || 0);
+      case 'distance':
+        return (a.distanceToCenter || 999) - (b.distanceToCenter || 999);
+      default:
+        return 0;
+    }
   });
 
   const handleSelectHotel = (hotelId: string) => {
@@ -1070,13 +1100,14 @@ export default function Step5HotelsV2() {
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
                 Select subreddits to find traveler-recommended hotels
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Select subreddits for recommendations">
                 {ALL_SUBREDDITS.map((sub) => (
                   <button
                     key={sub}
                     onClick={() => toggleSubreddit(sub)}
+                    aria-pressed={selectedSubreddits.has(sub)}
                     className={clsx(
-                      'flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all',
+                      'flex items-center gap-1 px-2.5 py-1.5 min-h-[36px] rounded-full text-xs font-medium transition-all',
                       selectedSubreddits.has(sub)
                         ? 'bg-orange-500 text-white shadow-sm'
                         : 'bg-white dark:bg-slate-700 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-600 hover:border-orange-300 dark:hover:border-orange-500'
@@ -1096,8 +1127,37 @@ export default function Step5HotelsV2() {
 
       {activeDestination && (
         <div className="grid lg:grid-cols-4 gap-6">
+          {/* Mobile filter toggle button */}
+          <div className="lg:hidden">
+            <button
+              onClick={() => setShowMobileFilters(!showMobileFilters)}
+              className="flex items-center gap-2 px-4 py-2.5 min-h-[44px] bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors w-full justify-center"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              {showMobileFilters ? 'Hide Filters' : 'Show Filters'}
+              {(() => {
+                const activeCount = [
+                  hotelNameSearch.trim().length > 0,
+                  starFilter.length > 0,
+                  priceFilter[0] > 0,
+                  priceFilter[1] < 2000,
+                  guestRatingFilter > 0,
+                  amenityFilters.length > 0,
+                  freeCancellationOnly,
+                  redditRecommendedOnly,
+                  distanceFilter < 300
+                ].filter(Boolean).length;
+                return activeCount > 0 ? (
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-primary-500 text-white text-xs font-bold">
+                    {activeCount}
+                  </span>
+                ) : null;
+              })()}
+            </button>
+          </div>
+
           {/* Filters - Compact Modern Design */}
-          <div className="lg:col-span-1">
+          <div className={clsx('lg:col-span-1', showMobileFilters ? 'block' : 'hidden lg:block')}>
             <div className="sticky top-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[calc(100vh-120px)] overflow-y-auto">
               {/* Filter Header */}
               <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
@@ -1137,14 +1197,16 @@ export default function Step5HotelsV2() {
                       value={hotelNameSearch}
                       onChange={(e) => setHotelNameSearch(e.target.value)}
                       placeholder="Hotel name..."
-                      className="w-full pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-slate-400"
+                      aria-label="Search hotels by name"
+                      className="w-full pl-9 pr-9 py-2.5 border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg text-base focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-slate-400"
                     />
                     {hotelNameSearch && (
                       <button
                         onClick={() => setHotelNameSearch('')}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+                        aria-label="Clear hotel search"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 p-2 min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                       >
-                        <X className="w-3 h-3" />
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
@@ -1187,13 +1249,14 @@ export default function Step5HotelsV2() {
                   <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 block">
                     Star Rating
                   </label>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1" role="group" aria-label="Filter by star rating">
                     {[5, 4, 3].map((stars) => (
                       <button
                         key={stars}
                         onClick={() => toggleStarFilter(stars)}
+                        aria-pressed={starFilter.includes(stars)}
                         className={clsx(
-                          'flex-1 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-medium transition-all',
+                          'flex-1 flex items-center justify-center gap-1 py-2 min-h-[40px] rounded-lg text-xs font-medium transition-all',
                           starFilter.includes(stars)
                             ? 'bg-primary-500 text-white'
                             : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
@@ -1210,13 +1273,15 @@ export default function Step5HotelsV2() {
                   <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 block">
                     Guest Rating
                   </label>
-                  <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
+                  <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1" role="radiogroup" aria-label="Minimum guest rating">
                     {[{ label: 'Any', value: 0 }, { label: '7+', value: 7 }, { label: '8+', value: 8 }, { label: '9+', value: 9 }].map((option) => (
                       <button
                         key={option.value}
                         onClick={() => setGuestRatingFilter(option.value)}
+                        role="radio"
+                        aria-checked={guestRatingFilter === option.value}
                         className={clsx(
-                          'flex-1 py-1.5 rounded-md text-xs font-medium transition-all',
+                          'flex-1 py-1.5 min-h-[36px] rounded-md text-xs font-medium transition-all',
                           guestRatingFilter === option.value
                             ? 'bg-white dark:bg-slate-600 text-primary-600 dark:text-primary-400 shadow-sm'
                             : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
@@ -1231,7 +1296,7 @@ export default function Step5HotelsV2() {
                 {/* Distance slider - Clean */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                    <label htmlFor="distanceSlider" className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                       Distance
                     </label>
                     <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -1239,14 +1304,23 @@ export default function Step5HotelsV2() {
                     </span>
                   </div>
                   <input
+                    id="distanceSlider"
                     type="range"
                     min={10}
                     max={300}
                     step={10}
                     value={distanceFilter}
                     onChange={(e) => setDistanceFilter(parseInt(e.target.value))}
+                    aria-valuemin={10}
+                    aria-valuemax={300}
+                    aria-valuenow={distanceFilter}
+                    aria-valuetext={`${distanceFilter} kilometers`}
                     className="w-full h-1.5 bg-slate-200 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
                   />
+                  <div className="flex justify-between text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                    <span>10 km</span>
+                    <span>300 km</span>
+                  </div>
                 </div>
 
                 {/* Amenities - Compact grid */}
@@ -1254,7 +1328,7 @@ export default function Step5HotelsV2() {
                   <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 block">
                     Amenities
                   </label>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by amenities">
                     {['wifi', 'pool', 'gym', 'spa', 'breakfast', 'parking'].map((amenity) => (
                       <button
                         key={amenity}
@@ -1265,8 +1339,9 @@ export default function Step5HotelsV2() {
                             setAmenityFilters((prev) => [...prev, amenity]);
                           }
                         }}
+                        aria-pressed={amenityFilters.includes(amenity)}
                         className={clsx(
-                          'px-2.5 py-1 rounded-full text-xs font-medium transition-all capitalize',
+                          'px-2.5 py-1 min-h-[36px] rounded-full text-xs font-medium transition-all capitalize',
                           amenityFilters.includes(amenity)
                             ? 'bg-primary-500 text-white'
                             : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
@@ -1329,9 +1404,37 @@ export default function Step5HotelsV2() {
           {/* Hotel list */}
           <div className="lg:col-span-3">
             {isLoading ? (
-              <div className="text-center py-12">
-                <Loader2 className="w-10 h-10 mx-auto mb-4 text-primary-500 animate-spin" />
-                <p className="text-slate-500 dark:text-slate-400">Searching for hotels in {activeDestination.place.name}...</p>
+              <div className="space-y-4">
+                <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary-500" />
+                  Searching for hotels in {activeDestination.place.name}...
+                </p>
+                {/* Skeleton hotel cards */}
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Card key={i} className="animate-pulse">
+                    <div className="flex flex-col sm:flex-row gap-4">
+                      <div className="w-full sm:w-48 h-40 sm:h-36 rounded-lg bg-slate-200 dark:bg-slate-700 flex-shrink-0" />
+                      <div className="flex-1 min-w-0 space-y-3">
+                        <div className="h-5 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                        <div className="flex gap-1">
+                          {Array.from({ length: 5 }).map((_, j) => (
+                            <div key={j} className="w-4 h-4 bg-slate-200 dark:bg-slate-700 rounded" />
+                          ))}
+                        </div>
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
+                        <div className="flex gap-2">
+                          <div className="h-6 bg-slate-200 dark:bg-slate-700 rounded w-16" />
+                          <div className="h-6 bg-slate-200 dark:bg-slate-700 rounded w-16" />
+                          <div className="h-6 bg-slate-200 dark:bg-slate-700 rounded w-16" />
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0 space-y-2 sm:text-right">
+                        <div className="h-7 bg-slate-200 dark:bg-slate-700 rounded w-20 sm:ml-auto" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-16 sm:ml-auto" />
+                      </div>
+                    </div>
+                  </Card>
+                ))}
               </div>
             ) : filteredHotels.length === 0 ? (
               <div className="text-center py-12 bg-slate-50 dark:bg-slate-800 rounded-xl">
@@ -1446,25 +1549,44 @@ export default function Step5HotelsV2() {
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Results count and pagination info */}
-                <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
-                  <span>
-                    Showing {Math.min(currentPage * HOTELS_PER_PAGE, filteredHotels.length)} of {filteredHotels.length} hotels
+                {/* Results count and sort options */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-700">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      {filteredHotels.length} hotel{filteredHotels.length !== 1 ? 's' : ''} found
+                      {allHotels.length > filteredHotels.length && (
+                        <span className="text-slate-400 dark:text-slate-500 font-normal ml-1">
+                          ({allHotels.length - filteredHotels.length} filtered)
+                        </span>
+                      )}
+                    </span>
                     {selectedSubreddits.size > 0 && filteredHotels.filter(h => h.isRedditRecommended).length > 0 && (
-                      <span className="ml-2 text-orange-500">
-                        ({filteredHotels.filter(h => h.isRedditRecommended).length} Reddit picks)
+                      <span className="text-xs text-orange-600 dark:text-orange-400 flex items-center gap-1">
+                        <MessageCircle className="w-3 h-3" />
+                        {filteredHotels.filter(h => h.isRedditRecommended).length} Reddit pick{filteredHotels.filter(h => h.isRedditRecommended).length !== 1 ? 's' : ''}
                       </span>
                     )}
-                  </span>
-                  {allHotels.length > filteredHotels.length && (
-                    <span className="text-xs">
-                      {allHotels.length - filteredHotels.length} hidden by filters
-                    </span>
-                  )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="hotelSortSelect" className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                      Sort by:
+                    </label>
+                    <select
+                      id="hotelSortSelect"
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as 'recommended' | 'price' | 'rating' | 'distance')}
+                      className="text-sm bg-white dark:bg-slate-700 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 min-h-[40px] font-medium focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    >
+                      <option value="recommended">Recommended</option>
+                      <option value="price">Price: Low to High</option>
+                      <option value="rating">Guest Rating: High to Low</option>
+                      <option value="distance">Distance: Closest First</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* Hotel cards - paginated */}
-                {filteredHotels.slice(0, currentPage * HOTELS_PER_PAGE).map((hotel) => {
+                {sortedHotels.slice(0, currentPage * HOTELS_PER_PAGE).map((hotel) => {
                   const isSelected = activeDestination.hotels.selectedHotelId === hotel.id;
                   const redditUpvotes = (hotel as any).redditUpvotes || 0;
 
@@ -1472,7 +1594,7 @@ export default function Step5HotelsV2() {
                     <Card
                       key={hotel.id}
                       className={clsx(
-                        'cursor-pointer transition-all',
+                        'cursor-pointer transition-all group/card',
                         isSelected
                           ? 'ring-2 ring-primary-500 !bg-primary-50 dark:!bg-primary-900/30'
                           : hotel.isRedditRecommended && selectedSubreddits.size > 0
@@ -1480,14 +1602,24 @@ export default function Step5HotelsV2() {
                           : 'hover:shadow-md'
                       )}
                       onClick={() => setModalHotel(hotel)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setModalHotel(hotel);
+                        }
+                      }}
+                      aria-label={`${hotel.name}, ${hotel.stars} stars, $${hotel.pricePerNight.toLocaleString()} per night${isSelected ? ', selected' : ''}`}
                     >
-                      <div className="flex gap-4">
-                        {/* Image */}
-                        <div className="relative w-48 h-36 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 flex-shrink-0">
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        {/* Image - full width on mobile, fixed width on desktop */}
+                        <div className="relative w-full sm:w-48 h-40 sm:h-36 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 flex-shrink-0">
                           <img
                             src={hotel.imageUrl || getPlaceholderImage('hotel')}
                             alt={hotel.name}
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-cover transition-transform duration-300 group-hover/card:scale-105"
+                            loading="lazy"
                             onError={(e) => handleImageError(e, 'hotel')}
                           />
                           {/* Reddit Pick badge - only show when subreddits are selected */}
@@ -1516,17 +1648,23 @@ export default function Step5HotelsV2() {
                               )}
                             </div>
                           )}
+                          {/* Selection check overlay on image for mobile */}
+                          {isSelected && (
+                            <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-primary-500 text-white flex items-center justify-center shadow-md sm:hidden">
+                              <Check className="w-4 h-4" />
+                            </div>
+                          )}
                         </div>
 
                         {/* Details */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between">
-                            <div>
-                              <h4 className="font-semibold text-slate-900 dark:text-white">{hotel.name}</h4>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="font-semibold text-slate-900 dark:text-white truncate">{hotel.name}</h4>
                               <div className="flex items-center gap-2 mt-1">
                                 <div className="flex items-center gap-0.5">
-                                  {Array.from({ length: hotel.stars }).map((_, i) => (
-                                    <Star key={i} className="w-4 h-4 text-amber-400 fill-amber-400" />
+                                  {Array.from({ length: 5 }).map((_, i) => (
+                                    <Star key={i} className={clsx('w-3.5 h-3.5 sm:w-4 sm:h-4', i < hotel.stars ? 'text-amber-400 fill-amber-400' : 'text-slate-200 dark:text-slate-600')} />
                                   ))}
                                 </div>
                                 {hotel.guestRating && (
@@ -1536,9 +1674,10 @@ export default function Step5HotelsV2() {
                                 )}
                               </div>
                             </div>
+                            {/* Selection indicator - desktop only */}
                             <div
                               className={clsx(
-                                'w-8 h-8 rounded-full flex items-center justify-center',
+                                'hidden sm:flex w-8 h-8 rounded-full items-center justify-center flex-shrink-0',
                                 isSelected
                                   ? 'bg-primary-500 text-white'
                                   : 'bg-slate-100 dark:bg-slate-700'
@@ -1548,67 +1687,72 @@ export default function Step5HotelsV2() {
                             </div>
                           </div>
 
-                          {/* Location */}
-                          <div className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400 mt-2">
-                            <MapPin className="w-4 h-4" />
-                            <span>{hotel.city}{getCountryName(hotel.countryCode) ? `, ${getCountryName(hotel.countryCode)}` : ''}</span>
-                            <span className="mx-1">•</span>
-                            <span>{typeof hotel.distanceToCenter === 'number' ? hotel.distanceToCenter.toFixed(1) : hotel.distanceToCenter} km from center</span>
+                          {/* Location and Distance */}
+                          <div className="flex flex-wrap items-center gap-2 mt-2">
+                            <div className="flex items-center gap-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                              <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                              <span className="truncate">{hotel.city}{getCountryName(hotel.countryCode) ? `, ${getCountryName(hotel.countryCode)}` : ''}</span>
+                            </div>
+                            {hotel.distanceToCenter !== undefined && (
+                              <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] sm:text-xs font-medium rounded">
+                                {typeof hotel.distanceToCenter === 'number' ? hotel.distanceToCenter.toFixed(1) : hotel.distanceToCenter} km to center
+                              </span>
+                            )}
                           </div>
 
                           {/* Amenities */}
-                          <div className="flex flex-wrap gap-2 mt-3">
-                            {hotel.amenities.slice(0, 5).map((amenity) => (
+                          <div className="flex flex-wrap gap-1.5 sm:gap-2 mt-2 sm:mt-3">
+                            {hotel.amenities.slice(0, 4).map((amenity) => (
                               <span
                                 key={amenity}
-                                className="px-2 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs rounded"
+                                className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] sm:text-xs rounded capitalize"
                               >
                                 {amenity}
                               </span>
                             ))}
-                            {hotel.amenities.length > 5 && (
-                              <span className="px-2 py-1 text-slate-500 dark:text-slate-400 text-xs">
-                                +{hotel.amenities.length - 5} more
+                            {hotel.amenities.length > 4 && (
+                              <span className="px-1.5 sm:px-2 py-0.5 sm:py-1 text-slate-500 dark:text-slate-400 text-[10px] sm:text-xs">
+                                +{hotel.amenities.length - 4} more
                               </span>
                             )}
                           </div>
                         </div>
 
-                        {/* Price */}
-                        <div className="text-right flex-shrink-0 min-w-[120px]">
+                        {/* Price - horizontal on mobile, vertical on desktop */}
+                        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start flex-shrink-0 sm:min-w-[120px] pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-700">
                           {/* Pricing status display */}
                           {(hotel as any).pricingStatus === 'available' || hotel.hasRealPricing ? (
-                            <>
-                              <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                                ${hotel.pricePerNight}
+                            <div className="sm:text-right">
+                              <p className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">
+                                ${hotel.pricePerNight.toLocaleString()}
                               </p>
-                              <p className="text-sm text-slate-500 dark:text-slate-400">per night</p>
-                              <p className="text-lg font-semibold text-primary-600 dark:text-primary-400 mt-2">
+                              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">per night</p>
+                              <p className="text-base sm:text-lg font-semibold text-primary-600 dark:text-primary-400 mt-1 sm:mt-2">
                                 ${hotel.totalPrice.toLocaleString()}
                               </p>
-                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                              <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400">
                                 {activeDestination.nights} nights total
                               </p>
-                            </>
+                            </div>
                           ) : (hotel as any).pricingStatus === 'unavailable' ? (
-                            <>
-                              <p className="text-slate-400 dark:text-slate-500 text-sm mb-1">No live rates</p>
-                              <p className="text-xl font-bold text-slate-600 dark:text-slate-300">
-                                ~${hotel.pricePerNight}
+                            <div className="sm:text-right">
+                              <p className="text-slate-400 dark:text-slate-500 text-xs sm:text-sm mb-1">No live rates</p>
+                              <p className="text-lg sm:text-xl font-bold text-slate-600 dark:text-slate-300">
+                                ~${hotel.pricePerNight.toLocaleString()}
                               </p>
-                              <p className="text-xs text-slate-400 italic">estimated</p>
-                            </>
+                              <p className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 italic">estimated</p>
+                            </div>
                           ) : pricingLoadingIds.has((hotel as any).placeId) ? (
-                            <div className="flex flex-col items-end">
+                            <div className="flex flex-col sm:items-end">
                               <Loader2 className="w-5 h-5 animate-spin text-primary-500 mb-1" />
-                              <span className="text-sm text-slate-400">Checking rates...</span>
+                              <span className="text-xs sm:text-sm text-slate-400 dark:text-slate-500">Checking rates...</span>
                             </div>
                           ) : (
-                            <>
-                              <p className="text-xl font-bold text-slate-600 dark:text-slate-300 mb-1">
-                                ~${hotel.pricePerNight}
+                            <div className="sm:text-right">
+                              <p className="text-lg sm:text-xl font-bold text-slate-600 dark:text-slate-300 mb-1">
+                                ~${hotel.pricePerNight.toLocaleString()}
                               </p>
-                              <p className="text-xs text-slate-400 italic mb-2">estimated</p>
+                              <p className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 italic mb-2">estimated</p>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1618,8 +1762,23 @@ export default function Step5HotelsV2() {
                               >
                                 Get live price
                               </button>
-                            </>
+                            </div>
                           )}
+                          {/* Select button CTA on mobile */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectHotel(hotel.id);
+                            }}
+                            className={clsx(
+                              'sm:hidden px-4 py-2 rounded-lg text-xs font-medium transition-colors',
+                              isSelected
+                                ? 'bg-green-500 text-white'
+                                : 'bg-primary-500 text-white hover:bg-primary-600'
+                            )}
+                          >
+                            {isSelected ? 'Selected' : 'Select'}
+                          </button>
                         </div>
                       </div>
                     </Card>
@@ -1627,13 +1786,13 @@ export default function Step5HotelsV2() {
                 })}
 
                 {/* Load More button */}
-                {currentPage * HOTELS_PER_PAGE < filteredHotels.length && (
+                {currentPage * HOTELS_PER_PAGE < sortedHotels.length && (
                   <div className="text-center pt-4">
                     <button
                       onClick={() => setCurrentPage(p => p + 1)}
-                      className="px-6 py-3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                      className="px-6 py-3 min-h-[44px] bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
                     >
-                      Load More ({filteredHotels.length - currentPage * HOTELS_PER_PAGE} remaining)
+                      Load More ({sortedHotels.length - currentPage * HOTELS_PER_PAGE} remaining)
                     </button>
                   </div>
                 )}

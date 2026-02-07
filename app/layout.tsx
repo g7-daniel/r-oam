@@ -2,15 +2,17 @@ import type { Metadata, Viewport } from 'next';
 import '@/styles/globals.css';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { ToastProvider } from '@/components/ui/Toast';
+import { clientEnv } from '@/lib/env';
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://roam.travel';
+const siteUrl = clientEnv.SITE_URL;
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
+  viewportFit: 'cover', // Required for safe-area-inset-* env() values to work on iOS notched devices
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: light)', color: '#f8fafc' },
     { media: '(prefers-color-scheme: dark)', color: '#0f172a' },
   ],
 };
@@ -99,22 +101,34 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Satisfy&display=swap"
+          rel="stylesheet"
+        />
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
                 try {
-                  var theme = localStorage.getItem('roam-theme');
-                  if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                  var pref = localStorage.getItem('roam-theme');
+                  var isDark = pref === 'dark' || (pref !== 'light' && pref !== 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                  if (isDark) {
                     document.documentElement.classList.add('dark');
                   }
+                  // Set color-scheme for native browser controls (scrollbars, etc.)
+                  document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
                 } catch (e) {}
               })();
             `,
           }}
         />
       </head>
-      <body className="min-h-screen bg-gray-50 dark:bg-slate-900 transition-colors duration-300">
+      <body className="min-h-screen bg-slate-50 dark:bg-slate-900">
+        <a href="#main-content" className="skip-link">
+          Skip to main content
+        </a>
         <ThemeProvider>
           <ToastProvider>
             {children}

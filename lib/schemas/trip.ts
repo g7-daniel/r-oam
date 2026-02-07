@@ -257,7 +257,7 @@ export const ChatMessageSchema = z.object({
   isStreaming: z.boolean().optional(),
   error: z.string().optional(),
 });
-export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+export type JourneyChatMessage = z.infer<typeof ChatMessageSchema>;
 
 export const ChatThreadSchema = z.object({
   threadId: z.string(),

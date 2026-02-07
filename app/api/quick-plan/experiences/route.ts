@@ -11,6 +11,7 @@ import {
   validateRequestBody,
   isValidCoordinate,
 } from '@/lib/api-validation';
+import { serverEnv } from '@/lib/env';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 const GOOGLE_API_TIMEOUT = 15000; // 15 second timeout
@@ -444,17 +445,10 @@ export async function POST(request: NextRequest) {
       areas,
     } = validationResult.data;
 
-    console.log('[Experiences API] Request:', {
-      activityTypes,
-      destination,
-      hotelCount: Object.keys(hotels || {}).length,
-      areasCount: areas?.length,
-    });
-
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    const apiKey = serverEnv.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
       console.error('[Experiences API] No Google Maps API key configured');
-      return NextResponse.json({ error: 'API key not configured' }, { status: 500 });
+      return NextResponse.json({ error: 'Experience search is temporarily unavailable' }, { status: 503 });
     }
 
     // Build hotel coordinates list for proximity filtering
@@ -476,14 +470,10 @@ export async function POST(request: NextRequest) {
           lng: area.centerLng,
         });
       } else {
-        console.warn(`[Experiences API] Invalid coordinates for area ${area.name}: hotel=(${hotel?.lat}, ${hotel?.lng}), center=(${area.centerLat}, ${area.centerLng})`);
       }
     }
 
-    console.log('[Experiences API] Hotel coordinates:', hotelCoords);
-
     if (hotelCoords.length === 0) {
-      console.warn('[Experiences API] No hotel/area coordinates available');
       return NextResponse.json({
         experiencesByType: {},
         totalCount: 0,
@@ -543,12 +533,10 @@ export async function POST(request: NextRequest) {
     // =================================================================
     // PARALLELIZED: Process all activity types concurrently using Promise.all
     // =================================================================
-    console.log(`[Experiences API] Processing ${activityTypes.length} activity types in parallel`);
 
     const activityResults = await Promise.all(activityTypes.map(async (activityType) => {
       // Warn for unknown activity types but still process with generic search
       if (!VALID_ACTIVITY_TYPES.includes(activityType)) {
-        console.warn(`[Experiences API] Unknown activity type: ${activityType}, using generic search`);
       }
 
       const searchTerms = activitySearchTerms[activityType] || [`${activityType} tour`, `${activityType} experience`];
@@ -680,8 +668,6 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      console.log(`[Experiences API] Found ${allExperiences.length} ${activityType} experiences after filtering`);
-
       // Sort by relevance score (primary), then rating, then distance
       allExperiences.sort((a, b) => {
         // Primary: relevance score
@@ -704,8 +690,6 @@ export async function POST(request: NextRequest) {
         e.relevanceScore < RELEVANCE_THRESHOLD_GOOD
       );
 
-      console.log(`[Experiences API] ${activityType}: ${highQuality.length} high-quality, ${mediumQuality.length} medium-quality results`);
-
       // Prioritize high-quality results - only include medium-quality if we don't have enough high-quality
       // If we have 4+ high-quality results, don't include any medium-quality
       const MIN_HIGH_QUALITY_THRESHOLD = 4;
@@ -715,14 +699,12 @@ export async function POST(request: NextRequest) {
       if (highQuality.length >= MIN_HIGH_QUALITY_THRESHOLD) {
         // We have enough high-quality results, use only those
         finalResults = highQuality.slice(0, MAX_RESULTS);
-        console.log(`[Experiences API] ${activityType}: Using ${finalResults.length} high-quality results only`);
       } else {
         // Not enough high-quality, supplement with medium-quality
         const highQualityToUse = highQuality.slice(0, MAX_RESULTS);
         const mediumSlotsAvailable = MAX_RESULTS - highQualityToUse.length;
         const mediumQualityToUse = mediumQuality.slice(0, mediumSlotsAvailable);
         finalResults = [...highQualityToUse, ...mediumQualityToUse];
-        console.log(`[Experiences API] ${activityType}: Using ${highQualityToUse.length} high + ${mediumQualityToUse.length} medium quality results`);
       }
 
       // Add quality tier indicator to results
@@ -731,7 +713,6 @@ export async function POST(request: NextRequest) {
         qualityTier: exp.relevanceScore >= RELEVANCE_THRESHOLD_GOOD ? 'high' : 'medium',
       }));
 
-      console.log(`[Experiences API] Returning ${mappedResults.length} quality results for ${activityType}`);
       return { activityType, experiences: mappedResults };
     }));
 

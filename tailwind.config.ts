@@ -10,7 +10,8 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Reddit-inspired primary color (Reddit Orange)
+        // Canonical brand orange scale (used as both `reddit-*` and `primary-*`)
+        // `primary` is an alias kept for backwards compat with builder components.
         primary: {
           50: '#fff4ed',
           100: '#ffe4d5',
@@ -49,7 +50,7 @@ const config: Config = {
           800: '#228636',
           900: '#166d28',
         },
-        // Reddit orange (main brand color)
+        // Reddit orange (main brand color) - canonical reference
         reddit: {
           DEFAULT: '#FF4500',
           light: '#FF5722',
@@ -65,20 +66,20 @@ const config: Config = {
           800: '#912400',
           900: '#701c00',
         },
-        // Reddit's UI grays
+        // Reddit's UI grays - monotonic lightness scale (50 lightest -> 900 darkest)
         'reddit-gray': {
-          50: '#F8F9FA',
-          100: '#DAE0E6', // Reddit feed background
-          200: '#EDEFF1',
-          300: '#C8CBCD',
-          400: '#878A8C',
-          500: '#7C7C7C',
-          600: '#5A5A5A',
-          700: '#343536', // Reddit dark card
-          800: '#272729',
-          900: '#1A1A1B', // Reddit dark background
+          50: '#F8F9FA',   // Lightest
+          100: '#EDEFF1',  // Light background
+          200: '#DAE0E6',  // Reddit feed background
+          300: '#C8CBCD',  // Borders
+          400: '#878A8C',  // Muted text
+          500: '#7C7C7C',  // Secondary text
+          600: '#5A5A5A',  // Body text
+          700: '#343536',  // Reddit dark card
+          800: '#272729',  // Dark surface
+          900: '#1A1A1B',  // Reddit dark background
         },
-        // Keep trust color for verification badges
+        // Trust color for verification badges (alias of accent)
         trust: {
           DEFAULT: '#46D160',
           50: '#e6fff2',
@@ -100,8 +101,6 @@ const config: Config = {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         script: ['Satisfy', 'cursive'],
-        // Reddit-style font
-        reddit: ['IBMPlexSans', 'Arial', 'sans-serif'],
       },
       borderRadius: {
         xl: '16px',
@@ -133,11 +132,19 @@ const config: Config = {
         'popover': '70',      // Popovers, tooltips above modals
         'toast': '100',       // Toast notifications (always on top)
       },
+      // Default transition timing for consistent feel across the app
+      transitionTimingFunction: {
+        'ease-out-expo': 'cubic-bezier(0.16, 1, 0.3, 1)',
+      },
+      transitionDuration: {
+        DEFAULT: '200ms',
+      },
       animation: {
         'shimmer': 'shimmer 2s infinite linear',
         'fade-in': 'fadeIn 0.3s ease-in-out',
         'slide-up': 'slideUp 0.3s ease-out',
         'slide-down': 'slideDown 0.3s ease-out',
+        'scale-in': 'scaleIn 0.15s ease-out',
       },
       keyframes: {
         shimmer: {
@@ -155,6 +162,10 @@ const config: Config = {
         slideDown: {
           '0%': { transform: 'translateY(-10px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        scaleIn: {
+          '0%': { transform: 'scale(0.9)', opacity: '0' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
         },
       },
     },

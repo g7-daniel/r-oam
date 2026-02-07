@@ -44,7 +44,7 @@ export function filterByDistance<T>(
 ): T[] {
   return items.filter((item) => {
     const coords = getCoords(item);
-    if (!coords || !coords.lat || !coords.lng) return false;
+    if (!coords || coords.lat == null || coords.lng == null) return false;
     const distance = calculateHaversineDistance(
       center.lat,
       center.lng,
@@ -69,6 +69,6 @@ export function getDistanceFromCenter(
   centerLat: number,
   centerLng: number
 ): number | null {
-  if (!itemLat || !itemLng || !centerLat || !centerLng) return null;
+  if (itemLat == null || itemLng == null || centerLat == null || centerLng == null) return null;
   return calculateHaversineDistance(centerLat, centerLng, itemLat, itemLng);
 }

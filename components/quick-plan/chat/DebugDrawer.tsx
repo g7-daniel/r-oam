@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Bug, ChevronRight, X, Clock, MessageSquare, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import type { DebugInfo, DebugEntry, EnrichmentStatus } from '@/types/quick-plan';
 
@@ -51,9 +51,10 @@ export default function DebugDrawer({
               </div>
               <button
                 onClick={onClose}
-                className="p-1 hover:bg-slate-700 rounded-lg transition-colors"
+                aria-label="Close debug panel"
+                className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-slate-700 active:bg-slate-600 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
 
@@ -380,10 +381,11 @@ export function DebugButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="fixed bottom-4 right-4 w-12 h-12 bg-slate-800 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center transition-colors z-30"
+      aria-label="Open Debug Panel"
+      className="fixed bottom-4 right-4 min-w-[44px] min-h-[44px] w-12 h-12 bg-slate-800 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center transition-colors z-30"
       title="Open Debug Panel"
     >
-      <Bug className="w-5 h-5" />
+      <Bug className="w-5 h-5" aria-hidden="true" />
     </button>
   );
 }

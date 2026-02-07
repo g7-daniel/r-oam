@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
   Share2,
   Settings,
@@ -18,7 +19,11 @@ import { formatDateRange } from '@/lib/date-utils';
 import clsx from 'clsx';
 
 export default function TripHeader() {
-  const { trip, setBasics, resetTrip } = useTripStore();
+  const { trip, setBasics, resetTrip } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    setBasics: state.setBasics,
+    resetTrip: state.resetTrip,
+  })));
   const { destinations, basics } = trip;
   const router = useRouter();
 
@@ -82,7 +87,6 @@ export default function TripHeader() {
 
   const handleExportPDF = () => {
     // In production, this would generate a PDF
-    console.log('Exporting PDF...');
     setShowShareMenu(false);
   };
 
@@ -92,7 +96,8 @@ export default function TripHeader() {
       <div className="flex items-center gap-1 sm:gap-3 min-w-0 flex-1">
         <a
           href="/plan/start"
-          className="p-2 -ml-1 sm:-ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors flex-shrink-0"
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center -ml-1 sm:-ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors flex-shrink-0"
+          aria-label="Back to trip setup"
         >
           <ChevronLeft className="w-5 h-5" />
         </a>
@@ -144,10 +149,10 @@ export default function TripHeader() {
         <div className="relative">
           <button
             onClick={() => setShowShareMenu(!showShareMenu)}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-3 py-2 min-h-[44px] text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
           >
             <Share2 className="w-4 h-4" />
-            Share
+            <span className="hidden sm:inline">Share</span>
           </button>
 
           {showShareMenu && (
@@ -183,7 +188,8 @@ export default function TripHeader() {
         {/* Settings button */}
         <button
           onClick={() => setShowSettings(!showSettings)}
-          className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+          aria-label="Trip settings"
         >
           <Settings className="w-5 h-5" />
         </button>
@@ -196,7 +202,7 @@ export default function TripHeader() {
             className="fixed inset-0 z-40 bg-black/30"
             onClick={() => setShowSettings(false)}
           />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-xl z-50 p-6">
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-xl z-50 p-5 sm:p-6">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Trip Settings</h2>
 
             <div className="space-y-4">

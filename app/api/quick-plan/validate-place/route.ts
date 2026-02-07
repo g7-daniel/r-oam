@@ -5,8 +5,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/api-cache';
+import { serverEnv } from '@/lib/env';
 
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
+const getGoogleMapsApiKey = () => serverEnv.GOOGLE_MAPS_API_KEY;
 const GOOGLE_API_TIMEOUT = 10000; // 10 second timeout
 
 interface PlaceDetails {
@@ -23,7 +24,7 @@ interface PlaceDetails {
 }
 
 async function getPlaceDetails(placeId: string): Promise<PlaceDetails | null> {
-  if (!GOOGLE_MAPS_API_KEY) {
+  if (!getGoogleMapsApiKey()) {
     console.error('GOOGLE_MAPS_API_KEY not configured');
     return null;
   }
@@ -32,7 +33,7 @@ async function getPlaceDetails(placeId: string): Promise<PlaceDetails | null> {
     const params = new URLSearchParams({
       place_id: placeId,
       fields: 'place_id,name,formatted_address,geometry,types,rating,price_level,photos',
-      key: GOOGLE_MAPS_API_KEY,
+      key: getGoogleMapsApiKey(),
     });
 
     const response = await fetchWithTimeout(
@@ -69,7 +70,7 @@ async function getPlaceDetails(placeId: string): Promise<PlaceDetails | null> {
 }
 
 async function searchPlace(query: string, type?: string): Promise<PlaceDetails[]> {
-  if (!GOOGLE_MAPS_API_KEY) {
+  if (!getGoogleMapsApiKey()) {
     console.error('GOOGLE_MAPS_API_KEY not configured');
     return [];
   }
@@ -77,7 +78,7 @@ async function searchPlace(query: string, type?: string): Promise<PlaceDetails[]
   try {
     const params = new URLSearchParams({
       query,
-      key: GOOGLE_MAPS_API_KEY,
+      key: getGoogleMapsApiKey(),
     });
 
     if (type) {

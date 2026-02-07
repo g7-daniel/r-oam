@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import Card from '@/components/ui/Card';
 import RestaurantAvailability from '@/components/ui/RestaurantAvailability';
 import ExperienceCart from '@/components/ui/ExperienceCart';
@@ -26,7 +27,7 @@ import {
   Navigation,
 } from 'lucide-react';
 import clsx from 'clsx';
-import type { Recommendation, ChatMessage } from '@/lib/schemas/trip';
+import type { Recommendation, JourneyChatMessage as ChatMessage } from '@/lib/schemas/trip';
 
 // Category display config
 const CATEGORY_CONFIG: Record<string, { color: string; icon: string }> = {
@@ -742,7 +743,6 @@ function AttractionDetailModal({
                 date={tripDate}
                 defaultPartySize={partySize}
                 onBook={(slot) => {
-                  console.log('Booking slot:', slot);
                   // Add to dining reservations and cart
                   if (onDiningReservation) {
                     onDiningReservation(slot);
@@ -750,13 +750,11 @@ function AttractionDetailModal({
                   onClose();
                 }}
                 onAgentBook={(size, time) => {
-                  console.log('Agent booking:', size, time);
                   // Add to cart with agent booking status
                   onToggle();
                   onClose();
                 }}
                 onUserBook={() => {
-                  console.log('User will book themselves');
                   // Add to cart anyway
                   onToggle();
                   onClose();
@@ -962,7 +960,23 @@ export default function Step3AIDiscovery() {
     experienceCart,
     // Dining reservation
     addDiningReservation,
-  } = useTripStore();
+  } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    addChatMessage: state.addChatMessage,
+    updateLastMessage: state.updateLastMessage,
+    getChatThread: state.getChatThread,
+    setRecommendations: state.setRecommendations,
+    selectSpot: state.selectSpot,
+    deselectSpot: state.deselectSpot,
+    completeDiscovery: state.completeDiscovery,
+    setActiveDestination: state.setActiveDestination,
+    getNextIncompleteDestination: state.getNextIncompleteDestination,
+    addToCart: state.addToCart,
+    removeFromCart: state.removeFromCart,
+    isInCart: state.isInCart,
+    experienceCart: state.experienceCart,
+    addDiningReservation: state.addDiningReservation,
+  })));
 
   const { destinations, activeDestinationId, basics } = trip;
   const activeDestination = destinations.find((d) => d.destinationId === activeDestinationId);
@@ -1399,7 +1413,7 @@ export default function Step3AIDiscovery() {
                   onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                   placeholder={isLoading ? "Snoo is searching..." : "Or type what you're looking for..."}
                   disabled={isLoading}
-                  className="flex-1 px-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-reddit focus:border-transparent disabled:bg-slate-50"
+                  className="flex-1 px-4 py-3 text-base border border-slate-200 dark:border-slate-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-reddit focus:border-transparent disabled:bg-slate-50 dark:disabled:bg-slate-700 bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400"
                 />
                 <button
                   onClick={handleSend}

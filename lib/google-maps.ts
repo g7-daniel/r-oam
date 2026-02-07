@@ -2,13 +2,13 @@ import type { Experience, ExperienceCategory, PlaceResult, DirectionsResult, Tra
 import { fetchWithTimeout } from './api-cache';
 import { withRetry } from './retry';
 import { calculateHaversineDistance } from './utils/geo';
-import { isConfigured } from './env';
+import { isConfigured, serverEnv } from './env';
 
 const GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
 const GOOGLE_MAPS_TIMEOUT = 15000; // 15 second timeout
 
 // Lazy getter for API key to avoid issues during module initialization
-const getGoogleMapsApiKey = () => process.env.GOOGLE_MAPS_API_KEY || '';
+const getGoogleMapsApiKey = () => serverEnv.GOOGLE_MAPS_API_KEY;
 
 // Custom error with status for rate limit handling
 interface RateLimitError extends Error {
@@ -27,7 +27,6 @@ const GOOGLE_MAPS_RETRY_OPTIONS = {
   initialDelayMs: 2000,
   maxDelayMs: 10000,
   onRetry: (attempt: number, delay: number) => {
-    console.log(`Google Maps API retry attempt ${attempt} after ${delay}ms`);
   },
 };
 
@@ -56,7 +55,6 @@ export async function searchHotelsWithPagination(
   maxResults: number = 60
 ): Promise<GooglePlaceResult[]> {
   if (!isConfigured.googleMaps()) {
-    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
   const apiKey = getGoogleMapsApiKey();
@@ -93,7 +91,7 @@ export async function searchHotelsWithPagination(
         return response.json();
       }, GOOGLE_MAPS_RETRY_OPTIONS);
 
-      if (data.results) {
+      if (data.results && Array.isArray(data.results)) {
         results.push(...data.results);
       }
 
@@ -115,7 +113,6 @@ export async function searchHotelsByGeocode(
   maxResults: number = 60
 ): Promise<GooglePlaceResult[]> {
   if (!isConfigured.googleMaps()) {
-    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
   const apiKey = getGoogleMapsApiKey();
@@ -152,7 +149,7 @@ export async function searchHotelsByGeocode(
         return response.json();
       }, GOOGLE_MAPS_RETRY_OPTIONS);
 
-      if (data.results) {
+      if (data.results && Array.isArray(data.results)) {
         results.push(...data.results);
       }
 
@@ -175,7 +172,6 @@ export async function searchLuxuryHotels(
   maxResults: number = 20
 ): Promise<GooglePlaceResult[]> {
   if (!isConfigured.googleMaps()) {
-    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
   const apiKey = getGoogleMapsApiKey();
@@ -237,14 +233,21 @@ export async function searchLuxuryHotels(
     });
 
     try {
-      const response = await fetchWithTimeout(
-        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
-        {},
-        GOOGLE_MAPS_TIMEOUT
-      );
-      const data = await response.json();
+      const data = await withRetry(async () => {
+        const response = await fetchWithTimeout(
+          `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+          {},
+          GOOGLE_MAPS_TIMEOUT
+        );
 
-      if (data.results) {
+        if (response.status === 429) {
+          throw createRateLimitError();
+        }
+
+        return response.json();
+      }, GOOGLE_MAPS_RETRY_OPTIONS);
+
+      if (data.results && Array.isArray(data.results)) {
         for (const place of data.results) {
           // Only include high-rated hotels (4.0+)
           if (place.place_id &&
@@ -272,7 +275,6 @@ export async function searchLuxuryHotels(
     return (b.rating || 0) - (a.rating || 0);
   });
 
-  console.log(`[Google Maps] Found ${results.length} luxury hotels for ${areaName}`);
   return results.slice(0, maxResults);
 }
 
@@ -281,7 +283,6 @@ export async function geocodeLocation(
   locationName: string
 ): Promise<{ lat: number; lng: number } | null> {
   if (!isConfigured.googleMaps()) {
-    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return null;
   }
   const apiKey = getGoogleMapsApiKey();
@@ -292,20 +293,27 @@ export async function geocodeLocation(
   });
 
   try {
-    const response = await fetchWithTimeout(
-      `${GOOGLE_MAPS_BASE_URL}/geocode/json?${params}`,
-      {},
-      GOOGLE_MAPS_TIMEOUT
-    );
-    const data = await response.json();
+    const data = await withRetry(async () => {
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/geocode/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
+      );
 
-    if (data.status === 'OK' && data.results && data.results.length > 0) {
-      const location = data.results[0].geometry.location;
-      console.log(`Geocoded "${locationName}" to (${location.lat}, ${location.lng})`);
-      return { lat: location.lat, lng: location.lng };
+      if (response.status === 429) {
+        throw createRateLimitError();
+      }
+
+      return response.json();
+    }, GOOGLE_MAPS_RETRY_OPTIONS);
+
+    if (data.status === 'OK' && data.results && Array.isArray(data.results) && data.results.length > 0) {
+      const location = data.results[0]?.geometry?.location;
+      if (location && typeof location.lat === 'number' && typeof location.lng === 'number') {
+        return { lat: location.lat, lng: location.lng };
+      }
     }
 
-    console.warn(`Geocoding failed for "${locationName}": ${data.status}`);
     return null;
   } catch (error) {
     console.error('Geocoding error:', error);
@@ -319,7 +327,6 @@ export async function searchPlaces(
   radius = 50000
 ): Promise<PlaceResult[]> {
   if (!isConfigured.googleMaps()) {
-    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
   const apiKey = getGoogleMapsApiKey();
@@ -334,19 +341,31 @@ export async function searchPlaces(
     params.append('radius', radius.toString());
   }
 
-  const response = await fetchWithTimeout(
-    `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
-    {},
-    GOOGLE_MAPS_TIMEOUT
-  );
+  try {
+    const data = await withRetry(async () => {
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
+      );
 
-  if (!response.ok) {
-    console.error('Google Places search failed:', response.statusText);
+      if (response.status === 429) {
+        throw createRateLimitError();
+      }
+
+      if (!response.ok) {
+        console.error('Google Places search failed:', response.statusText);
+        return { results: [] };
+      }
+
+      return response.json();
+    }, GOOGLE_MAPS_RETRY_OPTIONS);
+
+    return Array.isArray(data.results) ? data.results : [];
+  } catch (error) {
+    console.error('Google Places search error:', error);
     return [];
   }
-
-  const data = await response.json();
-  return data.results || [];
 }
 
 export async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
@@ -361,18 +380,30 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceResult | nu
     key: apiKey,
   });
 
-  const response = await fetchWithTimeout(
-    `${GOOGLE_MAPS_BASE_URL}/place/details/json?${params}`,
-    {},
-    GOOGLE_MAPS_TIMEOUT
-  );
+  try {
+    const data = await withRetry(async () => {
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/place/details/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
+      );
 
-  if (!response.ok) {
+      if (response.status === 429) {
+        throw createRateLimitError();
+      }
+
+      if (!response.ok) {
+        return { result: null };
+      }
+
+      return response.json();
+    }, GOOGLE_MAPS_RETRY_OPTIONS);
+
+    return data.result || null;
+  } catch (error) {
+    console.error('Google Places details error:', error);
     return null;
   }
-
-  const data = await response.json();
-  return data.result || null;
 }
 
 export async function getDirections(
@@ -392,18 +423,30 @@ export async function getDirections(
     key: apiKey,
   });
 
-  const response = await fetchWithTimeout(
-    `${GOOGLE_MAPS_BASE_URL}/directions/json?${params}`,
-    {},
-    GOOGLE_MAPS_TIMEOUT
-  );
+  try {
+    const data = await withRetry(async () => {
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/directions/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
+      );
 
-  if (!response.ok) {
+      if (response.status === 429) {
+        throw createRateLimitError();
+      }
+
+      if (!response.ok) {
+        return null;
+      }
+
+      return response.json();
+    }, GOOGLE_MAPS_RETRY_OPTIONS);
+
+    return data;
+  } catch (error) {
+    console.error('Google Directions API error:', error);
     return null;
   }
-
-  const data = await response.json();
-  return data;
 }
 
 export async function getDistanceMatrix(
@@ -426,17 +469,29 @@ export async function getDistanceMatrix(
     key: apiKey,
   });
 
-  const response = await fetchWithTimeout(
-    `${GOOGLE_MAPS_BASE_URL}/distancematrix/json?${params}`,
-    {},
-    GOOGLE_MAPS_TIMEOUT
-  );
+  let data;
+  try {
+    data = await withRetry(async () => {
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/distancematrix/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
+      );
 
-  if (!response.ok) {
+      if (response.status === 429) {
+        throw createRateLimitError();
+      }
+
+      if (!response.ok) {
+        return { rows: [] };
+      }
+
+      return response.json();
+    }, GOOGLE_MAPS_RETRY_OPTIONS);
+  } catch (error) {
+    console.error('Google Distance Matrix API error:', error);
     return [];
   }
-
-  const data = await response.json();
 
   interface DistanceMatrixElement {
     distance?: { text: string; value: number };
@@ -538,18 +593,28 @@ export async function getExperiencesByCategory(
     });
   }
 
-  // Fetch place details to get descriptions (batch up to 10)
+  // Fetch place details to get descriptions (batch up to 10, with concurrency limit)
   const placesToFetch = uniquePlaces.slice(0, 10);
-  const detailsPromises = placesToFetch.map(async (place) => {
-    try {
-      const details = await getPlaceDetails(place.place_id);
-      return { place, details };
-    } catch {
-      return { place, details: null };
+  const placesWithDetails: { place: PlaceResult; details: PlaceResult | null }[] = [];
+  // Process in batches of 3 to avoid hitting Google rate limits
+  for (let i = 0; i < placesToFetch.length; i += 3) {
+    const batch = placesToFetch.slice(i, i + 3);
+    const batchResults = await Promise.all(
+      batch.map(async (place) => {
+        try {
+          const details = await getPlaceDetails(place.place_id);
+          return { place, details };
+        } catch {
+          return { place, details: null };
+        }
+      })
+    );
+    placesWithDetails.push(...batchResults);
+    // Small delay between batches
+    if (i + 3 < placesToFetch.length) {
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
-  });
-
-  const placesWithDetails = await Promise.all(detailsPromises);
+  }
 
   // Extended place details type
   interface ExtendedPlaceDetails {
@@ -750,17 +815,24 @@ export async function getHotelAmenities(placeId: string): Promise<VerifiedHotelA
       key: getGoogleMapsApiKey(),
     });
 
-    const response = await fetchWithTimeout(
-      `${GOOGLE_MAPS_BASE_URL}/place/details/json?${params}`,
-      {},
-      GOOGLE_MAPS_TIMEOUT
-    );
+    const data = await withRetry(async () => {
+      const response = await fetchWithTimeout(
+        `${GOOGLE_MAPS_BASE_URL}/place/details/json?${params}`,
+        {},
+        GOOGLE_MAPS_TIMEOUT
+      );
 
-    if (!response.ok) {
-      return defaultResult;
-    }
+      if (response.status === 429) {
+        throw createRateLimitError();
+      }
 
-    const data = await response.json();
+      if (!response.ok) {
+        return { result: null };
+      }
+
+      return response.json();
+    }, GOOGLE_MAPS_RETRY_OPTIONS);
+
     const result = data.result;
 
     if (!result) {
@@ -849,7 +921,6 @@ export async function searchHotelsGoogle(
   isLuxury: boolean;
 }[]> {
   if (!isConfigured.googleMaps()) {
-    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
     return [];
   }
   const apiKey = getGoogleMapsApiKey();
@@ -884,21 +955,33 @@ export async function searchHotelsGoogle(
     }
 
     try {
-      const response = await fetchWithTimeout(
-        `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
-        {},
-        GOOGLE_MAPS_TIMEOUT
-      );
+      const data = await withRetry(async () => {
+        const response = await fetchWithTimeout(
+          `${GOOGLE_MAPS_BASE_URL}/place/textsearch/json?${params}`,
+          {},
+          GOOGLE_MAPS_TIMEOUT
+        );
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.results) {
-          allPlaces.push(...data.results);
+        if (response.status === 429) {
+          throw createRateLimitError();
         }
+
+        if (!response.ok) {
+          return { results: [] };
+        }
+
+        return response.json();
+      }, GOOGLE_MAPS_RETRY_OPTIONS);
+
+      if (data.results && Array.isArray(data.results)) {
+        allPlaces.push(...data.results);
       }
     } catch (error) {
       console.error('Google Places hotel search error:', error);
     }
+
+    // Small delay between queries to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
 
   // Deduplicate by place_id
@@ -907,16 +990,17 @@ export async function searchHotelsGoogle(
   );
 
   // Filter by distance if we have location coordinates (max 50km)
-  if (location && location.lat && location.lng) {
+  // Use != null instead of truthiness check because lat/lng of 0 is valid
+  // (e.g., locations near the equator or prime meridian)
+  if (location && location.lat != null && location.lng != null) {
     const beforeCount = uniquePlaces.length;
     uniquePlaces = uniquePlaces.filter((place) => {
       const placeLat = place.geometry?.location?.lat;
       const placeLng = place.geometry?.location?.lng;
-      if (!placeLat || !placeLng) return false;
+      if (placeLat == null || placeLng == null) return false;
       const distance = getDistanceKm(location.lat, location.lng, placeLat, placeLng);
       return distance <= 50; // Max 50km from destination
     });
-    console.log(`Google Places: Filtered ${beforeCount} -> ${uniquePlaces.length} hotels by distance (50km max)`);
   }
 
   // Detect luxury hotels by name - comprehensive list

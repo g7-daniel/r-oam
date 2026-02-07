@@ -11,6 +11,7 @@ import { discoverAreas, generateSplitOptions } from '@/lib/quick-plan/area-disco
 import { chatCompletion } from '@/lib/groq';
 import { GoogleGenAI } from '@google/genai';
 import { prisma } from '@/lib/prisma';
+import { countHotelsCI } from '@/lib/prisma-ci-search';
 import { BoundedMap } from '@/lib/bounded-cache';
 import { geocodeLocation } from '@/lib/google-maps';
 import { calculateHaversineDistance } from '@/lib/utils/geo';
@@ -18,11 +19,18 @@ import {
   discoverAreasPostSchema,
   validateRequestBody,
 } from '@/lib/api-validation';
+import { serverEnv } from '@/lib/env';
 
-// Initialize Gemini client (fallback when Groq rate limits)
-const gemini = process.env.GEMINI_API_KEY
-  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-  : null;
+// Lazy-initialize Gemini client (fallback when Groq rate limits)
+let _gemini: GoogleGenAI | null | undefined = undefined;
+function getGemini(): GoogleGenAI | null {
+  if (_gemini === undefined) {
+    _gemini = serverEnv.GEMINI_API_KEY
+      ? new GoogleGenAI({ apiKey: serverEnv.GEMINI_API_KEY })
+      : null;
+  }
+  return _gemini;
+}
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -47,17 +55,16 @@ async function getHotelCountForArea(
     // Try multiple search strategies
     let count = 0;
 
-    // Strategy 1: Search by area name in region/city fields
-    // Note: SQLite LIKE is case-insensitive by default for ASCII, so we don't need mode
-    count = await prisma.hotel.count({
-      where: {
-        OR: [
-          { region: { contains: areaName } },
-          { city: { contains: areaName } },
-          { name: { contains: areaName } },
+    // Strategy 1: Search by area name in region/city fields (case-insensitive for SQLite)
+    count = await countHotelsCI({
+      orGroups: [{
+        textConditions: [
+          { field: 'region', value: areaName },
+          { field: 'city', value: areaName },
+          { field: 'name', value: areaName },
         ],
-        googleRating: { gte: 3.5 }, // Only count decent hotels
-      },
+      }],
+      minRating: 3.5, // Only count decent hotels
     });
 
     // Strategy 2: If no results by name and we have coordinates, search by proximity
@@ -72,13 +79,15 @@ async function getHotelCountForArea(
       });
     }
 
-    // Strategy 3: Search by destination country/region as fallback
+    // Strategy 3: Search by destination country/region as fallback (case-insensitive)
     if (count === 0) {
-      count = await prisma.hotel.count({
-        where: {
-          country: { contains: destination },
-          googleRating: { gte: 3.5 },
-        },
+      count = await countHotelsCI({
+        orGroups: [{
+          textConditions: [
+            { field: 'country', value: destination },
+          ],
+        }],
+        minRating: 3.5,
       });
       // If searching by country, cap the "available" count to indicate general availability
       if (count > 10) count = 10;
@@ -109,8 +118,6 @@ async function validateAreasWithHotels(
       area.centerLng
     );
 
-    console.log(`[Area Validation] ${area.name}: ${hotelCount} hotels found`);
-
     if (hotelCount >= MIN_HOTELS_FOR_VALID_AREA) {
       validatedAreas.push({
         ...area,
@@ -126,13 +133,11 @@ async function validateAreasWithHotels(
     } else {
       // No hotels at all - exclude but track
       excludedAreas.push(area.name);
-      console.log(`[Area Validation] Excluding ${area.name} - no hotels found`);
     }
   }
 
   // If we excluded too many areas and have very few left, be more lenient
   if (validatedAreas.length < 2 && excludedAreas.length > 0) {
-    console.log(`[Area Validation] Only ${validatedAreas.length} areas passed validation, including excluded areas with warning`);
     // Re-add excluded areas but flag them
     for (const areaName of excludedAreas) {
       const area = areas.find(a => a.name === areaName);
@@ -154,16 +159,14 @@ async function validateAreasWithHotels(
  * Call Gemini as fallback when Groq rate limits
  */
 async function callGeminiForAreas(prompt: string, systemPrompt: string): Promise<string | null> {
-  if (!gemini) {
-    console.log('[Area Discovery] Gemini not configured (no API key)');
+  if (!getGemini()) {
     return null;
   }
 
   try {
-    console.log('[Area Discovery] Attempting Gemini fallback...');
     const fullPrompt = `${systemPrompt}\n\n${prompt}\n\nIMPORTANT: Output ONLY valid JSON. No markdown, no code blocks, just the JSON object.`;
 
-    const response = await gemini.models.generateContent({
+    const response = await getGemini()!.models.generateContent({
       model: GEMINI_MODEL,
       contents: fullPrompt,
       config: {
@@ -174,7 +177,6 @@ async function callGeminiForAreas(prompt: string, systemPrompt: string): Promise
     });
 
     const content = response.text || '';
-    console.log(`[Area Discovery] Gemini response length: ${content.length}`);
     return content;
   } catch (error) {
     console.error('[Area Discovery] Gemini call failed:', error);
@@ -324,18 +326,15 @@ Only respond with the JSON, no other text.`;
 
   // Try Groq first
   try {
-    console.log(`[Area Discovery] Calling Groq for ${destination}...`);
     response = await chatCompletion([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: prompt },
     ], 0.3);
-    console.log(`[Area Discovery] Groq response length: ${response?.length || 0}`);
   } catch (error) {
     console.error('[Area Discovery] Groq call failed:', error);
 
     // Check if it's a rate limit error - try Gemini fallback
     if (isRateLimitError(error)) {
-      console.log('[Area Discovery] Groq rate limited, trying Gemini fallback...');
       response = await callGeminiForAreas(prompt, systemPrompt);
       usedGemini = true;
     }
@@ -361,15 +360,12 @@ Only respond with the JSON, no other text.`;
         parsed = JSON.parse(response);
       }
     } catch (parseError) {
-      console.warn('[Area Discovery] Failed to parse LLM response as JSON:', parseError);
-      console.log('[Area Discovery] Raw response (first 500 chars):', response.substring(0, 500));
 
       // Strategy 3: Attempt to extract areas from plain text
       parsed = extractAreasFromText(response);
     }
 
     if (parsed?.areas && Array.isArray(parsed.areas)) {
-      console.log(`[Area Discovery] ${usedGemini ? 'Gemini' : 'Groq'} discovered ${parsed.areas.length} areas for ${destination}`);
       return parsed.areas.map((area, idx: number) => {
         // Build enhanced description with specific activities
         let enhancedDescription = area.description;
@@ -401,7 +397,6 @@ Only respond with the JSON, no other text.`;
     console.error('[Area Discovery] Failed to parse response:', parseError);
   }
 
-  console.warn('[Area Discovery] No valid areas parsed from response');
   return [];
 }
 
@@ -444,7 +439,6 @@ function extractAreasFromText(text: string): { areas: ExtractedArea[] } | null {
   }
 
   if (areas.length > 0) {
-    console.log(`[Area Discovery] Extracted ${areas.length} areas from text fallback`);
     return { areas };
   }
 
@@ -474,7 +468,6 @@ async function validateAreasGeographically(
 ): Promise<{ validAreas: GeoValidatedAreaData[]; rejectedAreas: { name: string; reason: string; distance?: number }[] }> {
   // If no destination center coordinates, skip validation (can't validate without reference point)
   if (!destCenterLat || !destCenterLng) {
-    console.log('[Area Geo Validation] No destination center coordinates, skipping geographic validation');
     return { validAreas: areas, rejectedAreas: [] };
   }
 
@@ -496,10 +489,18 @@ async function validateAreasGeographically(
 
       if (!areaCoords) {
         // Can't verify - include but flag it
-        console.log(`[Area Geo Validation] Could not geocode "${areaName}" - including with warning`);
         return {
           type: 'valid' as const,
           area: { ...area, geoValidation: 'unverified' as const },
+        };
+      }
+
+      // Validate geocoded coordinates before using them
+      if (Math.abs(areaCoords.lat) > 90 || Math.abs(areaCoords.lng) > 180) {
+        console.error(`Invalid geocoded coordinates for "${areaName}": lat=${areaCoords.lat}, lng=${areaCoords.lng}`);
+        return {
+          type: 'valid' as const,
+          area: { ...area, geoValidation: 'error' as const },
         };
       }
 
@@ -511,11 +512,8 @@ async function validateAreasGeographically(
         areaCoords.lng
       );
 
-      console.log(`[Area Geo Validation] "${areaName}": ${distanceKm.toFixed(1)}km from destination center`);
-
       if (distanceKm > MAX_AREA_DISTANCE_KM) {
         // Too far - likely wrong location or LLM hallucination
-        console.warn(`[Area Geo Validation] REJECTED "${areaName}": ${distanceKm.toFixed(1)}km exceeds ${MAX_AREA_DISTANCE_KM}km limit`);
         return {
           type: 'rejected' as const,
           name: areaName,
@@ -554,7 +552,6 @@ async function validateAreasGeographically(
     }
   }
 
-  console.log(`[Area Geo Validation] Result: ${validAreas.length} valid, ${rejectedAreas.length} rejected`);
   return { validAreas, rejectedAreas };
 }
 
@@ -614,9 +611,7 @@ export async function POST(request: NextRequest) {
 
     // Run LLM and Reddit search in PARALLEL for speed
     const startTime = Date.now();
-    console.log(`Area discovery: Starting parallel fetch for ${destination}`);
     if (customActivities.length > 0) {
-      console.log(`Area discovery: Custom activities: ${customActivities.join(', ')}`);
     }
 
     const destCenterLat = preferences.destinationContext?.centerLat;
@@ -644,8 +639,6 @@ export async function POST(request: NextRequest) {
         : Promise.resolve([] as any[]),
     ]);
 
-    console.log(`Area discovery: LLM returned ${initialLlmData.length} areas, Reddit returned ${redditResults.length} areas [${Date.now() - startTime}ms]`);
-
     let redditData: LocalRedditAreaData[] = redditResults.length > 0
       ? convertRedditDataToAreaFormat(redditResults)
       : [];
@@ -656,13 +649,10 @@ export async function POST(request: NextRequest) {
     let llmData: GeoValidatedAreaData[] = initialLlmData;
 
     if (destCenterLat && destCenterLng && (destCenterLat !== 0 || destCenterLng !== 0)) {
-      console.log(`Area discovery: Validating areas geographically (center: ${destCenterLat}, ${destCenterLng})`);
       const geoValidation = await validateAreasGeographically(initialLlmData, destination, destCenterLat, destCenterLng);
       llmData = geoValidation.validAreas;
       geoRejectedAreas = geoValidation.rejectedAreas;
-      console.log(`Area discovery: After geo validation: ${llmData.length} valid, ${geoRejectedAreas.length} rejected [${Date.now() - startTime}ms]`);
     } else {
-      console.log(`Area discovery: No destination coordinates available, skipping geo validation`);
     }
 
     // Merge LLM and Reddit data - AI descriptions are primary, Reddit provides evidence
@@ -701,8 +691,6 @@ export async function POST(request: NextRequest) {
         mergedData.push(redditArea);
       }
     }
-
-    console.log(`Area discovery: Merged ${mergedData.length} total areas (${llmData.length} LLM primary + ${redditData.length} Reddit evidence)`);
 
     // Use merged data for discovery
     const combinedData = mergedData;
@@ -762,17 +750,46 @@ export async function POST(request: NextRequest) {
     };
 
     // Discover areas using the engine with combined data
-    console.log(`Area discovery: Running discovery with ${combinedData.length} data points for "${destination}"`);
     const areas = await discoverAreas(fullPreferences, combinedData);
-    console.log(`Area discovery: Found ${areas.length} areas`);
+
+    // Patch geocoded coordinates from geo-validated data onto discovered areas.
+    // discoverAreas() creates AreaCandidates with 0,0 coords — the geo validation
+    // already geocoded each area, so propagate those coordinates.
+    for (const area of areas) {
+      if (area.centerLat === 0 && area.centerLng === 0) {
+        const matchingGeo = combinedData.find(cd =>
+          cd.mentionedAreas?.some((ma: MentionedArea) =>
+            ma.name.toLowerCase() === area.name.toLowerCase()
+          )
+        ) as GeoValidatedAreaData | undefined;
+        if (matchingGeo?.centerLat && matchingGeo?.centerLng) {
+          area.centerLat = matchingGeo.centerLat;
+          area.centerLng = matchingGeo.centerLng;
+        }
+      }
+    }
+
+    // For any areas still at 0,0 (geo validation was skipped or failed), geocode them
+    const areasNeedingCoords = areas.filter(a => a.centerLat === 0 && a.centerLng === 0);
+    if (areasNeedingCoords.length > 0) {
+      await Promise.all(areasNeedingCoords.map(async (area) => {
+        try {
+          const coords = await geocodeLocation(`${area.name}, ${destination}`);
+          if (coords) {
+            area.centerLat = coords.lat;
+            area.centerLng = coords.lng;
+          }
+        } catch (e) {
+          // Leave at 0,0 if geocoding fails — map will handle gracefully
+        }
+      }));
+    }
 
     // Validate hotel availability for discovered areas
-    console.log(`Area discovery: Validating hotel availability for ${areas.length} areas`);
     const { validatedAreas: areasWithHotelData, excludedAreas } = await validateAreasWithHotels(
       areas as AreaCandidate[],
       destination
     );
-    console.log(`Area discovery: ${areasWithHotelData.length} areas passed validation, ${excludedAreas.length} excluded`);
 
     // Add evidence to areas - AI descriptions are primary, Reddit provides social proof
     const areasWithEvidence = areasWithHotelData.map(area => {
@@ -882,7 +899,7 @@ export async function POST(request: NextRequest) {
         message: 'We had trouble finding areas for your destination. Please try a different destination or try again.',
         areas: [],
         splitOptions: [],
-        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+        details: serverEnv.NODE_ENV === 'development' ? errorMessage : undefined,
       },
       { status: 500 }
     );

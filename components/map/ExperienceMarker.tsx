@@ -57,9 +57,19 @@ export default function ExperienceMarker({
     >
       <div
         onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClick?.();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-label={`${experience.name}${isSelected ? ' (selected)' : ''} - ${experience.price > 0 ? `$${experience.price}` : 'Free'}`}
         className={`
           relative cursor-pointer transform transition-all duration-200
           ${isHovered || isSelected ? 'scale-110 z-50' : 'z-10'}
+          focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 rounded-full
         `}
       >
         {/* Main Marker */}

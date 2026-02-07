@@ -9,13 +9,12 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q');
 
-  if (!query || query.length < 2) {
+  if (!query || query.length < 2 || query.length > 200) {
     return NextResponse.json({ destinations: [] });
   }
 
   if (!isConfigured.googleMaps()) {
-    console.warn('Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env.local');
-    return NextResponse.json({ destinations: [], error: 'API not configured' });
+    return NextResponse.json({ destinations: [] });
   }
   const apiKey = serverEnv.GOOGLE_MAPS_API_KEY;
 

@@ -75,7 +75,6 @@ async function handleWrongAreas(
 
   // Parse what's wrong with current areas from feedback
   const currentAreas = currentItinerary.stops.map(s => s.area.name).join(', ');
-  console.log(`Regenerating areas. Current: ${currentAreas}. Feedback: ${customFeedback}`);
 
   // Use LLM to understand what areas the user wants instead
   let targetAreaDescription = 'different areas from the current selection';
@@ -177,9 +176,13 @@ async function handleTooPacked(
   changesApplied.push(`Reducing from ~${avgActivities.toFixed(1)} to ~${(targetActivities / updated.days.length).toFixed(1)} activities per day`);
 
   // Update days to have more free time
-  updated.days = updated.days.map(day => {
-    // Keep mornings mostly, reduce afternoons
-    if (day.afternoon?.type === 'activity' && Math.random() > 0.6) {
+  // Use deterministic reduction: remove every other afternoon activity
+  let removedCount = 0;
+  const targetRemoval = Math.ceil(updated.days.length * 0.25);
+  updated.days = updated.days.map((day, idx) => {
+    // Keep mornings mostly, reduce afternoons deterministically (every other one)
+    if (day.afternoon?.type === 'activity' && removedCount < targetRemoval && idx % 2 === 1) {
+      removedCount++;
       return {
         ...day,
         afternoon: {
@@ -629,8 +632,6 @@ export async function regenerateForDissatisfaction(
       continue;
     }
 
-    console.log(`Processing dissatisfaction: ${reason}`);
-
     const result = await handler({
       ...context,
       currentItinerary: updatedItinerary,
@@ -647,8 +648,8 @@ export async function regenerateForDissatisfaction(
     }
   }
 
-  // If "other" reason with custom feedback but no specific reasons
-  if (response.reasons?.length === 0 && response.customFeedback) {
+  // If custom feedback provided but no specific reasons (or reasons is empty/undefined)
+  if ((!response.reasons || response.reasons.length === 0) && response.customFeedback) {
     const result = await handleOther(context);
     if (result.changesApplied) allChanges.push(...result.changesApplied);
     if (result.errors) allErrors.push(...result.errors);
@@ -683,7 +684,7 @@ export function getSatisfactionOptions(
     d.afternoon?.title?.toLowerCase().includes('surf')
   );
 
-  const hasDining = itinerary.diningPlan?.scheduledDinners?.length > 0;
+  const hasDining = (itinerary.diningPlan?.scheduledDinners?.length ?? 0) > 0;
 
   const hasMultipleAreas = itinerary.stops.length > 1;
 

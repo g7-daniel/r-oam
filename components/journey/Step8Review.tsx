@@ -1,6 +1,7 @@
 'use client';
 
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import Card from '@/components/ui/Card';
 import {
   CheckCircle2,
@@ -16,7 +17,11 @@ import {
 import clsx from 'clsx';
 
 export default function Step8Review() {
-  const { trip, getTotalBudgetSpent, getRemainingBudget } = useTripStore();
+  const { trip, getTotalBudgetSpent, getRemainingBudget } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    getTotalBudgetSpent: state.getTotalBudgetSpent,
+    getRemainingBudget: state.getRemainingBudget,
+  })));
   const { basics, destinations, flights } = trip;
 
   const spent = getTotalBudgetSpent();
@@ -110,7 +115,6 @@ export default function Step8Review() {
       try {
         await navigator.share(shareData);
       } catch (err) {
-        console.log('Share cancelled');
       }
     } else {
       await navigator.clipboard.writeText(window.location.href);
@@ -133,56 +137,56 @@ export default function Step8Review() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="text-center">
           <Calendar className="w-8 h-8 mx-auto mb-2 text-primary-500" />
-          <p className="text-2xl font-bold text-slate-900">{totalNights}</p>
-          <p className="text-sm text-slate-500">Nights</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalNights}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Nights</p>
         </Card>
         <Card className="text-center">
           <MapPin className="w-8 h-8 mx-auto mb-2 text-primary-500" />
-          <p className="text-2xl font-bold text-slate-900">{destinations.length}</p>
-          <p className="text-sm text-slate-500">Destinations</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{destinations.length}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Destinations</p>
         </Card>
         <Card className="text-center">
           <Sparkles className="w-8 h-8 mx-auto mb-2 text-primary-500" />
-          <p className="text-2xl font-bold text-slate-900">{totalExperiences}</p>
-          <p className="text-sm text-slate-500">Experiences</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalExperiences}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Experiences</p>
         </Card>
         <Card className="text-center">
           <DollarSign className="w-8 h-8 mx-auto mb-2 text-primary-500" />
-          <p className="text-2xl font-bold text-slate-900">${spent.toLocaleString()}</p>
-          <p className="text-sm text-slate-500">Total Cost</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">${spent.toLocaleString()}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Total Cost</p>
         </Card>
       </div>
 
       {/* Trip details */}
       <Card>
-        <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+        <h3 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
           <Calendar className="w-5 h-5 text-primary-500" />
           Trip Details
         </h3>
         <div className="grid md:grid-cols-2 gap-4">
           <div>
-            <p className="text-sm text-slate-500">Origin</p>
-            <p className="font-medium text-slate-900">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Origin</p>
+            <p className="font-medium text-slate-900 dark:text-white">
               {basics.originAirport?.city} ({basics.originAirport?.iata})
             </p>
           </div>
           <div>
-            <p className="text-sm text-slate-500">Dates</p>
-            <p className="font-medium text-slate-900">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Dates</p>
+            <p className="font-medium text-slate-900 dark:text-white">
               {basics.startDate && new Date(basics.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} -{' '}
               {basics.endDate && new Date(basics.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             </p>
           </div>
           <div>
-            <p className="text-sm text-slate-500">Travelers</p>
-            <p className="font-medium text-slate-900">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Travelers</p>
+            <p className="font-medium text-slate-900 dark:text-white">
               {basics.travelers.adults} adult{basics.travelers.adults > 1 ? 's' : ''}
               {basics.travelers.children > 0 && `, ${basics.travelers.children} child${basics.travelers.children > 1 ? 'ren' : ''}`}
             </p>
           </div>
           <div>
-            <p className="text-sm text-slate-500">Budget Style</p>
-            <p className="font-medium text-slate-900 capitalize">{basics.budgetStyle}</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Budget Style</p>
+            <p className="font-medium text-slate-900 dark:text-white capitalize">{basics.budgetStyle || 'mid'}</p>
           </div>
         </div>
       </Card>
@@ -198,7 +202,7 @@ export default function Step8Review() {
           <Card key={dest.destinationId}>
             <div className="flex items-start gap-4">
               {/* Hero image */}
-              <div className="w-24 h-24 rounded-lg overflow-hidden bg-slate-100 flex-shrink-0">
+              <div className="w-24 h-24 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 flex-shrink-0">
                 {dest.heroImageUrl && (
                   <img
                     src={dest.heroImageUrl}
@@ -210,25 +214,25 @@ export default function Step8Review() {
 
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="w-6 h-6 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-sm font-bold">
+                  <span className="w-6 h-6 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 flex items-center justify-center text-sm font-bold">
                     {idx + 1}
                   </span>
-                  <h3 className="font-semibold text-slate-900">{dest.place.name}</h3>
-                  <span className="text-sm text-slate-500">({dest.nights} nights)</span>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">{dest.place.name}</h3>
+                  <span className="text-sm text-slate-500 dark:text-slate-400">({dest.nights} nights)</span>
                 </div>
 
                 <div className="space-y-2 text-sm">
                   {hotel && (
                     <div className="flex items-center gap-2">
                       <Hotel className="w-4 h-4 text-slate-400" />
-                      <span className="text-slate-700">{hotel.name}</span>
-                      <span className="text-slate-500">${hotel.totalPrice}</span>
+                      <span className="text-slate-700 dark:text-slate-300">{hotel.name}</span>
+                      <span className="text-slate-500 dark:text-slate-400">${hotel.totalPrice}</span>
                     </div>
                   )}
                   {selectedExps.length > 0 && (
                     <div className="flex items-center gap-2">
                       <Sparkles className="w-4 h-4 text-slate-400" />
-                      <span className="text-slate-700">{selectedExps.length} experiences</span>
+                      <span className="text-slate-700 dark:text-slate-300">{selectedExps.length} experiences</span>
                       <span className="text-slate-500">
                         ${selectedExps.reduce((s, e) => s + e.priceUsd, 0)}
                       </span>
@@ -243,7 +247,7 @@ export default function Step8Review() {
 
       {/* Flights */}
       <Card>
-        <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+        <h3 className="font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
           <Plane className="w-5 h-5 text-primary-500" />
           Flights
         </h3>
@@ -252,15 +256,15 @@ export default function Step8Review() {
             const flight = leg.flights.find((f) => f.id === leg.selectedFlightId);
 
             return (
-              <div key={leg.legId} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+              <div key={leg.legId} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
                 <div className="flex items-center gap-3">
                   <Plane className="w-5 h-5 text-slate-400" />
                   <div>
-                    <p className="font-medium text-slate-900">
+                    <p className="font-medium text-slate-900 dark:text-white">
                       {leg.from.city} to {leg.to.city}
                     </p>
                     {flight && (
-                      <p className="text-sm text-slate-500">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
                         {flight.airline} {flight.flightNumber} • {flight.departureTime}
                       </p>
                     )}
@@ -270,7 +274,7 @@ export default function Step8Review() {
                   </div>
                 </div>
                 {flight && (
-                  <span className="font-medium text-slate-900">${flight.priceUsd}</span>
+                  <span className="font-medium text-slate-900 dark:text-white">${flight.priceUsd}</span>
                 )}
               </div>
             );
@@ -279,19 +283,19 @@ export default function Step8Review() {
       </Card>
 
       {/* Budget summary */}
-      <Card className={remaining >= 0 ? 'bg-green-50' : 'bg-red-50'}>
+      <Card className={remaining >= 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}>
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-slate-900">Budget Summary</h3>
-            <p className="text-sm text-slate-500">
+            <h3 className="font-semibold text-slate-900 dark:text-white">Budget Summary</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               ${spent.toLocaleString()} of ${basics.totalBudgetUsd.toLocaleString()} spent
             </p>
           </div>
           <div className="text-right">
-            <p className={clsx('text-2xl font-bold', remaining >= 0 ? 'text-green-600' : 'text-red-600')}>
+            <p className={clsx('text-2xl font-bold', remaining >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
               ${Math.abs(remaining).toLocaleString()}
             </p>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               {remaining >= 0 ? 'under budget' : 'over budget'}
             </p>
           </div>
@@ -299,23 +303,23 @@ export default function Step8Review() {
       </Card>
 
       {/* Actions */}
-      <Card className="bg-slate-50">
+      <Card className="bg-slate-50 dark:bg-slate-800/50">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
-            <h3 className="font-semibold text-slate-900">Save Your Trip</h3>
-            <p className="text-sm text-slate-500">Download or share your complete itinerary</p>
+            <h3 className="font-semibold text-slate-900 dark:text-white">Save Your Trip</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Download or share your complete itinerary</p>
           </div>
           <div className="flex gap-3">
             <button
               onClick={handleExport}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 min-h-[44px] bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 transition-colors"
             >
               <Download className="w-4 h-4" />
               Export
             </button>
             <button
               onClick={handleShare}
-              className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 min-h-[44px] bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
             >
               <Share2 className="w-4 h-4" />
               Share

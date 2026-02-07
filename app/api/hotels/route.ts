@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { findHotelsCI } from '@/lib/prisma-ci-search';
 import { searchHotelsWithPagination, searchHotelsByGeocode, GooglePlaceResult } from '@/lib/google-maps';
 import { BoundedSet } from '@/lib/bounded-cache';
 
@@ -89,23 +90,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    console.log(`Hotel search for: ${destination}, search term: "${search}"`);
-
-    // Step 1: Query from indexed database
-    let hotels = await prisma.hotel.findMany({
-    where: {
-      OR: [
-        { country: { contains: destination } },
-        { region: { contains: destination } },
-        { city: { contains: destination } },
+    // Step 1: Query from indexed database (case-insensitive for SQLite)
+    let hotels = await findHotelsCI({
+      orGroups: [{
+        textConditions: [
+          { field: 'country', value: destination },
+          { field: 'region', value: destination },
+          { field: 'city', value: destination },
+        ],
+      }],
+      ...(search ? { andContains: [{ field: 'name', value: search }] } : {}),
+      orderBy: [
+        { field: 'googleRating', direction: 'DESC' },
+        { field: 'reviewCount', direction: 'DESC' },
       ],
-      ...(search ? { name: { contains: search } } : {}),
-    },
-    orderBy: [{ googleRating: 'desc' }, { reviewCount: 'desc' }],
-    take: 500,
-  });
-
-  console.log(`Step 1: Found ${hotels.length} hotels in database`);
+      take: 500,
+    });
 
   // Get lat/lng from request params for geocode search
   const lat = params.get('lat') ? parseFloat(params.get('lat')!) : null;
@@ -115,7 +115,6 @@ export async function GET(request: NextRequest) {
   // This runs multiple searches to build a complete hotel index for any destination
   if (hotels.length < 100 && !indexingInProgress.has(destination.toLowerCase())) {
     indexingInProgress.add(destination.toLowerCase());
-    console.log(`Comprehensive indexing for: ${destination} (currently have ${hotels.length} hotels)`);
 
     try {
       const allResults: GooglePlaceResult[] = [];
@@ -123,7 +122,6 @@ export async function GET(request: NextRequest) {
 
       // Strategy 1: Geocode-based radius search (if we have coordinates)
       if (lat && lng) {
-        console.log(`Running geocode search at ${lat}, ${lng}`);
         const geocodeResults = await searchHotelsByGeocode(lat, lng, 50000, 60); // 50km radius
         for (const place of geocodeResults) {
           if (place.place_id && !seenPlaceIds.has(place.place_id)) {
@@ -131,7 +129,6 @@ export async function GET(request: NextRequest) {
             allResults.push(place);
           }
         }
-        console.log(`Geocode search: ${geocodeResults.length} results, ${allResults.length} unique`);
       }
 
       // Strategy 2: Multiple text queries to find variety of hotels
@@ -166,65 +163,95 @@ export async function GET(request: NextRequest) {
             }
           }
           if (newCount > 0) {
-            console.log(`Query "${query}": ${results.length} results, ${newCount} new unique`);
           }
         } catch (error) {
           console.error(`Query "${query}" failed:`, error);
         }
       }
 
-      console.log(`Total unique hotels found: ${allResults.length}`);
-
-      // Index all results to database
+      // Index all results to database using batched transaction
+      // to avoid N+1 individual upsert queries
       let indexed = 0;
-      for (const place of allResults) {
-        if (!place.place_id) continue;
+      const validResults = allResults.filter(place => place.place_id);
+      const UPSERT_BATCH_SIZE = 50;
 
+      for (let batchStart = 0; batchStart < validResults.length; batchStart += UPSERT_BATCH_SIZE) {
+        const batch = validResults.slice(batchStart, batchStart + UPSERT_BATCH_SIZE);
         try {
-          await prisma.hotel.upsert({
-            where: { placeId: place.place_id },
-            create: {
-              placeId: place.place_id,
-              name: place.name,
-              address: place.formatted_address || place.vicinity || null,
-              city: destination,
-              region: destination,
-              country: destination,
-              countryCode: 'XX',
-              lat: place.geometry.location.lat,
-              lng: place.geometry.location.lng,
-              googleRating: place.rating || null,
-              reviewCount: place.user_ratings_total || null,
-              priceLevel: place.price_level || null,
-              photoReference: place.photos?.[0]?.photo_reference || null,
-              types: place.types ? JSON.stringify(place.types) : null,
-            },
-            update: {
-              googleRating: place.rating || null,
-              indexedAt: new Date(),
-            },
-          });
-          indexed++;
+          await prisma.$transaction(
+            batch.map(place => prisma.hotel.upsert({
+              where: { placeId: place.place_id! },
+              create: {
+                placeId: place.place_id!,
+                name: place.name,
+                address: place.formatted_address || place.vicinity || null,
+                city: destination,
+                region: destination,
+                country: destination,
+                countryCode: 'XX',
+                lat: place.geometry.location.lat,
+                lng: place.geometry.location.lng,
+                googleRating: place.rating || null,
+                reviewCount: place.user_ratings_total || null,
+                priceLevel: place.price_level || null,
+                photoReference: place.photos?.[0]?.photo_reference || null,
+                types: place.types ? JSON.stringify(place.types) : null,
+              },
+              update: {
+                googleRating: place.rating || null,
+                indexedAt: new Date(),
+              },
+            }))
+          );
+          indexed += batch.length;
         } catch (error) {
-          // Ignore individual insert errors (likely duplicates)
+          // If batch transaction fails, fall back to individual upserts
+          for (const place of batch) {
+            try {
+              await prisma.hotel.upsert({
+                where: { placeId: place.place_id! },
+                create: {
+                  placeId: place.place_id!,
+                  name: place.name,
+                  address: place.formatted_address || place.vicinity || null,
+                  city: destination,
+                  region: destination,
+                  country: destination,
+                  countryCode: 'XX',
+                  lat: place.geometry.location.lat,
+                  lng: place.geometry.location.lng,
+                  googleRating: place.rating || null,
+                  reviewCount: place.user_ratings_total || null,
+                  priceLevel: place.price_level || null,
+                  photoReference: place.photos?.[0]?.photo_reference || null,
+                  types: place.types ? JSON.stringify(place.types) : null,
+                },
+                update: {
+                  googleRating: place.rating || null,
+                  indexedAt: new Date(),
+                },
+              });
+              indexed++;
+            } catch {
+              // Ignore individual insert errors (likely duplicates)
+            }
+          }
         }
       }
-      console.log(`Indexed ${indexed} hotels to database`);
 
-      // Re-query with fresh data
-      hotels = await prisma.hotel.findMany({
-        where: {
-          OR: [
-            { country: { contains: destination } },
-            { region: { contains: destination } },
-            { city: { contains: destination } },
+      // Re-query with fresh data (case-insensitive for SQLite)
+      hotels = await findHotelsCI({
+        orGroups: [{
+          textConditions: [
+            { field: 'country', value: destination },
+            { field: 'region', value: destination },
+            { field: 'city', value: destination },
           ],
-          ...(search ? { name: { contains: search } } : {}),
-        },
-        orderBy: [{ googleRating: 'desc' }],
+        }],
+        ...(search ? { andContains: [{ field: 'name', value: search }] } : {}),
+        orderBy: [{ field: 'googleRating', direction: 'DESC' }],
         take: 500,
       });
-      console.log(`After comprehensive indexing: ${hotels.length} hotels`);
     } catch (error) {
       console.error('Comprehensive indexing error:', error);
     } finally {
@@ -279,7 +306,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('Hotel search error:', error);
     return NextResponse.json(
-      { error: error.message || 'Hotel search failed', details: error.toString() },
+      { error: 'Hotel search failed' },
       { status: 500 }
     );
   }

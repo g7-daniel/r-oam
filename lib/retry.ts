@@ -3,6 +3,11 @@
  * For use with external API calls that may fail transiently
  */
 
+/** Error type with HTTP status code for retry logic */
+export interface HttpError extends Error {
+  status: number;
+}
+
 export interface RetryOptions {
   /** Maximum number of retry attempts (default: 3) */
   maxRetries?: number;
@@ -153,8 +158,8 @@ export async function fetchWithRetry(
 
     // Throw on retryable status codes so we can retry
     if (response.status === 429 || response.status >= 500) {
-      const error = new Error(`HTTP ${response.status}: ${response.statusText}`);
-      (error as any).status = response.status;
+      const error = new Error(`HTTP ${response.status}: ${response.statusText}`) as HttpError;
+      error.status = response.status;
       throw error;
     }
 
@@ -180,7 +185,6 @@ export const apiRetry = createRetryWrapper({
   maxRetries: 3,
   initialDelayMs: 1000,
   onRetry: (attempt, delay, error) => {
-    console.log(`API retry attempt ${attempt} after ${delay}ms:`, (error as Error).message);
   },
 });
 
@@ -189,6 +193,5 @@ export const aggressiveRetry = createRetryWrapper({
   initialDelayMs: 500,
   maxDelayMs: 60000,
   onRetry: (attempt, delay, error) => {
-    console.log(`Aggressive retry attempt ${attempt} after ${delay}ms:`, (error as Error).message);
   },
 });

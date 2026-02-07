@@ -220,8 +220,6 @@ export async function extractActivitiesFromReddit(
     }
   }
 
-  console.log(`Activity extraction: Analyzed ${allPosts.length} posts for ${location}`);
-
   // Extract activities from posts
   const activityMap = new Map<string, ActivityCandidate>();
   const destLower = destination.toLowerCase();
@@ -615,13 +613,9 @@ export async function discoverAndVerifyActivities(
   stats.postsAnalyzed = extraction.postsAnalyzed;
   errors.push(...extraction.errors);
 
-  console.log(`Activity pipeline: Extracted ${stats.candidatesExtracted} candidates`);
-
   // Step 2: Deduplicate
   const deduped = deduplicateActivities(extraction.candidates);
   stats.afterDedupe = deduped.length;
-
-  console.log(`Activity pipeline: Deduped to ${stats.afterDedupe} unique activities`);
 
   // Step 3: Validate each activity
   const validatedActivities: VerifiedActivity[] = [];
@@ -684,13 +678,10 @@ export async function discoverAndVerifyActivities(
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 
-  console.log(`Activity pipeline: Verified ${stats.verified}, rejected ${stats.rejected}`);
-
   // Step 4: Filter by season
   let filtered = validatedActivities;
   if (dates) {
     filtered = filterBySeason(validatedActivities, dates);
-    console.log(`Activity pipeline: ${filtered.length} activities in season`);
   }
 
   // Step 5: Rank

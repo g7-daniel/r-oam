@@ -35,6 +35,10 @@ interface ServerEnv {
   // Makcorps Hotel Pricing API
   MAKCORPS_API_KEY: string;
 
+  // Unsplash API (destination photos)
+  UNSPLASH_ACCESS_KEY: string;
+  UNSPLASH_SECRET_KEY: string;
+
   // Database
   DATABASE_URL: string;
 
@@ -78,6 +82,8 @@ export function validateServerEnv(): void {
     'GROQ_API_KEY',
     'RAPIDAPI_KEY',
     'MAKCORPS_API_KEY',
+    'UNSPLASH_ACCESS_KEY',
+    'UNSPLASH_SECRET_KEY',
     'DATABASE_URL',
   ];
 
@@ -146,6 +152,14 @@ export const serverEnv: ServerEnv = {
     return getRequiredServerEnv('MAKCORPS_API_KEY');
   },
 
+  // Unsplash
+  get UNSPLASH_ACCESS_KEY() {
+    return getRequiredServerEnv('UNSPLASH_ACCESS_KEY');
+  },
+  get UNSPLASH_SECRET_KEY() {
+    return getRequiredServerEnv('UNSPLASH_SECRET_KEY');
+  },
+
   // Database
   get DATABASE_URL() {
     return getRequiredServerEnv('DATABASE_URL');
@@ -167,6 +181,12 @@ interface ClientEnv {
   // - HTTP referrers (your domain only)
   // - Maps JavaScript API, Places API only
   GOOGLE_MAPS_API_KEY: string;
+
+  // Site URL for metadata and OpenGraph
+  SITE_URL: string;
+
+  // Base URL for API calls from client-side orchestrator
+  BASE_URL: string;
 
   // Feature flags (safe to expose)
   QUICK_PLAN_CHAT_ENABLED: boolean;
@@ -191,13 +211,19 @@ export const clientEnv: ClientEnv = {
   get GOOGLE_MAPS_API_KEY() {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
     if (!key) {
-      console.warn(
-        'NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not configured. ' +
-        'Maps will not be available.'
-      );
       return '';
     }
     return key;
+  },
+
+  // Site URL for metadata/OpenGraph
+  get SITE_URL() {
+    return process.env.NEXT_PUBLIC_SITE_URL || 'https://roam.travel';
+  },
+
+  // Base URL for API calls
+  get BASE_URL() {
+    return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
   },
 
   // Feature flags
@@ -230,15 +256,16 @@ export const isConfigured = {
   gemini: () => !!process.env.GEMINI_API_KEY,
   rapidApi: () => !!process.env.RAPIDAPI_KEY,
   makcorps: () => !!process.env.MAKCORPS_API_KEY,
+  unsplash: () => !!process.env.UNSPLASH_ACCESS_KEY,
 };
 
 /**
  * Get configuration status for debugging
  * Only use in development!
  */
-export function getConfigStatus(): Record<string, boolean> {
+export function getConfigStatus(): Record<string, boolean | string> {
   if (process.env.NODE_ENV === 'production') {
-    return { message: 'Config status hidden in production' } as unknown as Record<string, boolean>;
+    return { message: 'Config status hidden in production' };
   }
 
   return {
@@ -249,5 +276,6 @@ export function getConfigStatus(): Record<string, boolean> {
     gemini: isConfigured.gemini(),
     rapidApi: isConfigured.rapidApi(),
     makcorps: isConfigured.makcorps(),
+    unsplash: isConfigured.unsplash(),
   };
 }

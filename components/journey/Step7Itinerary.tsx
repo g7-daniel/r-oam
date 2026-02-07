@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useTripStore } from '@/stores/tripStore';
+import { useShallow } from 'zustand/react/shallow';
 import { calculateHaversineDistance } from '@/lib/utils/geo';
 import Card from '@/components/ui/Card';
 import {
@@ -571,7 +572,13 @@ function generateTravelSegments(items: ScheduleItem[]): TravelSegment[] {
 }
 
 export default function Step7Itinerary() {
-  const { trip, setCurrentStep, moveExperienceToDay, updateExperienceTime, itineraryAssignments } = useTripStore();
+  const { trip, setCurrentStep, moveExperienceToDay, updateExperienceTime, itineraryAssignments } = useTripStore(useShallow((state) => ({
+    trip: state.trip,
+    setCurrentStep: state.setCurrentStep,
+    moveExperienceToDay: state.moveExperienceToDay,
+    updateExperienceTime: state.updateExperienceTime,
+    itineraryAssignments: state.itineraryAssignments,
+  })));
   const [viewMode, setViewMode] = useState<'schedule' | 'map'>('schedule');
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [modalItem, setModalItem] = useState<ScheduleItem | null>(null);

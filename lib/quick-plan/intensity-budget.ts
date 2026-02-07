@@ -301,7 +301,7 @@ export function calculateIdealMix(
   preferences: TripPreferences
 ): { type: string; targetDays: number; effort: number }[] {
   const tripLength = preferences.tripLength;
-  const dailyBudget = PACE_DAILY_BUDGET[preferences.pace];
+  const dailyBudget = PACE_DAILY_BUDGET[preferences.pace || 'balanced'];
   const totalBudget = tripLength * dailyBudget;
 
   const mix: { type: string; targetDays: number; effort: number }[] = [];

@@ -39,18 +39,6 @@ export async function GET(request: NextRequest) {
 
   const isRoundTrip = !!returnDate;
 
-  console.log('Flight search params:', {
-    origin,
-    destination,
-    departureDate,
-    returnDate,
-    adults,
-    children,
-    maxPrice,
-    travelClass,
-    isRoundTrip,
-  });
-
   try {
     // Use round trip search if return date is provided
     if (isRoundTrip) {
@@ -64,8 +52,6 @@ export async function GET(request: NextRequest) {
         maxPrice,
         travelClass,
       });
-
-      console.log('Amadeus returned', roundTripFlights.length, 'round trip options');
 
       // Transform round trip flights
       const transformedFlights = roundTripFlights.map((rt) => ({
@@ -119,8 +105,6 @@ export async function GET(request: NextRequest) {
       travelClass,
     });
 
-    console.log('Amadeus returned', flights.length, 'one-way flights');
-
     // Transform to match our schema
     const transformedFlights = flights.map((flight) => ({
       id: flight.id,
@@ -143,9 +127,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(transformedFlights);
   } catch (error) {
     console.error('Flight search error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: `Failed to search flights: ${errorMessage}` },
+      { error: 'Failed to search flights. Please try again.' },
       { status: 500 }
     );
   }

@@ -4,11 +4,11 @@
  */
 
 import { fetchWithTimeout } from './api-cache';
-import { isConfigured } from './env';
+import { isConfigured, serverEnv } from './env';
 
 const RAPIDAPI_HOST = 'booking-com15.p.rapidapi.com';
 // Use lazy evaluation to avoid issues during module load
-const getRapidApiKey = () => process.env.RAPIDAPI_KEY || '';
+const getRapidApiKey = () => serverEnv.RAPIDAPI_KEY;
 const BASE_URL = `https://${RAPIDAPI_HOST}/api/v1`;
 const BOOKING_TIMEOUT = 15000; // 15 second timeout
 
@@ -19,7 +19,6 @@ function logConfigStatus() {
   configLogged = true;
 
   if (!isConfigured.rapidApi()) {
-    console.warn('WARNING: RAPIDAPI_KEY is not configured - Booking.com pricing will not work. Set it in .env.local');
   }
 }
 
@@ -204,7 +203,6 @@ export async function getHotelPricing(
   // Get cheapest room price - with extra safety check
   const cheapestRoom = hotel.block?.[0];
   if (!cheapestRoom) {
-    console.warn('Booking.com: block exists but no rooms available');
     return null;
   }
 
@@ -237,11 +235,8 @@ export async function findHotelPricingByName(
   const hotelInfo = await searchHotelByName(hotelName);
 
   if (!hotelInfo) {
-    console.log(`Booking.com: Hotel "${hotelName}" not found`);
     return null;
   }
-
-  console.log(`Booking.com: Found "${hotelInfo.name}" (ID: ${hotelInfo.dest_id})`);
 
   // Then get pricing
   return getHotelPricing(hotelInfo.dest_id, checkIn, checkOut, adults);
@@ -308,7 +303,6 @@ export async function matchAndPriceHotel(
   }
 
   if (bestMatch) {
-    console.log(`Booking.com: Matched "${googleHotelName}" → "${bestMatch.name}" (score: ${(bestScore * 100).toFixed(0)}%)`);
     return bestMatch;
   }
 

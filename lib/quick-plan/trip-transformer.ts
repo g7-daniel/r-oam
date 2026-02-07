@@ -130,7 +130,6 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
   // Run validation (logs warnings but doesn't block)
   const warnings = validateBeforeTransform(data);
   if (warnings.length > 0) {
-    console.warn('[QuickPlan Transform] Validation warnings:', warnings);
   }
   const now = new Date().toISOString();
   const tripId = `trip_qp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -147,8 +146,8 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
   // Build trip basics
   const basics: TripBasics = {
     originAirport: null, // Quick Plan doesn't collect origin
-    startDate: prefs.startDate ? prefs.startDate.toISOString().split('T')[0] : null,
-    endDate: prefs.endDate ? prefs.endDate.toISOString().split('T')[0] : null,
+    startDate: prefs.startDate ? new Date(prefs.startDate).toISOString().split('T')[0] : null,
+    endDate: prefs.endDate ? new Date(prefs.endDate).toISOString().split('T')[0] : null,
     travelers: {
       adults: prefs.adults || 2,
       children: prefs.children || 0,
@@ -178,6 +177,20 @@ export function transformQuickPlanToTrip(data: QuickPlanData): TransformedTripDa
     destinations.push(destination);
     // Track the mapping for later hotel lookups
     destinationToAreaMap.set(destination.destinationId, area.id);
+  }
+
+  // Fallback: if no selectedAreas but we have a destination context, create a single destination
+  if (destinations.length === 0 && prefs.destinationContext) {
+    const fallbackArea = {
+      id: 'main',
+      name: prefs.destinationContext.canonicalName || prefs.destinationContext.rawInput || 'Destination',
+      centerLat: 0,
+      centerLng: 0,
+    };
+    const nights = prefs.tripLength || 7;
+    const destination = createDestination(fallbackArea as any, nights, undefined, prefs);
+    destinations.push(destination);
+    destinationToAreaMap.set(destination.destinationId, 'main');
   }
 
   // Build day mapping from destinations
@@ -414,27 +427,28 @@ function findDestinationForRestaurant(
   }
 
   // Then try to find closest destination by coordinates
+  // Use longitude-weighted distance to account for latitude distortion
   if (rest.lat && rest.lng) {
     let closestDest = destinations[0];
     let minDistance = Infinity;
+    const cosLat = Math.cos((rest.lat * Math.PI) / 180);
 
     for (const dest of destinations) {
       if (dest.place.lat && dest.place.lng) {
-        const distance = Math.sqrt(
-          Math.pow(rest.lat - dest.place.lat, 2) +
-          Math.pow(rest.lng - dest.place.lng, 2)
-        );
+        const dlat = rest.lat - dest.place.lat;
+        const dlng = (rest.lng - dest.place.lng) * cosLat;
+        const distance = dlat * dlat + dlng * dlng;
         if (distance < minDistance) {
           minDistance = distance;
           closestDest = dest;
         }
       }
     }
-    return closestDest?.destinationId || destinations[0]?.destinationId;
+    return closestDest?.destinationId || destinations[0]?.destinationId || '';
   }
 
   // Fallback to first destination
-  return destinations[0]?.destinationId;
+  return destinations[0]?.destinationId || '';
 }
 
 /**
@@ -521,27 +535,28 @@ function findDestinationForExperience(
   }
 
   // Then try to find closest destination by coordinates
+  // Use longitude-weighted distance to account for latitude distortion
   if (exp.lat && exp.lng) {
     let closestDest = destinations[0];
     let minDistance = Infinity;
+    const cosLat = Math.cos((exp.lat * Math.PI) / 180);
 
     for (const dest of destinations) {
       if (dest.place.lat && dest.place.lng) {
-        const distance = Math.sqrt(
-          Math.pow(exp.lat - dest.place.lat, 2) +
-          Math.pow(exp.lng - dest.place.lng, 2)
-        );
+        const dlat = exp.lat - dest.place.lat;
+        const dlng = (exp.lng - dest.place.lng) * cosLat;
+        const distance = dlat * dlat + dlng * dlng;
         if (distance < minDistance) {
           minDistance = distance;
           closestDest = dest;
         }
       }
     }
-    return closestDest?.destinationId || destinations[0]?.destinationId;
+    return closestDest?.destinationId || destinations[0]?.destinationId || '';
   }
 
   // Fallback to first destination
-  return destinations[0]?.destinationId;
+  return destinations[0]?.destinationId || '';
 }
 
 /**
@@ -715,8 +730,8 @@ function createDestination(
     },
     hotels: {
       query: prefs.startDate && prefs.endDate ? {
-        checkIn: prefs.startDate.toISOString().split('T')[0],
-        checkOut: prefs.endDate.toISOString().split('T')[0],
+        checkIn: new Date(prefs.startDate).toISOString().split('T')[0],
+        checkOut: new Date(prefs.endDate).toISOString().split('T')[0],
         guests: (prefs.adults || 2) + (prefs.children || 0),
         maxPricePerNight: prefs.budgetPerNight?.max,
       } : null,
@@ -969,11 +984,24 @@ export function saveQuickPlanToTripStore(transformedData: TransformedTripData): 
       itineraryAssignments: [],
       _hasHydrated: true,
     },
-    version: 0,
+    version: 2,
   };
 
-  localStorage.setItem('wandercraft-trip-v2', JSON.stringify(storeData));
-  console.log('[QuickPlan] Saved trip to store:', transformedData.trip.id);
+  const serialized = JSON.stringify(storeData);
+  localStorage.setItem('wandercraft-trip-v2', serialized);
+
+  // Verify the save succeeded
+  const verify = localStorage.getItem('wandercraft-trip-v2');
+  if (verify) {
+    const parsed = JSON.parse(verify);
+    const destCount = parsed?.state?.trip?.destinations?.length || 0;
+    console.log(`[saveQuickPlanToTripStore] Saved trip with ${destCount} destinations, ${(serialized.length / 1024).toFixed(1)}KB`);
+    if (destCount === 0) {
+      console.error('[saveQuickPlanToTripStore] BUG: Saved trip has 0 destinations!', parsed?.state?.trip);
+    }
+  } else {
+    console.error('[saveQuickPlanToTripStore] BUG: localStorage write failed!');
+  }
 }
 
 /**

@@ -45,6 +45,9 @@ export function Skeleton({
         className
       )}
       style={style}
+      role="status"
+      aria-label="Loading"
+      aria-busy="true"
     />
   );
 }
@@ -148,7 +151,8 @@ export function SkeletonChatMessage() {
 // Loading grid for multiple cards
 export function SkeletonCardGrid({ count = 4, CardComponent = SkeletonCard }: { count?: number; CardComponent?: React.ComponentType }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" role="status" aria-label="Loading content" aria-busy="true">
+      <span className="sr-only">Loading content, please wait...</span>
       {Array.from({ length: count }).map((_, i) => (
         <CardComponent key={i} />
       ))}

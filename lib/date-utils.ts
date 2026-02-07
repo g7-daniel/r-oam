@@ -289,11 +289,14 @@ export function formatDateRange(
  * formatTime('14:30', true) // "14:30"
  */
 export function formatTime(timeString: string, use24Hour: boolean = false): string {
+  if (!timeString) return '';
   const match = timeString.match(/^(\d{1,2}):(\d{2})/);
   if (!match) return timeString;
 
   const hours = parseInt(match[1], 10);
   const minutes = match[2];
+
+  if (hours < 0 || hours > 23) return timeString;
 
   if (use24Hour) {
     return `${String(hours).padStart(2, '0')}:${minutes}`;
@@ -335,8 +338,12 @@ export function getNights(startDate: DateInput, endDate: DateInput): number {
 
   if (!start || !end) return 0;
 
-  const diffTime = end.getTime() - start.getTime();
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  // Use date-only comparison to avoid issues with noon-based parsing
+  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+
+  const diffTime = endDay.getTime() - startDay.getTime();
+  return Math.round(diffTime / (1000 * 60 * 60 * 24));
 }
 
 /**
@@ -600,13 +607,14 @@ export function getRelativeDate(date: DateInput): string {
   if (!d) return '';
 
   const today = getToday();
+  // getNights(today, d) returns positive when d is in the future, negative when in the past
   const diffDays = getNights(today, d);
 
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Tomorrow';
   if (diffDays === -1) return 'Yesterday';
-  if (diffDays > 0 && diffDays <= 7) return `In ${diffDays} days`;
-  if (diffDays < 0 && diffDays >= -7) return `${Math.abs(diffDays)} days ago`;
+  if (diffDays > 1 && diffDays <= 7) return `In ${diffDays} days`;
+  if (diffDays < -1 && diffDays >= -7) return `${Math.abs(diffDays)} days ago`;
 
   return formatDate(d, 'medium');
 }

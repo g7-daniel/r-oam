@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Loader2 } from 'lucide-react';
+import { Search, Loader2, X, ChevronRight } from 'lucide-react';
 import { handleImageError, getPlaceholderImage } from '@/lib/utils';
+import { clientEnv } from '@/lib/env';
 
 interface PlaceResult {
   placeId: string;
@@ -26,7 +27,7 @@ interface GooglePlacesAutocompleteProps {
 // Curated country/region images from Unsplash (direct URLs are reliable, source API is down)
 const COUNTRY_IMAGES: Record<string, string> = {
   // Caribbean
-  'dominican republic': 'https://images.unsplash.com/photo-1569700802224-f274732a94f4?w=100&h=100&fit=crop',
+  'dominican republic': 'https://images.unsplash.com/photo-1605799381738-e9c95702d06b?w=100&h=100&fit=crop',
   'jamaica': 'https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=100&h=100&fit=crop',
   'bahamas': 'https://images.unsplash.com/photo-1548574505-5e239809ee19?w=100&h=100&fit=crop',
   'puerto rico': 'https://images.unsplash.com/photo-1579687196544-08cb44349ad3?w=100&h=100&fit=crop',
@@ -112,7 +113,7 @@ const CITY_IMAGES: Record<string, string> = {
   'san francisco': 'https://images.unsplash.com/photo-1501594907352-04cda38ebc29?w=100&h=100&fit=crop',
   'las vegas': 'https://images.unsplash.com/photo-1605833556294-ea5c7a74f57d?w=100&h=100&fit=crop',
   'cancun': 'https://images.unsplash.com/photo-1510097467424-192d713fd8b2?w=100&h=100&fit=crop',
-  'punta cana': 'https://images.unsplash.com/photo-1569700802224-f274732a94f4?w=100&h=100&fit=crop',
+  'punta cana': 'https://images.unsplash.com/photo-1641957991880-8f2714e8acf3?w=100&h=100&fit=crop',
   'santorini': 'https://images.unsplash.com/photo-1533105079780-92b9be482077?w=100&h=100&fit=crop',
   'venice': 'https://images.unsplash.com/photo-1514890547357-a9ee288728e0?w=100&h=100&fit=crop',
   'kyoto': 'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=100&h=100&fit=crop',
@@ -174,9 +175,14 @@ interface Suggestion {
   types: string[];
 }
 
+// Check if a destination has a curated image (not the generic default)
+function hasCuratedImage(cityName: string, country?: string): boolean {
+  return getDestinationImageUrl(cityName, country) !== DEFAULT_IMAGE;
+}
+
 export default function GooglePlacesAutocomplete({
   onSelect,
-  placeholder = 'Search for a destination...',
+  placeholder = 'Where do you want to go?',
   disabled = false,
   types = ['(cities)'],
   className = '',
@@ -185,8 +191,12 @@ export default function GooglePlacesAutocomplete({
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'no_results' | 'error'>('idle');
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Dynamic photo URLs fetched from /api/destination-photo for places not in curated maps
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
 
   // Check if Google Maps script is loaded (needed for geocoding)
   useEffect(() => {
@@ -218,11 +228,27 @@ export default function GooglePlacesAutocomplete({
     };
   }, []);
 
+  // Handle click outside to dismiss dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setSuggestions([]);
+        setStatus('idle');
+        setHighlightedIndex(-1);
+      }
+    };
+
+    if (suggestions.length > 0) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [suggestions.length]);
+
   // Determine which place types to search for based on the types prop
   const getIncludedTypes = useCallback(() => {
     // Map legacy types to new API types
     if (types.includes('(cities)')) {
-      return ['locality', 'administrative_area_level_3'];
+      return ['locality', 'administrative_area_level_3', 'country'];
     }
     if (types.includes('(regions)')) {
       return ['country', 'administrative_area_level_1', 'locality'];
@@ -234,6 +260,7 @@ export default function GooglePlacesAutocomplete({
   const fetchSuggestions = useCallback(async (input: string) => {
     if (!input || input.length < 2) {
       setSuggestions([]);
+      setPhotoUrls({});
       setStatus('idle');
       return;
     }
@@ -241,7 +268,7 @@ export default function GooglePlacesAutocomplete({
     setStatus('loading');
 
     try {
-      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      const apiKey = clientEnv.GOOGLE_MAPS_API_KEY;
       if (!apiKey) {
         console.error('[GooglePlacesAutocomplete] Missing API key');
         setStatus('error');
@@ -285,8 +312,48 @@ export default function GooglePlacesAutocomplete({
         }));
 
       setSuggestions(mapped);
+      setHighlightedIndex(mapped.length > 0 ? 0 : -1);
       setStatus(mapped.length > 0 ? 'ok' : 'no_results');
-      console.log('[GooglePlacesAutocomplete] Query:', input, 'Results:', mapped.length);
+
+      // Fetch real photos for suggestions that don't have curated images
+      // Photo priority: 1. Curated maps (already handled) -> 2. Unsplash API -> 3. Google Places -> 4. Default
+      if (mapped.length > 0) {
+        const uncurated = mapped.filter(
+          (s) => !hasCuratedImage(s.mainText, s.secondaryText)
+        );
+        if (uncurated.length > 0) {
+          // Fire off photo fetches in parallel (non-blocking)
+          // Try Unsplash API first, fall back to Google Places photo
+          uncurated.forEach(async (s) => {
+            try {
+              // Step 1: Try Unsplash API search
+              const unsplashRes = await fetch(`/api/unsplash-photo?query=${encodeURIComponent(s.mainText)}`);
+              if (unsplashRes.ok) {
+                const unsplashData = await unsplashRes.json();
+                if (unsplashData.photoUrl) {
+                  setPhotoUrls((prev) => ({ ...prev, [s.placeId]: unsplashData.photoUrl }));
+                  return; // Unsplash photo found, no need for Google fallback
+                }
+              }
+            } catch {
+              // Unsplash failed, fall through to Google Places
+            }
+
+            try {
+              // Step 2: Fall back to Google Places photo
+              const res = await fetch(`/api/destination-photo?place_id=${encodeURIComponent(s.placeId)}`);
+              if (res.ok) {
+                const data = await res.json();
+                if (data.photoUrl) {
+                  setPhotoUrls((prev) => ({ ...prev, [s.placeId]: data.photoUrl }));
+                }
+              }
+            } catch {
+              // Silently fail - the static fallback image will remain
+            }
+          });
+        }
+      }
     } catch (error) {
       console.error('[GooglePlacesAutocomplete] Fetch error:', error);
       setStatus('error');
@@ -304,7 +371,53 @@ export default function GooglePlacesAutocomplete({
 
     debounceRef.current = setTimeout(() => {
       fetchSuggestions(newValue);
-    }, 300);
+    }, 250);
+  };
+
+  // Handle keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (suggestions.length === 0) {
+      if (e.key === 'Escape' && value) {
+        // Clear input on Escape
+        setValue('');
+        setSuggestions([]);
+        setStatus('idle');
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setHighlightedIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : prev));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+          handleSelect(suggestions[highlightedIndex]);
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setSuggestions([]);
+        setStatus('idle');
+        setHighlightedIndex(-1);
+        break;
+    }
+  };
+
+  // Clear input
+  const handleClear = () => {
+    setValue('');
+    setSuggestions([]);
+    setPhotoUrls({});
+    setStatus('idle');
+    setHighlightedIndex(-1);
+    inputRef.current?.focus();
   };
 
   // Handle selection
@@ -312,6 +425,7 @@ export default function GooglePlacesAutocomplete({
     setValue(suggestion.fullText);
     setSuggestions([]);
     setStatus('idle');
+    setHighlightedIndex(-1);
 
     try {
       let lat = 0;
@@ -352,7 +466,7 @@ export default function GooglePlacesAutocomplete({
         }
       } else {
         // Fallback: Use Place Details API (New) to get coordinates
-        const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+        const apiKey = clientEnv.GOOGLE_MAPS_API_KEY;
         if (apiKey) {
           try {
             const detailsResponse = await fetch(
@@ -372,7 +486,6 @@ export default function GooglePlacesAutocomplete({
               }
             }
           } catch (e) {
-            console.warn('[GooglePlacesAutocomplete] Could not fetch place details:', e);
           }
         }
       }
@@ -414,48 +527,98 @@ export default function GooglePlacesAutocomplete({
   };
 
   return (
-    <div className={`relative ${className}`}>
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 z-10" />
+    <div ref={containerRef} className={`relative ${className}`}>
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 dark:text-slate-500 z-10 pointer-events-none" />
+
+      {/* Loading indicator inside input */}
+      {status === 'loading' && (
+        <Loader2 className="absolute right-12 top-1/2 -translate-y-1/2 w-5 h-5 text-orange-500 z-10 animate-spin pointer-events-none" />
+      )}
+
+      {/* Clear button */}
+      {value && status !== 'loading' && (
+        <button
+          type="button"
+          onClick={handleClear}
+          aria-label="Clear search"
+          className="absolute right-1 top-1/2 -translate-y-1/2 w-11 h-11 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors z-10 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-slate-700"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      )}
+
       <input
         ref={inputRef}
         type="text"
         value={value}
         onChange={handleInputChange}
+        onKeyDown={handleKeyDown}
         placeholder={placeholder}
         disabled={disabled}
-        className="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+        role="combobox"
+        aria-expanded={status === 'ok' && suggestions.length > 0}
+        aria-controls={status === 'ok' && suggestions.length > 0 ? 'destination-listbox' : undefined}
+        aria-activedescendant={highlightedIndex >= 0 && suggestions[highlightedIndex] ? `destination-option-${highlightedIndex}` : undefined}
+        aria-autocomplete="list"
+        className="w-full pl-11 pr-12 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-base text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent dark:focus:ring-offset-slate-700 transition-shadow"
       />
 
       {/* Suggestions dropdown */}
       {status === 'ok' && suggestions.length > 0 && (
-        <ul className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-lg max-h-64 overflow-y-auto">
-          {suggestions.map((suggestion) => {
-            const imageUrl = getDestinationImageUrl(suggestion.mainText, suggestion.secondaryText);
+        <ul
+          id="destination-listbox"
+          role="listbox"
+          aria-label="Destination suggestions"
+          className="absolute z-20 w-full mt-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-80 overflow-y-auto"
+        >
+          {suggestions.map((suggestion, index) => {
+            // Use fetched Google Places photo if available, otherwise fall back to curated/default
+            const imageUrl = photoUrls[suggestion.placeId] || getDestinationImageUrl(suggestion.mainText, suggestion.secondaryText);
+            const isHighlighted = index === highlightedIndex;
 
             return (
-              <li key={suggestion.placeId}>
+              <li key={suggestion.placeId} role="option" aria-selected={isHighlighted}>
                 <button
+                  id={`destination-option-${index}`}
                   type="button"
                   onClick={() => handleSelect(suggestion)}
-                  className="w-full p-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 text-left transition-colors"
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  className={`w-full p-3 min-h-[68px] flex items-center gap-3 text-left transition-all ${
+                    isHighlighted
+                      ? 'bg-orange-50 dark:bg-orange-900/20 border-l-4 border-orange-500'
+                      : 'hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 border-transparent'
+                  }`}
                 >
-                  <div className="w-10 h-10 rounded-lg flex-shrink-0 overflow-hidden bg-slate-200 dark:bg-slate-600">
+                  <div className="w-12 h-12 rounded-lg flex-shrink-0 overflow-hidden bg-slate-200 dark:bg-slate-600 ring-2 ring-slate-200 dark:ring-slate-600">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={imageUrl || getPlaceholderImage('map')}
-                      alt={suggestion.mainText}
+                      alt=""
                       className="w-full h-full object-cover"
                       onError={(e) => handleImageError(e, 'map')}
                     />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-slate-900 dark:text-white truncate">
+                    <div className={`font-semibold truncate ${
+                      isHighlighted
+                        ? 'text-orange-900 dark:text-orange-100'
+                        : 'text-slate-900 dark:text-white'
+                    }`}>
                       {suggestion.mainText}
                     </div>
-                    <div className="text-sm text-slate-500 dark:text-slate-400 truncate">
+                    <div className={`text-sm truncate ${
+                      isHighlighted
+                        ? 'text-orange-700 dark:text-orange-300'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}>
                       {suggestion.secondaryText || suggestion.fullText}
                     </div>
                   </div>
+                  {isHighlighted && (
+                    <div className="flex-shrink-0 text-orange-500" aria-hidden="true">
+                      <ChevronRight className="w-5 h-5" />
+                    </div>
+                  )}
                 </button>
               </li>
             );
@@ -463,19 +626,20 @@ export default function GooglePlacesAutocomplete({
         </ul>
       )}
 
-      {/* Loading/status indicator */}
-      {value && value.length >= 2 && status !== 'ok' && status !== 'idle' && (
-        <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-lg p-3">
-          <div className="flex items-center gap-2 text-slate-500">
-            {status === 'loading' ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span className="text-sm">Searching...</span>
-              </>
-            ) : status === 'no_results' ? (
-              <span className="text-sm">No destinations found. Try a different search.</span>
+      {/* Status messages (no results / error) */}
+      {value && value.length >= 2 && status !== 'ok' && status !== 'idle' && status !== 'loading' && (
+        <div className="absolute z-20 w-full mt-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-4" role="status">
+          <div className="flex items-center justify-center gap-2 text-slate-500 dark:text-slate-400">
+            {status === 'no_results' ? (
+              <div className="text-center">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">No destinations found</p>
+                <p className="text-xs mt-1 text-slate-500 dark:text-slate-400">Try a different search term</p>
+              </div>
             ) : status === 'error' ? (
-              <span className="text-sm text-red-500">Search unavailable. Please try again later.</span>
+              <div className="text-center">
+                <p className="text-sm font-medium text-red-600 dark:text-red-400">Search unavailable</p>
+                <p className="text-xs mt-1 text-slate-500 dark:text-slate-400">Please try again in a moment</p>
+              </div>
             ) : null}
           </div>
         </div>
