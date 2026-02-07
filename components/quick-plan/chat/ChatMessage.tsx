@@ -1,9 +1,9 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { ExternalLink } from 'lucide-react';
 import SnooAgent, { TypingIndicator } from './SnooAgent';
-import type { ChatMessage as ChatMessageType, RedditEvidence, SnooState } from '@/types/quick-plan';
+import type { SnooChatMessage as ChatMessageType, RedditEvidence, SnooState } from '@/types/quick-plan';
 
 // PHASE 6 FIX: Simple markdown renderer for chat messages
 // Handles **bold**, *italic*, and line breaks without external dependencies
@@ -58,20 +58,21 @@ interface ChatMessageProps {
 }
 
 export default function ChatMessage({ message, isLatest = false, showTyping = false }: ChatMessageProps) {
+  const prefersReducedMotion = useReducedMotion();
   const isSnoo = message.type === 'snoo';
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className={`group flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'} ${isSystem ? 'justify-center' : ''}`}
+      initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
+      animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className={`group flex gap-2.5 sm:gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'} ${isSystem ? 'justify-center' : ''}`}
     >
       {/* Avatar */}
       {isSnoo && (
-        <div className="flex-shrink-0">
+        <div className="flex-shrink-0 self-end mb-1">
           <SnooAgent
             state={showTyping ? 'typing' : (message.snooState || 'idle')}
             size="sm"
@@ -80,22 +81,22 @@ export default function ChatMessage({ message, isLatest = false, showTyping = fa
         </div>
       )}
 
-      {/* User avatar - simpler circle without text to avoid confusion */}
+      {/* User avatar - aligned to bottom of bubble for natural chat feel */}
       {isUser && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-orange-100 to-amber-100 dark:from-orange-900/40 dark:to-amber-900/40 shadow-sm" role="img" aria-label="Your message" />
+        <div className="flex-shrink-0 self-end mb-1 w-8 h-8 rounded-full bg-gradient-to-br from-orange-100 to-amber-100 dark:from-orange-900/40 dark:to-amber-900/40 shadow-sm ring-2 ring-white dark:ring-slate-900" role="img" aria-label="Your message" />
       )}
 
       {/* Message content - responsive width */}
-      <div className={`flex-1 max-w-[85%] sm:max-w-[75%] ${isUser ? 'text-right' : 'text-left'}`}>
+      <div className={`min-w-0 max-w-[85%] sm:max-w-[75%] ${isUser ? 'flex flex-col items-end' : 'flex flex-col items-start'}`}>
         <div
-          className={`inline-block px-4 sm:px-5 py-3 sm:py-3.5 rounded-2xl break-words ${
+          className={`px-4 py-3 break-words ${
             isSnoo
-              ? 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 shadow-sm'
+              ? 'rounded-2xl rounded-bl-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 shadow-sm'
               : isUser
               ? message.content === '(Skipped)'
-                ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 italic text-sm max-w-full'
-                : 'bg-gradient-to-r from-orange-500 to-orange-400 text-white max-w-full shadow-sm shadow-orange-500/20'
-              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm'
+                ? 'rounded-2xl rounded-br-md bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 italic text-sm'
+                : 'rounded-2xl rounded-br-md bg-gradient-to-r from-orange-500 to-orange-400 text-white shadow-sm shadow-orange-500/20'
+              : 'rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm'
           }`}
         >
           {showTyping && isLatest ? (
@@ -103,11 +104,11 @@ export default function ChatMessage({ message, isLatest = false, showTyping = fa
           ) : (
             <>
               {/* Message text with markdown support - responsive text size */}
-              <p className="whitespace-pre-wrap text-sm sm:text-base leading-relaxed">{renderMarkdown(message.content)}</p>
+              <p className="whitespace-pre-wrap text-[15px] sm:text-base leading-relaxed break-words [overflow-wrap:anywhere]">{renderMarkdown(message.content)}</p>
 
               {/* Reddit evidence */}
               {message.evidence && message.evidence.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-600">
+                <div className="mt-4 pt-3 border-t border-slate-200/80 dark:border-slate-600/80">
                   <p className="text-xs text-slate-500 dark:text-slate-400 mb-2.5 font-semibold uppercase tracking-wide">
                     From Reddit
                   </p>
@@ -122,9 +123,9 @@ export default function ChatMessage({ message, isLatest = false, showTyping = fa
           )}
         </div>
 
-        {/* Timestamp - only shown on hover */}
-        <p className="text-xs text-slate-400 dark:text-slate-400 mt-1 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          {formatTime(message.timestamp)}
+        {/* Timestamp - visible on mobile, hover-enhanced on desktop */}
+        <p className={`text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 px-2 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200 select-none ${isUser ? 'text-right' : 'text-left'}`}>
+          <time dateTime={new Date(message.timestamp).toISOString()}>{formatTime(message.timestamp)}</time>
         </p>
       </div>
     </motion.div>
@@ -134,26 +135,26 @@ export default function ChatMessage({ message, isLatest = false, showTyping = fa
 // Evidence chip component
 function EvidenceChip({ evidence }: { evidence: RedditEvidence }) {
   return (
-    <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 text-xs border border-slate-100 dark:border-slate-600" role="article" aria-label={`Reddit post from r/${evidence.subreddit}`}>
+    <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 text-xs border border-slate-100 dark:border-slate-600 hover:border-slate-200 dark:hover:border-slate-500 transition-colors duration-150" role="article" aria-label={`Reddit post from r/${evidence.subreddit}`}>
       <div className="flex items-center flex-wrap gap-1.5 sm:gap-2 mb-1.5">
-        <span className="text-orange-500 font-semibold">r/{evidence.subreddit}</span>
-        <span className="text-slate-300 dark:text-slate-400 hidden sm:inline" aria-hidden="true">·</span>
+        <span className="text-orange-500 dark:text-orange-400 font-semibold">r/{evidence.subreddit}</span>
+        <span className="text-slate-300 dark:text-slate-500 hidden sm:inline" aria-hidden="true">&middot;</span>
         <span className="text-slate-500 dark:text-slate-400 font-medium">{evidence.upvotes} upvotes</span>
         {evidence.postUrl && (
           <a
             href={evidence.postUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-500 hover:text-blue-600 ml-auto min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+            className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 ml-auto min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2 sm:p-1 flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded-md transition-colors duration-150"
             aria-label={`View original post on Reddit (opens in new tab)`}
           >
-            <ExternalLink className="w-3 h-3" aria-hidden="true" />
+            <ExternalLink className="w-4 h-4 sm:w-3 sm:h-3" aria-hidden="true" />
           </a>
         )}
       </div>
       {evidence.quote && (
-        <blockquote className="text-slate-600 dark:text-slate-300 italic line-clamp-2 text-xs sm:text-sm leading-relaxed mt-1 pl-2 border-l-2 border-orange-300 dark:border-orange-700">
-          "{evidence.quote}"
+        <blockquote className="text-slate-600 dark:text-slate-300 italic line-clamp-2 text-xs sm:text-sm leading-relaxed mt-1.5 pl-2.5 border-l-2 border-orange-300 dark:border-orange-600">
+          &ldquo;{evidence.quote}&rdquo;
         </blockquote>
       )}
     </div>
@@ -178,12 +179,12 @@ export function SnooMessage({ content, snooState = 'idle', evidence, showTyping,
   return (
     <div className="space-y-3 sm:space-y-4">
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
+        initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="flex gap-3 sm:gap-3.5"
+        transition={{ duration: 0.3, ease: 'easeOut' }}
+        className="flex gap-2.5 sm:gap-3.5"
       >
-        <div className="flex-shrink-0">
+        <div className="flex-shrink-0 self-end mb-1">
           <SnooAgent
             state={showTyping ? 'typing' : snooState}
             size="sm"
@@ -191,16 +192,16 @@ export function SnooMessage({ content, snooState = 'idle', evidence, showTyping,
           />
         </div>
 
-        <div className="flex-1 max-w-[85%] sm:max-w-[80%]">
-          <div className="inline-block px-4 sm:px-5 py-3 sm:py-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 shadow-sm">
+        <div className="min-w-0 max-w-[85%] sm:max-w-[80%]">
+          <div className="px-4 py-3 rounded-2xl rounded-bl-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 shadow-sm">
             {showTyping ? (
               <TypingIndicator />
             ) : (
               <>
-                <p className="whitespace-pre-wrap text-sm sm:text-base leading-relaxed">{renderMarkdown(content)}</p>
+                <p className="whitespace-pre-wrap text-[15px] sm:text-base leading-relaxed break-words [overflow-wrap:anywhere]">{renderMarkdown(content)}</p>
 
                 {evidence && evidence.length > 0 && (
-                  <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-600">
+                  <div className="mt-4 pt-3 border-t border-slate-200/80 dark:border-slate-600/80">
                     <p className="text-xs text-slate-500 dark:text-slate-400 mb-2.5 font-semibold uppercase tracking-wide">
                       From Reddit
                     </p>
@@ -217,13 +218,13 @@ export function SnooMessage({ content, snooState = 'idle', evidence, showTyping,
         </div>
       </motion.div>
 
-      {/* Reply card slot */}
+      {/* Reply card slot - responsive left margin matching avatar + gap */}
       {children && (
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.1 }}
-          className="ml-[52px]"
+          transition={{ duration: 0.3, delay: 0.1, ease: 'easeOut' }}
+          className="ml-[50px] sm:ml-[54px]"
         >
           {children}
         </motion.div>
@@ -240,17 +241,17 @@ interface UserResponseProps {
 export function UserResponse({ content }: UserResponseProps) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="flex gap-3 sm:gap-3.5 flex-row-reverse"
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="flex gap-2.5 sm:gap-3.5 flex-row-reverse"
     >
-      {/* Simple avatar indicator */}
-      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-orange-100 to-amber-100 dark:from-orange-900/40 dark:to-amber-900/40 shadow-sm" role="img" aria-label="Your message" />
+      {/* Simple avatar indicator - aligned to bottom */}
+      <div className="flex-shrink-0 self-end mb-1 w-8 h-8 rounded-full bg-gradient-to-br from-orange-100 to-amber-100 dark:from-orange-900/40 dark:to-amber-900/40 shadow-sm ring-2 ring-white dark:ring-slate-900" role="img" aria-label="Your message" />
 
-      <div className="flex-1 max-w-[85%] sm:max-w-[75%] text-right">
-        <div className="inline-block px-4 sm:px-5 py-3 sm:py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-400 text-white break-words max-w-full shadow-sm shadow-orange-500/20">
-          <p className="whitespace-pre-wrap text-sm sm:text-base leading-relaxed">{renderMarkdown(content)}</p>
+      <div className="min-w-0 max-w-[85%] sm:max-w-[75%] flex flex-col items-end">
+        <div className="px-4 py-3 rounded-2xl rounded-br-md bg-gradient-to-r from-orange-500 to-orange-400 text-white break-words shadow-sm shadow-orange-500/20">
+          <p className="whitespace-pre-wrap text-[15px] sm:text-base leading-relaxed break-words [overflow-wrap:anywhere]">{renderMarkdown(content)}</p>
         </div>
       </div>
     </motion.div>
